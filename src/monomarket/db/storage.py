@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
     started_at TEXT NOT NULL,
     finished_at TEXT NOT NULL,
     rows_ingested INTEGER NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    retry_count INTEGER NOT NULL DEFAULT 0,
     error TEXT NOT NULL DEFAULT ''
 );
 
@@ -187,6 +190,28 @@ class Storage:
     def init_db(self) -> None:
         with self.conn() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._ensure_ingestion_runs_columns(conn)
+
+    @staticmethod
+    def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        return {str(row["name"]) for row in rows}
+
+    def _ensure_ingestion_runs_columns(self, conn: sqlite3.Connection) -> None:
+        cols = self._table_columns(conn, "ingestion_runs")
+
+        if "request_count" not in cols:
+            conn.execute(
+                "ALTER TABLE ingestion_runs ADD COLUMN request_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "failure_count" not in cols:
+            conn.execute(
+                "ALTER TABLE ingestion_runs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "retry_count" not in cols:
+            conn.execute(
+                "ALTER TABLE ingestion_runs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0"
+            )
 
     @staticmethod
     def _now() -> str:
@@ -200,14 +225,30 @@ class Storage:
         finished_at: str,
         rows_ingested: int,
         error: str,
+        request_count: int = 0,
+        failure_count: int = 0,
+        retry_count: int = 0,
     ) -> None:
         with self.conn() as conn:
             conn.execute(
                 """
-                INSERT INTO ingestion_runs(source, status, started_at, finished_at, rows_ingested, error)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO ingestion_runs(
+                    source, status, started_at, finished_at, rows_ingested,
+                    request_count, failure_count, retry_count, error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (source, status, started_at, finished_at, rows_ingested, error),
+                (
+                    source,
+                    status,
+                    started_at,
+                    finished_at,
+                    rows_ingested,
+                    max(0, request_count),
+                    max(0, failure_count),
+                    max(0, retry_count),
+                    error,
+                ),
             )
 
     def get_ingestion_checkpoint(self, source: str) -> str | None:
@@ -389,6 +430,9 @@ class Storage:
                         source,
                         status,
                         rows_ingested,
+                        request_count,
+                        failure_count,
+                        retry_count,
                         finished_at,
                         ROW_NUMBER() OVER (PARTITION BY source ORDER BY id DESC) AS rn
                     FROM ingestion_runs
@@ -402,6 +446,11 @@ class Storage:
                     SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_runs,
                     SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS non_ok_runs,
                     AVG(rows_ingested) AS avg_rows,
+                    AVG(request_count) AS avg_requests,
+                    AVG(failure_count) AS avg_failures,
+                    AVG(retry_count) AS avg_retries,
+                    SUM(failure_count) AS total_failures,
+                    SUM(request_count) AS total_requests,
                     MAX(finished_at) AS last_finished_at
                 FROM ranked
                 WHERE rn <= ?

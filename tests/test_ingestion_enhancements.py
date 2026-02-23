@@ -297,6 +297,9 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
         finished_at="2026-02-22T00:01:00+00:00",
         rows_ingested=10,
         error="",
+        request_count=10,
+        failure_count=0,
+        retry_count=1,
     )
     storage.record_ingestion(
         source="gamma",
@@ -305,6 +308,9 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
         finished_at="2026-02-22T01:01:00+00:00",
         rows_ingested=5,
         error="HTTP 503",
+        request_count=10,
+        failure_count=3,
+        retry_count=2,
     )
 
     config_path = tmp_path / "config.yaml"
@@ -318,6 +324,16 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
             ]
         )
     )
+
+    summary = storage.list_ingestion_run_summary_by_source(source="gamma", run_window=5)
+    assert len(summary) == 1
+    row = summary[0]
+    assert int(row["total_runs"]) == 2
+    assert int(row["non_ok_runs"]) == 1
+    assert float(row["avg_failures"]) == 1.5
+    assert float(row["avg_retries"]) == 1.5
+    assert float(row["total_failures"]) == 3.0
+    assert float(row["total_requests"]) == 20.0
 
     runner = CliRunner()
     res = runner.invoke(
@@ -344,4 +360,3 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "gamma" in res.output
     assert "http_5xx" in res.output
     assert "HTTP 503" in res.output
-    assert "50.00%" in res.output

@@ -277,12 +277,20 @@ def ingest_health(
     tb4.add_column("error")
     tb4.add_column("non_ok_rate")
     tb4.add_column("avg_rows")
+    tb4.add_column("avg_failures")
+    tb4.add_column("avg_retries")
+    tb4.add_column("failure_per_req")
     tb4.add_column("last_finished_at")
     for row in run_summary:
         total_runs = int(row["total_runs"] or 0)
         non_ok_runs = int(row["non_ok_runs"] or 0)
         non_ok_rate = (non_ok_runs / total_runs) if total_runs else 0.0
         avg_rows = float(row["avg_rows"] or 0.0)
+        avg_failures = float(row["avg_failures"] or 0.0)
+        avg_retries = float(row["avg_retries"] or 0.0)
+        total_failures = float(row["total_failures"] or 0.0)
+        total_requests = float(row["total_requests"] or 0.0)
+        failure_per_req = (total_failures / total_requests) if total_requests else 0.0
         tb4.add_row(
             str(row["source"]),
             str(total_runs),
@@ -291,6 +299,9 @@ def ingest_health(
             str(int(row["error_runs"] or 0)),
             f"{non_ok_rate:.2%}",
             f"{avg_rows:.2f}",
+            f"{avg_failures:.2f}",
+            f"{avg_retries:.2f}",
+            f"{failure_per_req:.2%}",
             str(row["last_finished_at"] or ""),
         )
     console.print(tb4)

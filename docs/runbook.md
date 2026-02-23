@@ -36,7 +36,7 @@ monomarket ingest-health --run-window 20 --error-sample-limit 5
 - error buckets 聚合
 - breaker 状态
 - breaker 状态过渡计数（open/half_open/closed）与最近转移时间
-- 近 N 次 run 的 source 级失败率摘要（non_ok_rate）
+- 近 N 次 run 的 source 级摘要：`non_ok_rate / avg_failures / avg_retries / failure_per_req`
 - 按 source 的最近错误样本（top-N last_error）
 
 ## 3) 生成与查看信号

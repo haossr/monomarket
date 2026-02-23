@@ -198,6 +198,9 @@ class IngestionService:
                 finished,
                 inserted,
                 "; ".join(errors),
+                request_count=req_count,
+                failure_count=fail_count,
+                retry_count=retry_count,
             )
             return IngestionResult(
                 source=source_l,
