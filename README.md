@@ -2,7 +2,7 @@
 
 Monomarket 是一个面向二元市场（Polymarket 风格）的可运行交易 MVP，目标是先达到：
 
-- 可稳定抓取数据（gamma/data/clob，含分级重试与 source 级熔断）
+- 可稳定抓取数据（gamma/data/clob，含分级重试、source 级熔断与 half-open 探测）
 - 统一归一化存储（SQLite）
 - 信号引擎（可插拔，优先 S1/S2/S4/S8）
 - 执行路由（paper/live 双模式，默认 paper）

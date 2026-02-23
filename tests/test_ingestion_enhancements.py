@@ -230,6 +230,40 @@ def test_ingestion_circuit_breaker_and_error_buckets(tmp_path: Path) -> None:
     assert b2 is not None and int(b2["total_count"]) == 1
 
 
+def test_ingestion_half_open_single_probe(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    fake_clients = _BreakerFakeClients()
+    storage.set_ingestion_breaker(
+        source="gamma",
+        consecutive_failures=1,
+        open_until_ts="2000-01-01T00:00:00+00:00",
+        last_error_bucket="http_5xx",
+    )
+
+    svc = IngestionService(
+        fake_clients,
+        storage,
+        breaker_failure_threshold=1,
+        breaker_cooldown_sec=600,
+    )
+
+    r1 = svc.ingest("gamma", limit=1, incremental=True)
+    r2 = svc.ingest("gamma", limit=1, incremental=True)
+
+    # cooldown passed: allow exactly one probe request
+    assert r1.status == "partial"
+    assert r1.error_buckets.get("http_5xx") == 1
+    assert fake_clients.calls == 1
+
+    # probe failed -> breaker re-opened, no second request
+    assert r2.status == "partial"
+    assert r2.error_buckets.get("circuit_open") == 1
+    assert fake_clients.calls == 1
+
+
 def test_cli_ingest_health(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))

@@ -22,6 +22,7 @@ monomarket ingest --source all --limit 300 --full
 ```
 
 `ingest` 输出会额外包含 `error_buckets`（如 `http_429/http_5xx/circuit_open`），用于观测分级重试与熔断恢复状态。
+当 breaker 冷却到期后，系统会执行单次 `half-open` 探测请求：成功则关闭 breaker，失败则立即重新打开。
 
 查看聚合健康状态（错误分桶 + breaker 状态）：
 

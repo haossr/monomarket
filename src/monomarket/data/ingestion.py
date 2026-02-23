@@ -62,20 +62,21 @@ class IngestionService:
             return self.clients.fetch_clob(limit, since=since, incremental=incremental)
         raise ValueError(f"Unsupported source: {source}")
 
-    def _is_breaker_open(self, source: str) -> tuple[bool, str]:
+    def _breaker_gate(self, source: str) -> tuple[bool, str, bool]:
         row = self.storage.get_ingestion_breaker(source)
         if row is None:
-            return False, ""
+            return False, "", False
 
         open_until = _parse_iso_ts(str(row.get("open_until_ts") or ""))
         if open_until is None:
-            return False, ""
+            return False, "", False
 
         now = datetime.now(UTC)
         if now < open_until:
-            return True, f"circuit open until {open_until.isoformat()}"
+            return True, f"circuit open until {open_until.isoformat()}", False
 
-        return False, ""
+        # cooldown passed: allow one half-open probe request
+        return False, "half-open probe", True
 
     def _note_failure(self, source: str, error_bucket: str) -> None:
         row = self.storage.get_ingestion_breaker(source)
@@ -92,6 +93,17 @@ class IngestionService:
             source=source,
             consecutive_failures=consecutive,
             open_until_ts=open_until,
+            last_error_bucket=error_bucket,
+        )
+
+    def _note_probe_failure(self, source: str, error_bucket: str) -> None:
+        # half-open single probe failed: immediately re-open breaker
+        self.storage.set_ingestion_breaker(
+            source=source,
+            consecutive_failures=self.breaker_failure_threshold,
+            open_until_ts=(
+                datetime.now(UTC) + timedelta(seconds=self.breaker_cooldown_sec)
+            ).isoformat(),
             last_error_bucket=error_bucket,
         )
 
@@ -123,7 +135,7 @@ class IngestionService:
             error_buckets: dict[str, int] = {}
 
             for target in targets:
-                is_open, breaker_msg = self._is_breaker_open(target)
+                is_open, breaker_msg, probe_mode = self._breaker_gate(target)
                 if is_open:
                     errors.append(f"{target}: {breaker_msg}")
                     error_buckets["circuit_open"] = error_buckets.get("circuit_open", 0) + 1
@@ -161,7 +173,10 @@ class IngestionService:
                 if batch.error:
                     errors.append(f"{target}: {batch.error}")
                     failure_bucket = batch.stats.last_error_bucket or "unknown"
-                    self._note_failure(target, failure_bucket)
+                    if probe_mode:
+                        self._note_probe_failure(target, failure_bucket)
+                    else:
+                        self._note_failure(target, failure_bucket)
                 else:
                     self._note_success(target)
 
