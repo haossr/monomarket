@@ -328,6 +328,8 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
             "gamma",
             "--run-window",
             "5",
+            "--error-sample-limit",
+            "3",
             "--config",
             str(config_path),
         ],
@@ -338,6 +340,8 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "Ingestion breakers" in res.output
     assert "Breaker transitions" in res.output
     assert "Ingestion run summary by source" in res.output
+    assert "Recent ingestion errors" in res.output
     assert "gamma" in res.output
     assert "http_5xx" in res.output
+    assert "HTTP 503" in res.output
     assert "50.00%" in res.output

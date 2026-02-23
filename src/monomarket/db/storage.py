@@ -412,6 +412,34 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_ingestion_recent_errors(
+        self,
+        source: str | None = None,
+        per_source_limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        source_norm = source.lower() if source else None
+        with self.conn() as conn:
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT
+                        source,
+                        status,
+                        error,
+                        finished_at,
+                        ROW_NUMBER() OVER (PARTITION BY source ORDER BY id DESC) AS rn
+                    FROM ingestion_runs
+                    WHERE error != '' AND (? IS NULL OR source = ?)
+                )
+                SELECT source, status, error, finished_at
+                FROM ranked
+                WHERE rn <= ?
+                ORDER BY source ASC, finished_at DESC
+                """,
+                (source_norm, source_norm, max(1, per_source_limit)),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def record_ingestion_breaker_transition(self, source: str, state: str) -> None:
         now = self._now()
         with self.conn() as conn:

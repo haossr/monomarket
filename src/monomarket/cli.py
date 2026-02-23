@@ -200,6 +200,12 @@ def ingest_health(
     source: str | None = typer.Option(None, help="gamma|data|clob (default: all)"),
     limit: int = typer.Option(20, min=1, max=200),
     run_window: int = typer.Option(20, min=1, max=500, help="Recent runs per source"),
+    error_sample_limit: int = typer.Option(
+        5,
+        min=1,
+        max=50,
+        help="Recent non-empty errors per source",
+    ),
     config: str | None = typer.Option(None),
 ) -> None:
     _, storage = _ctx(config)
@@ -212,6 +218,10 @@ def ingest_health(
         run_window=run_window,
     )
     transitions = storage.list_ingestion_breaker_transitions(source=source, limit=limit)
+    recent_errors = storage.list_ingestion_recent_errors(
+        source=source,
+        per_source_limit=error_sample_limit,
+    )
 
     tb1 = Table(title=f"Ingestion error buckets ({len(buckets)})")
     tb1.add_column("source")
@@ -284,6 +294,20 @@ def ingest_health(
             str(row["last_finished_at"] or ""),
         )
     console.print(tb4)
+
+    tb5 = Table(title=f"Recent ingestion errors (per source <= {error_sample_limit})")
+    tb5.add_column("source")
+    tb5.add_column("finished_at")
+    tb5.add_column("status")
+    tb5.add_column("error")
+    for row in recent_errors:
+        tb5.add_row(
+            str(row["source"]),
+            str(row["finished_at"]),
+            str(row["status"]),
+            str(row["error"]),
+        )
+    console.print(tb5)
 
 
 @app.command("list-markets")
