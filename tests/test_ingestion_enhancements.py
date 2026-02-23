@@ -281,6 +281,22 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
         open_until_ts="2026-02-24T00:00:00+00:00",
         last_error_bucket="http_5xx",
     )
+    storage.record_ingestion(
+        source="gamma",
+        status="ok",
+        started_at="2026-02-22T00:00:00+00:00",
+        finished_at="2026-02-22T00:01:00+00:00",
+        rows_ingested=10,
+        error="",
+    )
+    storage.record_ingestion(
+        source="gamma",
+        status="partial",
+        started_at="2026-02-22T01:00:00+00:00",
+        finished_at="2026-02-22T01:01:00+00:00",
+        rows_ingested=5,
+        error="HTTP 503",
+    )
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -301,6 +317,8 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
             "ingest-health",
             "--source",
             "gamma",
+            "--run-window",
+            "5",
             "--config",
             str(config_path),
         ],
@@ -309,5 +327,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert res.exit_code == 0, res.output
     assert "Ingestion error buckets" in res.output
     assert "Ingestion breakers" in res.output
+    assert "Ingestion run summary by source" in res.output
     assert "gamma" in res.output
     assert "http_5xx" in res.output
+    assert "50.00%" in res.output

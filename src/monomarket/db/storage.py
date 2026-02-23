@@ -367,6 +367,43 @@ class Storage:
                 ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_ingestion_run_summary_by_source(
+        self,
+        source: str | None = None,
+        run_window: int = 20,
+    ) -> list[dict[str, Any]]:
+        source_norm = source.lower() if source else None
+        with self.conn() as conn:
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT
+                        source,
+                        status,
+                        rows_ingested,
+                        finished_at,
+                        ROW_NUMBER() OVER (PARTITION BY source ORDER BY id DESC) AS rn
+                    FROM ingestion_runs
+                    WHERE (? IS NULL OR source = ?)
+                )
+                SELECT
+                    source,
+                    COUNT(1) AS total_runs,
+                    SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS ok_runs,
+                    SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) AS partial_runs,
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_runs,
+                    SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS non_ok_runs,
+                    AVG(rows_ingested) AS avg_rows,
+                    MAX(finished_at) AS last_finished_at
+                FROM ranked
+                WHERE rn <= ?
+                GROUP BY source
+                ORDER BY source ASC
+                """,
+                (source_norm, source_norm, max(1, run_window)),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def upsert_markets(self, markets: list[MarketView], snapshot_at: str | None = None) -> int:
         if not markets:
             return 0
