@@ -46,6 +46,10 @@ monomarket execute-signal 1
 monomarket pnl-report
 monomarket metrics-report
 
+# 6.1) live 报单回报同步 / 撤单（仅在你显式开启 live 后使用）
+monomarket live-sync --limit 100
+monomarket live-cancel <local_order_id>
+
 # 7) 时间窗口回测（按策略/事件归因 + 回放账本）
 monomarket backtest --strategies s1,s2,s4,s8 \
   --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z \
@@ -118,9 +122,32 @@ monomarket place-order \
 ## Live 说明
 
 - 默认关闭 live（`ENABLE_LIVE_TRADING=false`）
-- 即便切换 live，若缺少 `POLYMARKET_API_KEY` 会被明确拒单，不会伪造成交
+- live executor 已接入真实 CLOB HTTP 闭环：下单（`/order`）→ 回报同步（`live-sync`）→ 撤单（`live-cancel`）
+- 凭据要求（二选一）：
+  - `POLYMARKET_CLOB_HEADERS_JSON`（完整请求头 JSON）
+  - `POLYMARKET_API_KEY` + `POLYMARKET_API_SECRET` + `POLYMARKET_API_PASSPHRASE`
 - `REQUIRE_MANUAL_CONFIRM=true` 时，live 指令必须带 `--confirm-live`
-- `KILL_SWITCH=true` 时所有新单拒绝
+- `KILL_SWITCH=true` 时所有新单拒绝（不影响已有单的状态同步/撤单）
+
+## 24h Paper Soak Test
+
+```bash
+# 推荐使用专用配置（安全默认：paper + live=false）
+bash scripts/paper_soak_24h.sh \
+  --hours 24 \
+  --interval-sec 300 \
+  --max-signals-per-cycle 10 \
+  --retry-max 3 \
+  --config configs/soak.paper.yaml
+
+# 查看实时状态
+bash scripts/paper_soak_status.sh
+```
+
+产物目录：`artifacts/soak/paper-<timestamp>/`
+- `soak.log`：完整运行日志
+- `status/latest.json`：最新状态
+- `status/history.jsonl`：每轮状态历史
 
 ## 本地复现 CI
 
@@ -135,4 +162,5 @@ bash scripts/ci_local.sh
 - `docs/architecture.md`：架构图与模块说明
 - `docs/runbook.md`：运行手册
 - `docs/backtest-schema.md`：回测导出 schema 与迁移约定
+- `docs/backtest-vs-paper-alignment-template.md`：回测 vs paper 对齐报告模板
 - `docs/strategies.md`：S1/S2/S4/S8 策略细节

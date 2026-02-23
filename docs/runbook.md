@@ -69,7 +69,21 @@ monomarket switches
 monomarket execute-signal 1 --mode live --confirm-live
 ```
 
-> 若缺少 `POLYMARKET_API_KEY`，系统会拒单并记录原因。
+live 凭据（二选一）：
+- `POLYMARKET_CLOB_HEADERS_JSON`（完整请求头 JSON）
+- `POLYMARKET_API_KEY` + `POLYMARKET_API_SECRET` + `POLYMARKET_API_PASSPHRASE`
+
+若缺少凭据，系统会拒单并记录原因。
+
+live 闭环操作：
+
+```bash
+# 同步 live 订单回报（状态/成交）
+monomarket live-sync --limit 100
+
+# 撤销指定本地订单 ID
+monomarket live-cancel <local_order_id>
+```
 
 ## 5) 手工开平仓（Rocky 独立操作）
 
@@ -92,7 +106,26 @@ monomarket pnl-report
 monomarket metrics-report
 ```
 
-## 7) 回测（signals replay + 策略/事件归因）
+## 7) 24h paper soak test（可复现 + 状态输出 + 失败重试）
+
+```bash
+bash scripts/paper_soak_24h.sh \
+  --hours 24 \
+  --interval-sec 300 \
+  --max-signals-per-cycle 10 \
+  --retry-max 3 \
+  --config configs/soak.paper.yaml
+
+# 查看状态
+bash scripts/paper_soak_status.sh
+```
+
+产物：
+- `artifacts/soak/paper-<ts>/soak.log`
+- `artifacts/soak/paper-<ts>/status/latest.json`
+- `artifacts/soak/paper-<ts>/status/history.jsonl`
+
+## 8) 回测（signals replay + 策略/事件归因）
 
 ```bash
 monomarket backtest --strategies s1,s2,s4,s8 \
@@ -137,7 +170,10 @@ monomarket backtest-migration-map --format json --with-checksum \
   --out-json artifacts/backtest/migration-map.json
 ```
 
-## 8) 停机保护
+回测 vs paper 对齐报告建议使用：
+- `docs/backtest-vs-paper-alignment-template.md`
+
+## 9) 停机保护
 
 ```bash
 monomarket set-switch KILL_SWITCH true
