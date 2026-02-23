@@ -118,6 +118,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   - 导出工件统一带 `schema_version` 字段（兼容解析）
   - 解析端可使用 `monomarket.backtest.parse_schema_version` / `assert_schema_compatible`
   - JSON 解析可进一步使用 `monomarket.backtest.validate_backtest_json_artifact`
+  - 双栈校验可传 `supported_major=None` 并注入 `validators={2: ...}`
 
 ## 8) 停机保护
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 SUPPORTED_BACKTEST_SCHEMA_MAJOR = 1
@@ -19,6 +19,8 @@ REQUIRED_BACKTEST_JSON_FIELDS_V1 = {
     "event_results",
     "replay",
 }
+
+BacktestJsonArtifactValidator = Callable[[Mapping[str, Any]], None]
 
 
 def parse_schema_version(raw: str) -> tuple[int, int]:
@@ -47,33 +49,55 @@ def assert_schema_compatible(
     return major, minor
 
 
+def validate_backtest_json_artifact_v1(payload: Mapping[str, Any]) -> None:
+    missing = sorted(REQUIRED_BACKTEST_JSON_FIELDS_V1 - set(payload.keys()))
+    if missing:
+        raise ValueError(f"missing required v1 fields: {', '.join(missing)}")
+
+    if not isinstance(payload.get("execution_config"), Mapping):
+        raise ValueError("v1 execution_config must be an object")
+    if not isinstance(payload.get("risk_config"), Mapping):
+        raise ValueError("v1 risk_config must be an object")
+    if not isinstance(payload.get("results"), list):
+        raise ValueError("v1 results must be an array")
+    if not isinstance(payload.get("event_results"), list):
+        raise ValueError("v1 event_results must be an array")
+    if not isinstance(payload.get("replay"), list):
+        raise ValueError("v1 replay must be an array")
+
+
+DEFAULT_BACKTEST_JSON_VALIDATORS: dict[int, BacktestJsonArtifactValidator] = {
+    1: validate_backtest_json_artifact_v1,
+}
+
+
 def validate_backtest_json_artifact(
     payload: Mapping[str, Any],
     *,
-    supported_major: int = SUPPORTED_BACKTEST_SCHEMA_MAJOR,
+    supported_major: int | None = SUPPORTED_BACKTEST_SCHEMA_MAJOR,
+    validators: Mapping[int, BacktestJsonArtifactValidator] | None = None,
 ) -> tuple[int, int]:
     if "schema_version" not in payload:
         raise ValueError("missing required field: schema_version")
 
-    major, minor = assert_schema_compatible(
-        str(payload["schema_version"]),
-        supported_major=supported_major,
-    )
+    major, minor = parse_schema_version(str(payload["schema_version"]))
 
-    if major == 1:
-        missing = sorted(REQUIRED_BACKTEST_JSON_FIELDS_V1 - set(payload.keys()))
-        if missing:
-            raise ValueError(f"missing required v1 fields: {', '.join(missing)}")
+    if supported_major is not None and major != supported_major:
+        raise ValueError(
+            f"unsupported schema_version={payload['schema_version']!r}; "
+            f"supported major={supported_major}.x"
+        )
 
-        if not isinstance(payload.get("execution_config"), Mapping):
-            raise ValueError("v1 execution_config must be an object")
-        if not isinstance(payload.get("risk_config"), Mapping):
-            raise ValueError("v1 risk_config must be an object")
-        if not isinstance(payload.get("results"), list):
-            raise ValueError("v1 results must be an array")
-        if not isinstance(payload.get("event_results"), list):
-            raise ValueError("v1 event_results must be an array")
-        if not isinstance(payload.get("replay"), list):
-            raise ValueError("v1 replay must be an array")
+    validator_map = dict(DEFAULT_BACKTEST_JSON_VALIDATORS)
+    if validators:
+        validator_map.update(validators)
 
+    validator = validator_map.get(major)
+    if validator is None:
+        supported = ", ".join(str(x) for x in sorted(validator_map.keys()))
+        raise ValueError(
+            f"no validator registered for schema major={major}; available majors: {supported}"
+        )
+
+    validator(payload)
     return major, minor

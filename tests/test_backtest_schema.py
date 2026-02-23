@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import pytest
 
 from monomarket.backtest import (
@@ -9,6 +11,7 @@ from monomarket.backtest import (
     is_schema_compatible,
     parse_schema_version,
     validate_backtest_json_artifact,
+    validate_backtest_json_artifact_v1,
 )
 
 
@@ -80,3 +83,46 @@ def test_validate_backtest_json_artifact_missing_required_field() -> None:
 def test_validate_backtest_json_artifact_reject_incompatible_major() -> None:
     with pytest.raises(ValueError):
         validate_backtest_json_artifact({"schema_version": "2.0"})
+
+
+def test_validate_backtest_json_artifact_dual_stack_dispatch() -> None:
+    called = {"v2": False}
+
+    def _validate_v2(payload: Mapping[str, object]) -> None:
+        called["v2"] = True
+        assert payload["schema_version"] == "2.1"
+        assert payload["meta"] == "ok"
+
+    major, minor = validate_backtest_json_artifact(
+        {"schema_version": "2.1", "meta": "ok"},
+        supported_major=None,
+        validators={2: _validate_v2},
+    )
+    assert (major, minor) == (2, 1)
+    assert called["v2"] is True
+
+
+def test_validate_backtest_json_artifact_unknown_major_without_validator() -> None:
+    with pytest.raises(ValueError):
+        validate_backtest_json_artifact(
+            {"schema_version": "3.0"},
+            supported_major=None,
+        )
+
+
+def test_validate_backtest_json_artifact_v1_helper_reuse() -> None:
+    payload = {
+        "schema_version": "1.0",
+        "generated_at": "2026-02-20T00:00:00+00:00",
+        "from_ts": "2026-02-20T00:00:00+00:00",
+        "to_ts": "2026-02-20T01:00:00+00:00",
+        "total_signals": 1,
+        "executed_signals": 1,
+        "rejected_signals": 0,
+        "execution_config": {},
+        "risk_config": {},
+        "results": [],
+        "event_results": [],
+        "replay": [],
+    }
+    validate_backtest_json_artifact_v1(payload)

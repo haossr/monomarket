@@ -17,6 +17,7 @@
 - 先读取 `schema_version`
 - 用 `parse_schema_version` / `assert_schema_compatible` 做版本检查
 - 读取 JSON 可调用 `validate_backtest_json_artifact(payload)` 做 v1 结构校验
+- 如需双栈校验，可用 `validate_backtest_json_artifact(payload, supported_major=None, validators={2: ...})` 按 major 分派
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 
 ## v2 Breaking Changes Checklist（草案）
