@@ -74,14 +74,18 @@ monomarket pnl-report
 monomarket metrics-report
 ```
 
-## 7) 回测（signals replay + 归因）
+## 7) 回测（signals replay + 策略/事件归因）
 
 ```bash
 monomarket backtest --strategies s1,s2,s4,s8 \
-  --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z
+  --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z \
+  --replay-limit 30
 ```
 
-输出包含：按策略的 `pnl / winrate / max drawdown / 交易次数`。
+输出包含：
+- 按策略归因：`pnl / winrate / max drawdown / 交易次数`
+- 按事件归因：`strategy + event + pnl / winrate / max drawdown / 交易次数`
+- 回放账本：逐条 signal replay（时间、market、token、fill、realized、累计权益）
 
 ## 8) 停机保护
 

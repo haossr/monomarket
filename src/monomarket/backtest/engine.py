@@ -28,12 +28,42 @@ class BacktestStrategyResult:
 
 
 @dataclass(slots=True)
+class BacktestEventResult:
+    strategy: str
+    event_id: str
+    pnl: float
+    winrate: float
+    max_drawdown: float
+    trade_count: int
+    wins: int
+    losses: int
+
+
+@dataclass(slots=True)
+class BacktestReplayRow:
+    ts: str
+    strategy: str
+    event_id: str
+    market_id: str
+    token_id: str
+    side: str
+    qty: float
+    target_price: float
+    fill_price: float
+    realized_change: float
+    strategy_equity: float
+    event_equity: float
+
+
+@dataclass(slots=True)
 class BacktestReport:
     generated_at: datetime
     from_ts: str
     to_ts: str
     total_signals: int
     results: list[BacktestStrategyResult]
+    event_results: list[BacktestEventResult]
+    replay: list[BacktestReplayRow]
 
 
 @dataclass(slots=True)
@@ -75,17 +105,31 @@ class BacktestEngine:
         rows = self.storage.list_signals_in_window(from_iso, to_iso, strategies=selected or None)
 
         positions: dict[tuple[str, str, str], _Position] = {}
+        strategy_market_event: dict[tuple[str, str], str] = {}
+
         realized_by_strategy: dict[str, float] = defaultdict(float)
         trade_count: dict[str, int] = defaultdict(int)
         wins: dict[str, int] = defaultdict(int)
         losses: dict[str, int] = defaultdict(int)
         equity_curve: dict[str, list[float]] = defaultdict(lambda: [0.0])
 
+        realized_by_event: dict[tuple[str, str], float] = defaultdict(float)
+        event_trade_count: dict[tuple[str, str], int] = defaultdict(int)
+        event_wins: dict[tuple[str, str], int] = defaultdict(int)
+        event_losses: dict[tuple[str, str], int] = defaultdict(int)
+        event_equity_curve: dict[tuple[str, str], list[float]] = defaultdict(lambda: [0.0])
+
+        replay: list[BacktestReplayRow] = []
+
         for row in rows:
             strategy = str(row["strategy"]).lower()
             market_id = str(row["market_id"])
+            event_id = str(row["event_id"])
             side = str(row["side"]).lower()
             created_at = str(row["created_at"])
+
+            strategy_market_event[(strategy, market_id)] = event_id
+            event_key = (strategy, event_id)
 
             token_id, target_price, qty = self._signal_execution_fields(row)
             fill_price = self._fill_price(target_price, side)
@@ -102,15 +146,47 @@ class BacktestEngine:
             realized_by_strategy[strategy] += realized_change
             trade_count[strategy] += 1
 
+            realized_by_event[event_key] += realized_change
+            event_trade_count[event_key] += 1
+
             if outcome.closed_trade:
                 if realized_change > 0:
                     wins[strategy] += 1
+                    event_wins[event_key] += 1
                 elif realized_change < 0:
                     losses[strategy] += 1
+                    event_losses[event_key] += 1
 
-            equity_curve[strategy].append(
-                realized_by_strategy[strategy]
-                + self._strategy_unrealized(positions, strategy, created_at)
+            strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
+                positions,
+                strategy,
+                created_at,
+            )
+            event_equity = realized_by_event[event_key] + self._event_unrealized(
+                positions,
+                strategy,
+                event_id,
+                created_at,
+                strategy_market_event,
+            )
+            equity_curve[strategy].append(strategy_equity)
+            event_equity_curve[event_key].append(event_equity)
+
+            replay.append(
+                BacktestReplayRow(
+                    ts=created_at,
+                    strategy=strategy,
+                    event_id=event_id,
+                    market_id=market_id,
+                    token_id=token_id,
+                    side=side,
+                    qty=qty,
+                    target_price=target_price,
+                    fill_price=fill_price,
+                    realized_change=realized_change,
+                    strategy_equity=strategy_equity,
+                    event_equity=event_equity,
+                )
             )
 
         # Guarantee selected strategies appear in report, even if no signal in the window.
@@ -142,13 +218,44 @@ class BacktestEngine:
                 )
             )
 
+        event_results: list[BacktestEventResult] = []
+        for strategy, event_id in sorted(event_trade_count.keys()):
+            event_key = (strategy, event_id)
+            final_event_equity = realized_by_event[event_key] + self._event_unrealized(
+                positions,
+                strategy,
+                event_id,
+                to_iso,
+                strategy_market_event,
+            )
+            event_equity_curve[event_key].append(final_event_equity)
+
+            closed_total = event_wins[event_key] + event_losses[event_key]
+            winrate = (event_wins[event_key] / closed_total) if closed_total else 0.0
+            event_results.append(
+                BacktestEventResult(
+                    strategy=strategy,
+                    event_id=event_id,
+                    pnl=final_event_equity,
+                    winrate=winrate,
+                    max_drawdown=self._max_drawdown(event_equity_curve[event_key]),
+                    trade_count=event_trade_count[event_key],
+                    wins=event_wins[event_key],
+                    losses=event_losses[event_key],
+                )
+            )
+
         results.sort(key=lambda x: x.strategy)
+        replay.sort(key=lambda x: (x.ts, x.strategy, x.market_id, x.token_id))
+
         return BacktestReport(
             generated_at=datetime.now(UTC),
             from_ts=from_iso,
             to_ts=to_iso,
             total_signals=len(rows),
             results=results,
+            event_results=event_results,
+            replay=replay,
         )
 
     @staticmethod
@@ -213,6 +320,27 @@ class BacktestEngine:
         total = 0.0
         for (s, market_id, token_id), pos in positions.items():
             if s != strategy or abs(pos.net_qty) < 1e-9:
+                continue
+            mark = self.storage.get_snapshot_price_at(market_id, token_id, ts)
+            if mark is None:
+                mark = pos.avg_price
+            total += pos.net_qty * (mark - pos.avg_price)
+        return total
+
+    def _event_unrealized(
+        self,
+        positions: dict[tuple[str, str, str], _Position],
+        strategy: str,
+        event_id: str,
+        ts: str,
+        strategy_market_event: dict[tuple[str, str], str],
+    ) -> float:
+        total = 0.0
+        for (s, market_id, token_id), pos in positions.items():
+            if s != strategy or abs(pos.net_qty) < 1e-9:
+                continue
+            market_event_id = strategy_market_event.get((strategy, market_id))
+            if market_event_id != event_id:
                 continue
             mark = self.storage.get_snapshot_price_at(market_id, token_id, ts)
             if mark is None:

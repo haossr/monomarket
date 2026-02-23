@@ -150,6 +150,7 @@ def backtest(
     to_ts: str = typer.Option(..., "--to", help="Inclusive ISO timestamp"),
     slippage_bps: float = typer.Option(5.0, min=0.0),
     fee_bps: float = typer.Option(0.0, min=0.0),
+    replay_limit: int = typer.Option(20, min=0, help="Rows to print from replay ledger (0=skip)"),
     config: str | None = typer.Option(None),
 ) -> None:
     _, storage = _ctx(config)
@@ -163,8 +164,10 @@ def backtest(
     report = engine.run(selected, from_ts=from_ts, to_ts=to_ts)
 
     console.print(
-        f"backtest signals={report.total_signals} from={report.from_ts} to={report.to_ts}"
+        f"backtest signals={report.total_signals} replay_rows={len(report.replay)} "
+        f"from={report.from_ts} to={report.to_ts}"
     )
+
     tb = Table(title="Backtest attribution")
     tb.add_column("strategy")
     tb.add_column("pnl")
@@ -181,6 +184,58 @@ def backtest(
             str(result.trade_count),
         )
     console.print(tb)
+
+    event_tb = Table(title="Backtest event attribution")
+    event_tb.add_column("strategy")
+    event_tb.add_column("event")
+    event_tb.add_column("pnl")
+    event_tb.add_column("winrate")
+    event_tb.add_column("max_drawdown")
+    event_tb.add_column("trades")
+
+    for event_result in report.event_results:
+        event_tb.add_row(
+            event_result.strategy,
+            event_result.event_id,
+            f"{event_result.pnl:.4f}",
+            f"{event_result.winrate:.2%}",
+            f"{event_result.max_drawdown:.4f}",
+            str(event_result.trade_count),
+        )
+
+    console.print(event_tb)
+
+    if replay_limit > 0 and report.replay:
+        replay_tb = Table(title=f"Backtest replay ledger (first {replay_limit})")
+        replay_tb.add_column("ts")
+        replay_tb.add_column("strategy")
+        replay_tb.add_column("event")
+        replay_tb.add_column("market")
+        replay_tb.add_column("token")
+        replay_tb.add_column("side")
+        replay_tb.add_column("qty")
+        replay_tb.add_column("target")
+        replay_tb.add_column("fill")
+        replay_tb.add_column("realized")
+        replay_tb.add_column("strat_eq")
+        replay_tb.add_column("event_eq")
+
+        for replay_row in report.replay[:replay_limit]:
+            replay_tb.add_row(
+                replay_row.ts,
+                replay_row.strategy,
+                replay_row.event_id,
+                replay_row.market_id,
+                replay_row.token_id,
+                replay_row.side,
+                f"{replay_row.qty:.4f}",
+                f"{replay_row.target_price:.4f}",
+                f"{replay_row.fill_price:.4f}",
+                f"{replay_row.realized_change:.4f}",
+                f"{replay_row.strategy_equity:.4f}",
+                f"{replay_row.event_equity:.4f}",
+            )
+        console.print(replay_tb)
 
 
 @app.command("execute-signal")

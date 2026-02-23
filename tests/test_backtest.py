@@ -29,7 +29,21 @@ def _seed_market_snapshots(storage: Storage) -> None:
                 yes_price=0.40,
                 no_price=0.60,
                 mid_price=0.40,
-            )
+            ),
+            MarketView(
+                market_id="m2",
+                canonical_id="c2",
+                source="gamma",
+                event_id="e2",
+                question="Q2",
+                status="open",
+                neg_risk=False,
+                liquidity=900,
+                volume=90,
+                yes_price=0.30,
+                no_price=0.70,
+                mid_price=0.30,
+            ),
         ],
         snapshot_at=t1,
     )
@@ -48,7 +62,21 @@ def _seed_market_snapshots(storage: Storage) -> None:
                 yes_price=0.60,
                 no_price=0.40,
                 mid_price=0.60,
-            )
+            ),
+            MarketView(
+                market_id="m2",
+                canonical_id="c2",
+                source="gamma",
+                event_id="e2",
+                question="Q2",
+                status="open",
+                neg_risk=False,
+                liquidity=900,
+                volume=90,
+                yes_price=0.20,
+                no_price=0.80,
+                mid_price=0.20,
+            ),
         ],
         snapshot_at=t2,
     )
@@ -66,7 +94,7 @@ def _seed_signals(storage: Storage) -> None:
                 confidence=0.8,
                 target_price=0.40,
                 size_hint=10.0,
-                rationale="open",
+                rationale="open-e1",
             )
         ],
         created_at="2026-02-20T00:10:00+00:00",
@@ -82,10 +110,42 @@ def _seed_signals(storage: Storage) -> None:
                 confidence=0.8,
                 target_price=0.60,
                 size_hint=10.0,
-                rationale="close",
+                rationale="close-e1",
             )
         ],
         created_at="2026-02-20T00:50:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m2",
+                event_id="e2",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.30,
+                size_hint=5.0,
+                rationale="open-e2",
+            )
+        ],
+        created_at="2026-02-20T00:20:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m2",
+                event_id="e2",
+                side="sell",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.20,
+                size_hint=5.0,
+                rationale="close-e2",
+            )
+        ],
+        created_at="2026-02-20T00:55:00+00:00",
     )
 
 
@@ -101,14 +161,26 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
         execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
     ).run(["s1"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
 
-    assert report.total_signals == 2
+    assert report.total_signals == 4
     assert len(report.results) == 1
     r = report.results[0]
     assert r.strategy == "s1"
-    assert abs(r.pnl - 2.0) < 1e-9
-    assert r.trade_count == 2
-    assert r.winrate == 1.0
+    assert abs(r.pnl - 1.5) < 1e-9
+    assert r.trade_count == 4
+    assert r.winrate == 0.5
     assert r.max_drawdown >= 0.0
+
+    assert len(report.event_results) == 2
+    event_map = {(x.strategy, x.event_id): x for x in report.event_results}
+    assert abs(event_map[("s1", "e1")].pnl - 2.0) < 1e-9
+    assert abs(event_map[("s1", "e2")].pnl + 0.5) < 1e-9
+    assert event_map[("s1", "e1")].trade_count == 2
+    assert event_map[("s1", "e2")].trade_count == 2
+
+    assert len(report.replay) == 4
+    assert report.replay[0].event_id == "e1"
+    assert report.replay[-1].event_id == "e2"
+    assert abs(report.replay[-1].realized_change + 0.5) < 1e-9
 
 
 def test_cli_backtest_command(tmp_path: Path) -> None:
@@ -150,4 +222,6 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
 
     assert res.exit_code == 0, res.output
     assert "Backtest attribution" in res.output
+    assert "Backtest event attribution" in res.output
+    assert "Backtest replay ledger" in res.output
     assert "s1" in res.output
