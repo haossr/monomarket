@@ -58,6 +58,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
 
 回放账本（终端 + CSV）包含 `requested/filled qty`、`fill_ratio`、`fill_probability`、`slippage_bps_applied` 以及风控决策字段：`risk_allowed` / `risk_reason` 与阈值快照，便于离线审计。
 所有导出工件（JSON + 各 CSV）均包含 `schema_version` 字段，用于向后兼容与审计解析。
+JSON 额外包含 `execution_config` / `risk_config` 快照，用于可重复回放与参数审计。
 归因结果可分别导出 strategy/event CSV，便于接审计流水线与 BI。
 
 ## 交易控制开关（Rocky 可独立控制）

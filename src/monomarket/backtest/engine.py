@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -97,6 +97,8 @@ class BacktestReport:
     total_signals: int
     executed_signals: int
     rejected_signals: int
+    execution_config: dict[str, Any]
+    risk_config: dict[str, Any]
     results: list[BacktestStrategyResult]
     event_results: list[BacktestEventResult]
     replay: list[BacktestReplayRow]
@@ -457,6 +459,8 @@ class BacktestEngine:
             total_signals=len(rows),
             executed_signals=executed_signals,
             rejected_signals=len(rows) - executed_signals,
+            execution_config=asdict(self.execution),
+            risk_config=asdict(self.risk),
             results=results,
             event_results=event_results,
             replay=replay,

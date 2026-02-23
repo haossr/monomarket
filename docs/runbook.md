@@ -94,7 +94,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
 - 按事件归因：`strategy + event + pnl / winrate / max drawdown / 交易次数`
 - 回放账本：逐条 signal replay（时间、market、token、requested/filled qty、fill ratio、fill probability、slippage bps、realized、累计权益、risk allow/reject + reason）
 - 机器可读导出：
-  - `--out-json`：完整报告（summary + strategy/event attribution + replay rows）
+  - `--out-json`：完整报告（summary + execution/risk config snapshot + strategy/event attribution + replay rows）
   - `--out-replay-csv`：replay ledger CSV（便于审计/外部分析）
   - `--out-strategy-csv`：策略维度归因 CSV
   - `--out-event-csv`：事件维度归因 CSV

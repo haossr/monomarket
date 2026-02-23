@@ -172,6 +172,9 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert report.total_signals == 4
     assert report.executed_signals == 4
     assert report.rejected_signals == 0
+    assert report.execution_config["enable_partial_fill"] is False
+    assert report.execution_config["enable_fill_probability"] is False
+    assert report.risk_config["max_event_notional"] == 1e18
     assert len(report.results) == 1
     r = report.results[0]
     assert r.strategy == "s1"
@@ -252,6 +255,8 @@ def test_backtest_fill_probability_model(tmp_path: Path) -> None:
     assert report.total_signals == 4
     assert report.executed_signals == 4
     assert report.rejected_signals == 0
+    assert report.execution_config["enable_fill_probability"] is True
+    assert report.execution_config["enable_partial_fill"] is True
 
     # m2 liquidity=900 => partial ratio 0.9; buy prob=0.855; sell prob=0.9
     m2_buy = [x for x in report.replay if x.market_id == "m2" and x.side == "buy"][0]
@@ -394,6 +399,8 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert payload["total_signals"] == 4
     assert payload["executed_signals"] == 4
     assert payload["rejected_signals"] == 0
+    assert payload["execution_config"]["slippage_bps"] == 0.0
+    assert payload["risk_config"]["max_event_notional"] == 1500.0
     assert len(payload["results"]) == 1
     assert len(payload["event_results"]) == 2
     assert len(payload["replay"]) == 4

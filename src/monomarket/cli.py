@@ -45,6 +45,8 @@ def _write_backtest_json(report: BacktestReport, output_path: str) -> None:
         "total_signals": report.total_signals,
         "executed_signals": report.executed_signals,
         "rejected_signals": report.rejected_signals,
+        "execution_config": report.execution_config,
+        "risk_config": report.risk_config,
         "results": [asdict(x) for x in report.results],
         "event_results": [asdict(x) for x in report.event_results],
         "replay": [asdict(x) for x in report.replay],
