@@ -16,7 +16,22 @@
 
 - 先读取 `schema_version`
 - 用 `parse_schema_version` / `assert_schema_compatible` 做版本检查
+- 读取 JSON 可调用 `validate_backtest_json_artifact(payload)` 做 v1 结构校验
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
+
+## v2 Breaking Changes Checklist（草案）
+
+在引入 `2.0` 之前，逐项确认：
+
+1. **变更分类明确**：字段删除/重命名/语义变化已列出（不是仅新增字段）
+2. **迁移脚本可用**：提供 `v1_to_v2`，并覆盖 JSON + CSV 样本
+3. **双栈读取窗口**：读取端在一个发布周期同时支持 `1.x` 与 `2.x`
+4. **回滚策略**：可回退到 `1.x` 输出（feature flag 或兼容开关）
+5. **测试覆盖**：
+   - `1.x` 兼容不回退
+   - `2.x` 结构校验
+   - `1.x -> 2.x` 迁移正确性
+6. **文档同步**：runbook、字段字典、下游消费者告警窗口
 
 ## 迁移指南（v1.x -> v2 预案）
 

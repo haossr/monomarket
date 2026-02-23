@@ -11,6 +11,7 @@ from monomarket.backtest import (
     BacktestEngine,
     BacktestExecutionConfig,
     BacktestRiskConfig,
+    validate_backtest_json_artifact,
 )
 from monomarket.cli import app
 from monomarket.db.storage import Storage
@@ -396,6 +397,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
 
     payload = json.loads(json_out.read_text())
     assert payload["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION
+    validate_backtest_json_artifact(payload)
     assert payload["total_signals"] == 4
     assert payload["executed_signals"] == 4
     assert payload["rejected_signals"] == 0
