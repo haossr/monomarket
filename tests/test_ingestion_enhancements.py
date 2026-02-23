@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -45,7 +46,9 @@ class _FakeErrorResponse:
         self.status_code = status_code
 
     def raise_for_status(self) -> None:
-        raise requests.HTTPError(f"status={self.status_code}", response=self)
+        response = requests.Response()
+        response.status_code = self.status_code
+        raise requests.HTTPError(f"status={self.status_code}", response=response)
 
     def json(self) -> dict[str, object]:
         return {}
@@ -136,7 +139,12 @@ class _FakeClients:
     def __init__(self):
         self.calls: list[str | None] = []
 
-    def fetch_gamma(self, limit: int, since=None, incremental: bool = False) -> FetchBatch:
+    def fetch_gamma(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
         del limit, incremental
         self.calls.append(None if since is None else since.isoformat())
         if since is None:
@@ -151,18 +159,55 @@ class _FakeClients:
             max_timestamp="2026-02-21T00:00:00+00:00",
         )
 
+    def fetch_data(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
+        return self.fetch_gamma(limit=limit, since=since, incremental=incremental)
+
+    def fetch_clob(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
+        return self.fetch_gamma(limit=limit, since=since, incremental=incremental)
+
 
 class _BreakerFakeClients:
     def __init__(self):
         self.calls = 0
 
-    def fetch_gamma(self, limit: int, since=None, incremental: bool = False) -> FetchBatch:
+    def fetch_gamma(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
         del limit, since, incremental
         self.calls += 1
         stats = RequestStats(requests=1, failures=1, retries=0)
         stats.error_buckets["http_5xx"] = 1
         stats.last_error_bucket = "http_5xx"
         return FetchBatch(rows=[], stats=stats, error="HTTP 503")
+
+    def fetch_data(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
+        return self.fetch_gamma(limit=limit, since=since, incremental=incremental)
+
+    def fetch_clob(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
+        return self.fetch_gamma(limit=limit, since=since, incremental=incremental)
 
 
 def test_ingestion_incremental_checkpoint(tmp_path: Path) -> None:
@@ -218,14 +263,18 @@ def test_ingestion_circuit_breaker_and_error_buckets(tmp_path: Path) -> None:
     assert fake_clients.calls == 1
 
     with storage.conn() as conn:
-        b1 = conn.execute("""
+        b1 = conn.execute(
+            """
             SELECT total_count FROM ingestion_error_buckets
             WHERE source='gamma' AND error_bucket='http_5xx'
-            """).fetchone()
-        b2 = conn.execute("""
+            """
+        ).fetchone()
+        b2 = conn.execute(
+            """
             SELECT total_count FROM ingestion_error_buckets
             WHERE source='gamma' AND error_bucket='circuit_open'
-            """).fetchone()
+            """
+        ).fetchone()
     assert b1 is not None and int(b1["total_count"]) == 1
     assert b2 is not None and int(b2["total_count"]) == 1
 

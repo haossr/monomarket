@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
-from monomarket.data.clients import FetchBatch, MarketDataClients
+from monomarket.data.clients import FetchBatch
 from monomarket.db.storage import Storage
 
 
@@ -36,10 +37,33 @@ def _parse_iso_ts(value: str | None) -> datetime | None:
     return dt.astimezone(UTC)
 
 
+class IngestionClients(Protocol):
+    def fetch_gamma(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch: ...
+
+    def fetch_data(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch: ...
+
+    def fetch_clob(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch: ...
+
+
 class IngestionService:
     def __init__(
         self,
-        clients: MarketDataClients,
+        clients: IngestionClients,
         storage: Storage,
         breaker_failure_threshold: int = 3,
         breaker_cooldown_sec: int = 90,

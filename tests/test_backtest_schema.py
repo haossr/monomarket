@@ -79,7 +79,7 @@ def test_validate_backtest_json_artifact_v1_ok() -> None:
 
 
 def test_validate_backtest_json_artifact_missing_required_field() -> None:
-    payload = {
+    payload: dict[str, object] = {
         k: [] if k in {"results", "event_results", "replay"} else {}
         for k in REQUIRED_BACKTEST_JSON_FIELDS_V1
     }
@@ -144,7 +144,7 @@ def test_validate_backtest_json_artifact_v2_helper_reuse() -> None:
 
 
 def test_validate_backtest_json_artifact_v2_missing_required() -> None:
-    payload = {k: {} for k in REQUIRED_BACKTEST_JSON_FIELDS_V2}
+    payload: dict[str, object] = {k: {} for k in REQUIRED_BACKTEST_JSON_FIELDS_V2}
     payload["schema_version"] = "2.0"
     payload["replay"] = []
     payload.pop("meta")

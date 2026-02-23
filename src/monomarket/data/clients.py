@@ -183,7 +183,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if value is None:
         return None
 
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         try:
             return datetime.fromtimestamp(float(value), tz=UTC)
         except (TypeError, ValueError, OSError):
