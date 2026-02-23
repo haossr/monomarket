@@ -17,6 +17,8 @@ class BacktestExecutionConfig:
     enable_partial_fill: bool = False
     liquidity_full_fill: float = 1000.0
     min_fill_ratio: float = 0.1
+    enable_fill_probability: bool = False
+    min_fill_probability: float = 0.05
 
 
 @dataclass(slots=True)
@@ -61,6 +63,7 @@ class BacktestReplayRow:
     qty: float
     executed_qty: float
     fill_ratio: float
+    fill_probability: float
     target_price: float
     fill_price: float
     realized_change: float
@@ -176,9 +179,10 @@ class BacktestEngine:
 
             token_id, target_price, requested_qty = self._signal_execution_fields(row)
             fill_price = self._fill_price(target_price, side)
-            executed_qty, fill_ratio = self._effective_fill_qty(
+            executed_qty, fill_ratio, fill_probability = self._effective_fill_qty(
                 market_id=market_id,
                 ts=created_at,
+                side=side,
                 requested_qty=requested_qty,
             )
 
@@ -222,6 +226,7 @@ class BacktestEngine:
                         qty=requested_qty,
                         executed_qty=0.0,
                         fill_ratio=0.0,
+                        fill_probability=0.0,
                         target_price=target_price,
                         fill_price=fill_price,
                         realized_change=0.0,
@@ -271,6 +276,7 @@ class BacktestEngine:
                         qty=requested_qty,
                         executed_qty=0.0,
                         fill_ratio=0.0,
+                        fill_probability=0.0,
                         target_price=target_price,
                         fill_price=fill_price,
                         realized_change=0.0,
@@ -344,6 +350,7 @@ class BacktestEngine:
                     qty=requested_qty,
                     executed_qty=executed_qty,
                     fill_ratio=fill_ratio,
+                    fill_probability=fill_probability,
                     target_price=target_price,
                     fill_price=fill_price,
                     realized_change=realized_change,
@@ -467,24 +474,49 @@ class BacktestEngine:
         *,
         market_id: str,
         ts: str,
+        side: str,
         requested_qty: float,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, float]:
         if requested_qty <= 0:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
 
-        if not self.execution.enable_partial_fill:
-            return requested_qty, 1.0
-
-        full_fill_liq = max(1e-9, self.execution.liquidity_full_fill)
         liquidity = self.storage.get_snapshot_liquidity_at(market_id, ts)
-        if liquidity is None:
-            return requested_qty, 1.0
 
-        raw_ratio = max(0.0, min(1.0, float(liquidity) / full_fill_liq))
-        min_ratio = max(0.0, min(1.0, self.execution.min_fill_ratio))
-        ratio = max(min_ratio, raw_ratio)
-        executed_qty = requested_qty * ratio
-        return executed_qty, ratio
+        ratio = 1.0
+        if self.execution.enable_partial_fill:
+            full_fill_liq = max(1e-9, self.execution.liquidity_full_fill)
+            if liquidity is not None:
+                raw_ratio = max(0.0, min(1.0, float(liquidity) / full_fill_liq))
+                min_ratio = max(0.0, min(1.0, self.execution.min_fill_ratio))
+                ratio = max(min_ratio, raw_ratio)
+
+        fill_probability = 1.0
+        if self.execution.enable_fill_probability:
+            fill_probability = self._fill_probability(liquidity, side)
+
+        final_ratio = max(0.0, min(1.0, ratio * fill_probability))
+        executed_qty = requested_qty * final_ratio
+        return executed_qty, final_ratio, fill_probability
+
+    def _fill_probability(self, liquidity: float | None, side: str) -> float:
+        if liquidity is None:
+            return 1.0
+
+        liq = float(liquidity)
+        if liq >= 1000.0:
+            base = 1.0
+        elif liq >= 800.0:
+            base = 0.9
+        elif liq >= 500.0:
+            base = 0.75
+        elif liq >= 200.0:
+            base = 0.55
+        else:
+            base = 0.35
+
+        side_adj = 0.95 if side.lower() == "buy" else 1.0
+        min_prob = max(0.0, min(1.0, self.execution.min_fill_probability))
+        return max(min_prob, min(1.0, base * side_adj))
 
     @staticmethod
     def _apply_fill(pos: _Position, side: str, price: float, qty: float) -> _FillOutcome:

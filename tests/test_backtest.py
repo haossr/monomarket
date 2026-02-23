@@ -187,6 +187,8 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert abs(report.replay[-1].realized_change + 0.5) < 1e-9
     assert all(x.risk_allowed for x in report.replay)
     assert all(x.risk_reason == "ok" for x in report.replay)
+    assert all(abs(x.fill_ratio - 1.0) < 1e-9 for x in report.replay)
+    assert all(abs(x.fill_probability - 1.0) < 1e-9 for x in report.replay)
 
 
 def test_backtest_partial_fill_model(tmp_path: Path) -> None:
@@ -219,6 +221,42 @@ def test_backtest_partial_fill_model(tmp_path: Path) -> None:
     assert len(m2_rows) == 2
     assert all(abs(x.fill_ratio - 0.9) < 1e-9 for x in m2_rows)
     assert all(abs(x.executed_qty - 4.5) < 1e-9 for x in m2_rows)
+
+
+def test_backtest_fill_probability_model(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+    _seed_signals(storage)
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(
+            slippage_bps=0.0,
+            fee_bps=0.0,
+            enable_partial_fill=True,
+            liquidity_full_fill=1000.0,
+            min_fill_ratio=0.0,
+            enable_fill_probability=True,
+            min_fill_probability=0.05,
+        ),
+    ).run(["s1"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
+
+    assert report.total_signals == 4
+    assert report.executed_signals == 4
+    assert report.rejected_signals == 0
+
+    # m2 liquidity=900 => partial ratio 0.9; buy prob=0.855; sell prob=0.9
+    m2_buy = [x for x in report.replay if x.market_id == "m2" and x.side == "buy"][0]
+    m2_sell = [x for x in report.replay if x.market_id == "m2" and x.side == "sell"][0]
+    assert abs(m2_buy.fill_probability - 0.855) < 1e-9
+    assert abs(m2_sell.fill_probability - 0.9) < 1e-9
+    assert abs(m2_buy.fill_ratio - (0.9 * 0.855)) < 1e-9
+    assert abs(m2_sell.fill_ratio - (0.9 * 0.9)) < 1e-9
+
+    # deterministic pnl under current toy execution model
+    assert abs(report.results[0].pnl - 1.51525) < 1e-9
 
 
 def test_backtest_risk_replay_rejection(tmp_path: Path) -> None:
@@ -328,6 +366,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert rows[0]["risk_reason"] == "ok"
     assert abs(float(rows[0]["executed_qty"]) - float(rows[0]["qty"])) < 1e-9
     assert abs(float(rows[0]["fill_ratio"]) - 1.0) < 1e-9
+    assert abs(float(rows[0]["fill_probability"]) - 1.0) < 1e-9
 
     with strategy_csv_out.open() as f:
         strategy_rows = list(csv.DictReader(f))

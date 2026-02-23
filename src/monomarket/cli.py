@@ -69,6 +69,7 @@ def _write_backtest_replay_csv(report: BacktestReport, output_path: str) -> None
                 "qty",
                 "executed_qty",
                 "fill_ratio",
+                "fill_probability",
                 "target_price",
                 "fill_price",
                 "realized_change",
@@ -275,6 +276,17 @@ def backtest(
         max=1.0,
         help="Minimum fill ratio when partial fill is enabled",
     ),
+    fill_probability: bool = typer.Option(
+        False,
+        "--fill-probability/--no-fill-probability",
+        help="Enable liquidity-bucket fill probability model",
+    ),
+    min_fill_probability: float = typer.Option(
+        0.05,
+        min=0.0,
+        max=1.0,
+        help="Minimum fill probability when probability model is enabled",
+    ),
     replay_limit: int = typer.Option(20, min=0, help="Rows to print from replay ledger (0=skip)"),
     out_json: str | None = typer.Option(None, help="Write full backtest report as JSON"),
     out_replay_csv: str | None = typer.Option(None, help="Write replay ledger as CSV"),
@@ -300,6 +312,8 @@ def backtest(
             enable_partial_fill=partial_fill,
             liquidity_full_fill=liquidity_full_fill,
             min_fill_ratio=min_fill_ratio,
+            enable_fill_probability=fill_probability,
+            min_fill_probability=min_fill_probability,
         ),
         risk=BacktestRiskConfig(
             max_daily_loss=settings.risk.max_daily_loss,
@@ -364,6 +378,7 @@ def backtest(
         replay_tb.add_column("qty")
         replay_tb.add_column("filled")
         replay_tb.add_column("fill_ratio")
+        replay_tb.add_column("fill_prob")
         replay_tb.add_column("target")
         replay_tb.add_column("fill")
         replay_tb.add_column("realized")
@@ -383,6 +398,7 @@ def backtest(
                 f"{replay_row.qty:.4f}",
                 f"{replay_row.executed_qty:.4f}",
                 f"{replay_row.fill_ratio:.2%}",
+                f"{replay_row.fill_probability:.2%}",
                 f"{replay_row.target_price:.4f}",
                 f"{replay_row.fill_price:.4f}",
                 f"{replay_row.realized_change:.4f}",
