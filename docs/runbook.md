@@ -35,6 +35,7 @@ monomarket ingest-health --run-window 20
 输出包含：
 - error buckets 聚合
 - breaker 状态
+- breaker 状态过渡计数（open/half_open/closed）与最近转移时间
 - 近 N 次 run 的 source 级失败率摘要（non_ok_rate）
 
 ## 3) 生成与查看信号

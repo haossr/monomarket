@@ -76,6 +76,7 @@ class IngestionService:
             return True, f"circuit open until {open_until.isoformat()}", False
 
         # cooldown passed: allow one half-open probe request
+        self.storage.record_ingestion_breaker_transition(source, "half_open")
         return False, "half-open probe", True
 
     def _note_failure(self, source: str, error_bucket: str) -> None:
@@ -95,6 +96,8 @@ class IngestionService:
             open_until_ts=open_until,
             last_error_bucket=error_bucket,
         )
+        if open_until is not None:
+            self.storage.record_ingestion_breaker_transition(source, "open")
 
     def _note_probe_failure(self, source: str, error_bucket: str) -> None:
         # half-open single probe failed: immediately re-open breaker
@@ -106,14 +109,20 @@ class IngestionService:
             ).isoformat(),
             last_error_bucket=error_bucket,
         )
+        self.storage.record_ingestion_breaker_transition(source, "open")
 
     def _note_success(self, source: str) -> None:
+        prev = self.storage.get_ingestion_breaker(source)
         self.storage.set_ingestion_breaker(
             source=source,
             consecutive_failures=0,
             open_until_ts=None,
             last_error_bucket="",
         )
+        if prev is not None and (
+            int(prev.get("consecutive_failures") or 0) > 0 or prev.get("open_until_ts")
+        ):
+            self.storage.record_ingestion_breaker_transition(source, "closed")
 
     def ingest(self, source: str, limit: int = 200, incremental: bool = True) -> IngestionResult:
         started = datetime.now(UTC).isoformat()

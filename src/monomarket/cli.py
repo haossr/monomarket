@@ -207,6 +207,7 @@ def ingest_health(
         source=source,
         run_window=run_window,
     )
+    transitions = storage.list_ingestion_breaker_transitions(source=source, limit=limit)
 
     tb1 = Table(title=f"Ingestion error buckets ({len(buckets)})")
     tb1.add_column("source")
@@ -240,21 +241,35 @@ def ingest_health(
         )
     console.print(tb2)
 
-    tb3 = Table(title=f"Ingestion run summary by source (window={run_window})")
+    tb3 = Table(title=f"Breaker transitions ({len(transitions)})")
     tb3.add_column("source")
-    tb3.add_column("total")
-    tb3.add_column("ok")
-    tb3.add_column("partial")
-    tb3.add_column("error")
-    tb3.add_column("non_ok_rate")
-    tb3.add_column("avg_rows")
-    tb3.add_column("last_finished_at")
+    tb3.add_column("state")
+    tb3.add_column("count")
+    tb3.add_column("last_transition_at")
+    for row in transitions:
+        tb3.add_row(
+            str(row["source"]),
+            str(row["state"]),
+            str(row["transition_count"]),
+            str(row["last_transition_at"]),
+        )
+    console.print(tb3)
+
+    tb4 = Table(title=f"Ingestion run summary by source (window={run_window})")
+    tb4.add_column("source")
+    tb4.add_column("total")
+    tb4.add_column("ok")
+    tb4.add_column("partial")
+    tb4.add_column("error")
+    tb4.add_column("non_ok_rate")
+    tb4.add_column("avg_rows")
+    tb4.add_column("last_finished_at")
     for row in run_summary:
         total_runs = int(row["total_runs"] or 0)
         non_ok_runs = int(row["non_ok_runs"] or 0)
         non_ok_rate = (non_ok_runs / total_runs) if total_runs else 0.0
         avg_rows = float(row["avg_rows"] or 0.0)
-        tb3.add_row(
+        tb4.add_row(
             str(row["source"]),
             str(total_runs),
             str(int(row["ok_runs"] or 0)),
@@ -264,7 +279,7 @@ def ingest_health(
             f"{avg_rows:.2f}",
             str(row["last_finished_at"] or ""),
         )
-    console.print(tb3)
+    console.print(tb4)
 
 
 @app.command("list-markets")

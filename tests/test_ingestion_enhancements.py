@@ -229,6 +229,10 @@ def test_ingestion_circuit_breaker_and_error_buckets(tmp_path: Path) -> None:
     assert b1 is not None and int(b1["total_count"]) == 1
     assert b2 is not None and int(b2["total_count"]) == 1
 
+    transitions = storage.list_ingestion_breaker_transitions(source="gamma")
+    by_state = {str(x["state"]): int(x["transition_count"]) for x in transitions}
+    assert by_state.get("open") == 1
+
 
 def test_ingestion_half_open_single_probe(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
@@ -262,6 +266,11 @@ def test_ingestion_half_open_single_probe(tmp_path: Path) -> None:
     assert r2.status == "partial"
     assert r2.error_buckets.get("circuit_open") == 1
     assert fake_clients.calls == 1
+
+    transitions = storage.list_ingestion_breaker_transitions(source="gamma")
+    by_state = {str(x["state"]): int(x["transition_count"]) for x in transitions}
+    assert by_state.get("half_open") == 1
+    assert by_state.get("open") == 1
 
 
 def test_cli_ingest_health(tmp_path: Path) -> None:
@@ -327,6 +336,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert res.exit_code == 0, res.output
     assert "Ingestion error buckets" in res.output
     assert "Ingestion breakers" in res.output
+    assert "Breaker transitions" in res.output
     assert "Ingestion run summary by source" in res.output
     assert "gamma" in res.output
     assert "http_5xx" in res.output

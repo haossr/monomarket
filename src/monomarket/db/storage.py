@@ -48,6 +48,14 @@ CREATE TABLE IF NOT EXISTS ingestion_breakers (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ingestion_breaker_transitions (
+    source TEXT NOT NULL,
+    state TEXT NOT NULL,
+    transition_count INTEGER NOT NULL DEFAULT 0,
+    last_transition_at TEXT NOT NULL,
+    PRIMARY KEY(source, state)
+);
+
 CREATE TABLE IF NOT EXISTS markets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
@@ -402,6 +410,51 @@ class Storage:
                 """,
                 (source_norm, source_norm, max(1, run_window)),
             ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_ingestion_breaker_transition(self, source: str, state: str) -> None:
+        now = self._now()
+        with self.conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO ingestion_breaker_transitions(
+                    source, state, transition_count, last_transition_at
+                )
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(source, state) DO UPDATE SET
+                    transition_count = ingestion_breaker_transitions.transition_count + 1,
+                    last_transition_at = excluded.last_transition_at
+                """,
+                (source.lower(), state, now),
+            )
+
+    def list_ingestion_breaker_transitions(
+        self,
+        source: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        with self.conn() as conn:
+            if source:
+                rows = conn.execute(
+                    """
+                    SELECT source, state, transition_count, last_transition_at
+                    FROM ingestion_breaker_transitions
+                    WHERE source = ?
+                    ORDER BY state ASC
+                    LIMIT ?
+                    """,
+                    (source.lower(), limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT source, state, transition_count, last_transition_at
+                    FROM ingestion_breaker_transitions
+                    ORDER BY source ASC, state ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
         return [dict(row) for row in rows]
 
     def upsert_markets(self, markets: list[MarketView], snapshot_at: str | None = None) -> int:
