@@ -30,6 +30,9 @@ monomarket init-db
 # 2) 抓取市场数据（默认增量；可选 source=gamma/data/clob/all）
 monomarket ingest --source all --limit 300 --incremental
 
+# 2.1) 查看抓取健康（错误分桶 + breaker）
+monomarket ingest-health
+
 # 3) 生成策略信号（S1/S2/S4/S8）
 monomarket generate-signals --strategies s1,s2,s4,s8
 

@@ -191,6 +191,51 @@ def ingest(
         console.print(f"[red]error[/red] {res.error}")
 
 
+@app.command("ingest-health")
+def ingest_health(
+    source: str | None = typer.Option(None, help="gamma|data|clob (default: all)"),
+    limit: int = typer.Option(20, min=1, max=200),
+    config: str | None = typer.Option(None),
+) -> None:
+    _, storage = _ctx(config)
+    storage.init_db()
+
+    buckets = storage.list_ingestion_error_buckets(source=source, limit=limit)
+    breakers = storage.list_ingestion_breakers(source=source, limit=limit)
+
+    tb1 = Table(title=f"Ingestion error buckets ({len(buckets)})")
+    tb1.add_column("source")
+    tb1.add_column("bucket")
+    tb1.add_column("count")
+    tb1.add_column("last_error")
+    tb1.add_column("updated_at")
+    for row in buckets:
+        tb1.add_row(
+            str(row["source"]),
+            str(row["error_bucket"]),
+            str(row["total_count"]),
+            str(row["last_error"]),
+            str(row["updated_at"]),
+        )
+    console.print(tb1)
+
+    tb2 = Table(title=f"Ingestion breakers ({len(breakers)})")
+    tb2.add_column("source")
+    tb2.add_column("consecutive_failures")
+    tb2.add_column("open_until")
+    tb2.add_column("last_bucket")
+    tb2.add_column("updated_at")
+    for row in breakers:
+        tb2.add_row(
+            str(row["source"]),
+            str(row["consecutive_failures"]),
+            str(row["open_until_ts"] or ""),
+            str(row["last_error_bucket"]),
+            str(row["updated_at"]),
+        )
+    console.print(tb2)
+
+
 @app.command("list-markets")
 def list_markets(
     limit: int = typer.Option(20, min=1, max=1000),

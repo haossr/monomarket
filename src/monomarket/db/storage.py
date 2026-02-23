@@ -309,6 +309,64 @@ class Storage:
                 ),
             )
 
+    def list_ingestion_error_buckets(
+        self,
+        source: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self.conn() as conn:
+            if source:
+                rows = conn.execute(
+                    """
+                    SELECT source, error_bucket, total_count, last_error, updated_at
+                    FROM ingestion_error_buckets
+                    WHERE source = ?
+                    ORDER BY total_count DESC, source ASC, error_bucket ASC
+                    LIMIT ?
+                    """,
+                    (source.lower(), limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT source, error_bucket, total_count, last_error, updated_at
+                    FROM ingestion_error_buckets
+                    ORDER BY total_count DESC, source ASC, error_bucket ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_ingestion_breakers(
+        self,
+        source: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self.conn() as conn:
+            if source:
+                rows = conn.execute(
+                    """
+                    SELECT source, consecutive_failures, open_until_ts, last_error_bucket, updated_at
+                    FROM ingestion_breakers
+                    WHERE source = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (source.lower(), limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT source, consecutive_failures, open_until_ts, last_error_bucket, updated_at
+                    FROM ingestion_breakers
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
     def upsert_markets(self, markets: list[MarketView], snapshot_at: str | None = None) -> int:
         if not markets:
             return 0

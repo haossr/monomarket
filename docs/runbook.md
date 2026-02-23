@@ -23,6 +23,14 @@ monomarket ingest --source all --limit 300 --full
 
 `ingest` 输出会额外包含 `error_buckets`（如 `http_429/http_5xx/circuit_open`），用于观测分级重试与熔断恢复状态。
 
+查看聚合健康状态（错误分桶 + breaker 状态）：
+
+```bash
+monomarket ingest-health --source gamma
+# 或查看全部 source
+monomarket ingest-health
+```
+
 ## 3) 生成与查看信号
 
 ```bash

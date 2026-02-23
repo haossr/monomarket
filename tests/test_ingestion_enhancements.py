@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import requests
+from typer.testing import CliRunner
 
+from monomarket.cli import app
 from monomarket.data.clients import FetchBatch, RequestStats, SourceClient
 from monomarket.data.ingestion import IngestionService
 from monomarket.db.storage import Storage
@@ -226,3 +228,52 @@ def test_ingestion_circuit_breaker_and_error_buckets(tmp_path: Path) -> None:
             """).fetchone()
     assert b1 is not None and int(b1["total_count"]) == 1
     assert b2 is not None and int(b2["total_count"]) == 1
+
+
+def test_cli_ingest_health(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    storage.update_ingestion_error_bucket(
+        source="gamma",
+        error_bucket="http_5xx",
+        count=3,
+        last_error="HTTP 503",
+    )
+    storage.set_ingestion_breaker(
+        source="gamma",
+        consecutive_failures=2,
+        open_until_ts="2026-02-24T00:00:00+00:00",
+        last_error_bucket="http_5xx",
+    )
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "app:",
+                f"  db_path: {db}",
+                "trading:",
+                "  mode: paper",
+            ]
+        )
+    )
+
+    runner = CliRunner()
+    res = runner.invoke(
+        app,
+        [
+            "ingest-health",
+            "--source",
+            "gamma",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert "Ingestion error buckets" in res.output
+    assert "Ingestion breakers" in res.output
+    assert "gamma" in res.output
+    assert "http_5xx" in res.output
