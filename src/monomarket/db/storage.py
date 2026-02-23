@@ -10,6 +10,8 @@ from typing import Any
 
 from monomarket.models import MarketView, OrderRequest, Signal
 
+OUTCOME_TOKEN_YES = "YES"  # nosec B105
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS ingestion_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -19,6 +21,14 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
     finished_at TEXT NOT NULL,
     rows_ingested INTEGER NOT NULL,
     error TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_state (
+    source TEXT PRIMARY KEY,
+    checkpoint_ts TEXT,
+    total_requests INTEGER NOT NULL DEFAULT 0,
+    total_failures INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS markets (
@@ -43,6 +53,21 @@ CREATE TABLE IF NOT EXISTS markets (
 CREATE INDEX IF NOT EXISTS idx_markets_canonical ON markets(canonical_id);
 CREATE INDEX IF NOT EXISTS idx_markets_event ON markets(event_id);
 
+CREATE TABLE IF NOT EXISTS market_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    market_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    yes_price REAL,
+    no_price REAL,
+    mid_price REAL,
+    liquidity REAL NOT NULL DEFAULT 0,
+    volume REAL NOT NULL DEFAULT 0,
+    captured_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_market_snapshots_market_time
+    ON market_snapshots(market_id, captured_at);
+
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy TEXT NOT NULL,
@@ -61,6 +86,7 @@ CREATE TABLE IF NOT EXISTS signals (
 );
 CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
 CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy);
+CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at);
 
 CREATE TABLE IF NOT EXISTS switches (
     name TEXT PRIMARY KEY,
@@ -159,10 +185,53 @@ class Storage:
                 (source, status, started_at, finished_at, rows_ingested, error),
             )
 
-    def upsert_markets(self, markets: list[MarketView]) -> int:
+    def get_ingestion_checkpoint(self, source: str) -> str | None:
+        with self.conn() as conn:
+            row = conn.execute(
+                "SELECT checkpoint_ts FROM ingestion_state WHERE source = ?",
+                (source.lower(),),
+            ).fetchone()
+        if row is None:
+            return None
+        checkpoint = row["checkpoint_ts"]
+        return str(checkpoint) if checkpoint else None
+
+    def update_ingestion_checkpoint(self, source: str, checkpoint_ts: str) -> None:
+        now = self._now()
+        with self.conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO ingestion_state(source, checkpoint_ts, total_requests, total_failures, updated_at)
+                VALUES (?, ?, 0, 0, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                    checkpoint_ts = excluded.checkpoint_ts,
+                    updated_at = excluded.updated_at
+                """,
+                (source.lower(), checkpoint_ts, now),
+            )
+
+    def update_ingestion_counters(
+        self, source: str, request_count: int, failure_count: int
+    ) -> None:
+        now = self._now()
+        with self.conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO ingestion_state(source, checkpoint_ts, total_requests, total_failures, updated_at)
+                VALUES (?, NULL, ?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                    total_requests = ingestion_state.total_requests + excluded.total_requests,
+                    total_failures = ingestion_state.total_failures + excluded.total_failures,
+                    updated_at = excluded.updated_at
+                """,
+                (source.lower(), request_count, failure_count, now),
+            )
+
+    def upsert_markets(self, markets: list[MarketView], snapshot_at: str | None = None) -> int:
         if not markets:
             return 0
         now = self._now()
+        captured_at = snapshot_at or now
         with self.conn() as conn:
             for m in markets:
                 conn.execute(
@@ -203,6 +272,25 @@ class Storage:
                         m.liquidity,
                         m.volume,
                         now,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO market_snapshots(
+                        source, market_id, event_id, yes_price, no_price, mid_price, liquidity, volume, captured_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        m.source,
+                        m.market_id,
+                        m.event_id,
+                        m.yes_price,
+                        m.no_price,
+                        m.mid_price,
+                        m.liquidity,
+                        m.volume,
+                        captured_at,
                     ),
                 )
         return len(markets)
@@ -253,10 +341,10 @@ class Storage:
             for row in rows
         ]
 
-    def insert_signals(self, signals: list[Signal]) -> int:
+    def insert_signals(self, signals: list[Signal], created_at: str | None = None) -> int:
         if not signals:
             return 0
-        now = self._now()
+        now = created_at or self._now()
         with self.conn() as conn:
             conn.executemany(
                 """
@@ -378,6 +466,93 @@ class Storage:
         d["payload"] = payload
         d.pop("payload_json", None)
         return d
+
+    def list_signals_in_window(
+        self,
+        from_ts: str,
+        to_ts: str,
+        strategies: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        with self.conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, strategy, market_id, event_id, side, score, confidence,
+                       target_price, size_hint, rationale, payload_json, status, created_at, updated_at
+                FROM signals
+                WHERE created_at >= ? AND created_at <= ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (from_ts, to_ts),
+            ).fetchall()
+
+        wanted = {s.lower() for s in strategies} if strategies else None
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if wanted is not None and str(row["strategy"]).lower() not in wanted:
+                continue
+
+            payload = {}
+            if row["payload_json"]:
+                try:
+                    payload = json.loads(row["payload_json"])
+                except json.JSONDecodeError:
+                    payload = {}
+            d = dict(row)
+            d["payload"] = payload
+            d.pop("payload_json", None)
+            out.append(d)
+        return out
+
+    def get_snapshot_price_at(self, market_id: str, token_id: str, ts: str) -> float | None:
+        token = token_id.upper()
+        with self.conn() as conn:
+            if token == OUTCOME_TOKEN_YES:
+                row = conn.execute(
+                    """
+                    SELECT yes_price AS px
+                    FROM market_snapshots
+                    WHERE market_id = ? AND captured_at <= ? AND yes_price IS NOT NULL
+                    ORDER BY captured_at DESC
+                    LIMIT 1
+                    """,
+                    (market_id, ts),
+                ).fetchone()
+                if row is None:
+                    row = conn.execute(
+                        """
+                        SELECT yes_price AS px
+                        FROM market_snapshots
+                        WHERE market_id = ? AND yes_price IS NOT NULL
+                        ORDER BY captured_at ASC
+                        LIMIT 1
+                        """,
+                        (market_id,),
+                    ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT no_price AS px
+                    FROM market_snapshots
+                    WHERE market_id = ? AND captured_at <= ? AND no_price IS NOT NULL
+                    ORDER BY captured_at DESC
+                    LIMIT 1
+                    """,
+                    (market_id, ts),
+                ).fetchone()
+                if row is None:
+                    row = conn.execute(
+                        """
+                        SELECT no_price AS px
+                        FROM market_snapshots
+                        WHERE market_id = ? AND no_price IS NOT NULL
+                        ORDER BY captured_at ASC
+                        LIMIT 1
+                        """,
+                        (market_id,),
+                    ).fetchone()
+        if row is None:
+            return None
+        return float(row["px"])
 
     def update_signal_status(self, signal_id: int, status: str) -> None:
         with self.conn() as conn:

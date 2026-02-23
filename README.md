@@ -8,6 +8,7 @@ Monomarket 是一个面向二元市场（Polymarket 风格）的可运行交易 
 - 执行路由（paper/live 双模式，默认 paper）
 - 统一风控（全局止损、单策略上限、单事件上限、熔断）
 - PnL + 指标报表
+- 时间窗口回测（signals replay + paper fills + 策略归因）
 
 > 安全默认值：`paper`，且 `ENABLE_LIVE_TRADING=false`。
 
@@ -26,8 +27,8 @@ cp configs/config.example.yaml configs/config.yaml
 # 1) 初始化数据库
 monomarket init-db
 
-# 2) 抓取市场数据（可选 source=gamma/data/clob/all）
-monomarket ingest --source all --limit 300
+# 2) 抓取市场数据（默认增量；可选 source=gamma/data/clob/all）
+monomarket ingest --source all --limit 300 --incremental
 
 # 3) 生成策略信号（S1/S2/S4/S8）
 monomarket generate-signals --strategies s1,s2,s4,s8
@@ -41,6 +42,10 @@ monomarket execute-signal 1
 # 6) 查看收益与指标
 monomarket pnl-report
 monomarket metrics-report
+
+# 7) 时间窗口回测（按策略归因）
+monomarket backtest --strategies s1,s2,s4,s8 \
+  --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z
 ```
 
 ## 交易控制开关（Rocky 可独立控制）

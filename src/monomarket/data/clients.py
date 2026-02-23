@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -10,18 +12,72 @@ from monomarket.models import MarketView
 
 
 @dataclass(slots=True)
+class RequestStats:
+    requests: int = 0
+    failures: int = 0
+    retries: int = 0
+    throttled_sec: float = 0.0
+
+
+@dataclass(slots=True)
+class FetchBatch:
+    rows: list[MarketView]
+    stats: RequestStats = field(default_factory=RequestStats)
+    max_timestamp: str | None = None
+    error: str = ""
+
+
+@dataclass(slots=True)
 class SourceClient:
     base_url: str
     timeout_sec: int
+    max_retries: int
+    backoff_base_sec: float
+    rate_limit_per_sec: float
+    _last_request_monotonic: float | None = field(default=None, init=False, repr=False)
+    _min_interval_sec: float = field(default=0.0, init=False, repr=False)
 
-    def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    def __post_init__(self) -> None:
+        self._min_interval_sec = (
+            1.0 / self.rate_limit_per_sec if self.rate_limit_per_sec > 0 else 0.0
+        )
+
+    def _throttle(self, stats: RequestStats) -> None:
+        if self._min_interval_sec <= 0.0 or self._last_request_monotonic is None:
+            return
+
+        elapsed = time.monotonic() - self._last_request_monotonic
+        sleep_for = self._min_interval_sec - elapsed
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+            stats.throttled_sec += sleep_for
+
+    def get_json(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> tuple[Any, RequestStats, str]:
         url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
-        try:
-            resp = requests.get(url, params=params, timeout=self.timeout_sec)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException:
-            return []
+        stats = RequestStats()
+
+        for attempt in range(self.max_retries + 1):
+            self._throttle(stats)
+            stats.requests += 1
+            try:
+                resp = requests.get(url, params=params, timeout=self.timeout_sec)
+                self._last_request_monotonic = time.monotonic()
+                resp.raise_for_status()
+                return resp.json(), stats, ""
+            except (requests.RequestException, ValueError) as exc:
+                self._last_request_monotonic = time.monotonic()
+                stats.failures += 1
+                if attempt >= self.max_retries:
+                    return [], stats, str(exc)
+
+                backoff = self.backoff_base_sec * (2**attempt)
+                if backoff > 0:
+                    time.sleep(backoff)
+                stats.retries += 1
+
+        return [], stats, "unreachable"
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -70,6 +126,35 @@ def _extract_prices(item: dict[str, Any]) -> tuple[float | None, float | None]:
         )
 
     return None, None
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=UTC)
+        except (TypeError, ValueError, OSError):
+            return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    try:
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            return datetime.fromtimestamp(float(text), tz=UTC)
+        except (TypeError, ValueError, OSError):
+            return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def normalize_market(item: dict[str, Any], source: str) -> MarketView | None:
@@ -128,12 +213,52 @@ def normalize_market(item: dict[str, Any], source: str) -> MarketView | None:
 
 class MarketDataClients:
     def __init__(self, settings: DataSettings):
-        self.gamma = SourceClient(settings.gamma_base_url, settings.timeout_sec)
-        self.data = SourceClient(settings.data_base_url, settings.timeout_sec)
-        self.clob = SourceClient(settings.clob_base_url, settings.timeout_sec)
+        self.gamma = SourceClient(
+            settings.gamma_base_url,
+            settings.timeout_sec,
+            settings.max_retries,
+            settings.backoff_base_sec,
+            settings.rate_limit_per_sec,
+        )
+        self.data = SourceClient(
+            settings.data_base_url,
+            settings.timeout_sec,
+            settings.max_retries,
+            settings.backoff_base_sec,
+            settings.rate_limit_per_sec,
+        )
+        self.clob = SourceClient(
+            settings.clob_base_url,
+            settings.timeout_sec,
+            settings.max_retries,
+            settings.backoff_base_sec,
+            settings.rate_limit_per_sec,
+        )
 
     @staticmethod
-    def _normalize_rows(payload: Any, source: str) -> list[MarketView]:
+    def _extract_item_timestamp(item: dict[str, Any]) -> datetime | None:
+        for key in (
+            "updatedAt",
+            "updated_at",
+            "lastUpdated",
+            "last_updated",
+            "endDate",
+            "end_date",
+            "createdAt",
+            "created_at",
+        ):
+            ts = _parse_timestamp(item.get(key))
+            if ts is not None:
+                return ts
+        return None
+
+    @classmethod
+    def _normalize_rows(
+        cls,
+        payload: Any,
+        source: str,
+        since: datetime | None = None,
+    ) -> tuple[list[MarketView], str | None]:
         rows: list[dict[str, Any]]
         if isinstance(payload, dict):
             for key in ("markets", "data", "items", "results"):
@@ -148,22 +273,87 @@ class MarketDataClients:
             rows = []
 
         normalized: list[MarketView] = []
+        max_seen_ts: datetime | None = None
+
         for item in rows:
             if not isinstance(item, dict):
                 continue
+
+            ts = cls._extract_item_timestamp(item)
+            if ts is not None and (max_seen_ts is None or ts > max_seen_ts):
+                max_seen_ts = ts
+            if since is not None and ts is not None and ts <= since:
+                continue
+
             n = normalize_market(item, source)
             if n is not None:
                 normalized.append(n)
-        return normalized
 
-    def fetch_gamma(self, limit: int = 200) -> list[MarketView]:
-        payload = self.gamma.get_json("markets", params={"limit": limit, "active": "true"})
-        return self._normalize_rows(payload, "gamma")
+        max_seen_iso = max_seen_ts.isoformat() if max_seen_ts is not None else None
+        return normalized, max_seen_iso
 
-    def fetch_data(self, limit: int = 200) -> list[MarketView]:
-        payload = self.data.get_json("markets", params={"limit": limit})
-        return self._normalize_rows(payload, "data")
+    @staticmethod
+    def _with_incremental_params(
+        base_params: dict[str, Any],
+        since: datetime | None,
+        incremental: bool,
+    ) -> dict[str, Any]:
+        params = dict(base_params)
+        if incremental and since is not None:
+            since_iso = since.astimezone(UTC).isoformat()
+            params["updated_after"] = since_iso
+            params["since"] = since_iso
+        return params
 
-    def fetch_clob(self, limit: int = 200) -> list[MarketView]:
-        payload = self.clob.get_json("markets", params={"limit": limit})
-        return self._normalize_rows(payload, "clob")
+    def fetch_gamma(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
+        params = self._with_incremental_params(
+            {"limit": limit, "active": "true"},
+            since=since,
+            incremental=incremental,
+        )
+        payload, stats, error = self.gamma.get_json("markets", params=params)
+        rows, max_timestamp = self._normalize_rows(
+            payload,
+            "gamma",
+            since=since if incremental else None,
+        )
+        return FetchBatch(rows=rows, stats=stats, max_timestamp=max_timestamp, error=error)
+
+    def fetch_data(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
+        params = self._with_incremental_params(
+            {"limit": limit},
+            since=since,
+            incremental=incremental,
+        )
+        payload, stats, error = self.data.get_json("markets", params=params)
+        rows, max_timestamp = self._normalize_rows(
+            payload, "data", since=since if incremental else None
+        )
+        return FetchBatch(rows=rows, stats=stats, max_timestamp=max_timestamp, error=error)
+
+    def fetch_clob(
+        self,
+        limit: int = 200,
+        since: datetime | None = None,
+        incremental: bool = False,
+    ) -> FetchBatch:
+        params = self._with_incremental_params(
+            {"limit": limit},
+            since=since,
+            incremental=incremental,
+        )
+        payload, stats, error = self.clob.get_json("markets", params=params)
+        rows, max_timestamp = self._normalize_rows(
+            payload, "clob", since=since if incremental else None
+        )
+        return FetchBatch(rows=rows, stats=stats, max_timestamp=max_timestamp, error=error)

@@ -39,6 +39,9 @@ class DataSettings:
     data_base_url: str = "https://data-api.polymarket.com"
     clob_base_url: str = "https://clob.polymarket.com"
     timeout_sec: int = 15
+    max_retries: int = 2
+    backoff_base_sec: float = 0.5
+    rate_limit_per_sec: float = 4.0
 
 
 @dataclass(slots=True)
@@ -147,6 +150,9 @@ def load_settings(config_path: str | None = None) -> Settings:
             data_base_url=str(data_raw.get("data_base_url", "https://data-api.polymarket.com")),
             clob_base_url=str(data_raw.get("clob_base_url", "https://clob.polymarket.com")),
             timeout_sec=_as_int(data_raw.get("timeout_sec"), 15),
+            max_retries=max(0, _as_int(data_raw.get("max_retries"), 2)),
+            backoff_base_sec=max(0.0, _as_float(data_raw.get("backoff_base_sec"), 0.5)),
+            rate_limit_per_sec=max(0.1, _as_float(data_raw.get("rate_limit_per_sec"), 4.0)),
         ),
         strategies=raw.get("strategies", {}),
     )

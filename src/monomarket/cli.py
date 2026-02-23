@@ -4,6 +4,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from monomarket.backtest import BacktestEngine, BacktestExecutionConfig
 from monomarket.config import Settings, load_settings
 from monomarket.data import IngestionService, MarketDataClients
 from monomarket.db import Storage
@@ -36,16 +37,27 @@ def init_db(config: str | None = typer.Option(None, help="Config yaml path")) ->
 def ingest(
     source: str = typer.Option("gamma", help="gamma|data|clob|all"),
     limit: int = typer.Option(200, min=1, max=5000),
+    incremental: bool = typer.Option(True, "--incremental/--full"),
     config: str | None = typer.Option(None),
 ) -> None:
     settings, storage = _ctx(config)
     storage.init_db()
     svc = IngestionService(MarketDataClients(settings.data), storage)
-    res = svc.ingest(source, limit)
+    res = svc.ingest(source, limit, incremental=incremental)
+
     if res.status == "ok":
-        console.print(f"[green]ingest ok[/green] source={res.source} rows={res.rows}")
+        color = "green"
+    elif res.status == "partial":
+        color = "yellow"
     else:
-        console.print(f"[red]ingest error[/red] source={res.source} error={res.error}")
+        color = "red"
+
+    console.print(
+        f"[{color}]ingest {res.status}[/{color}] source={res.source} rows={res.rows} "
+        f"requests={res.request_count} retries={res.retry_count} failures={res.failure_count}"
+    )
+    if res.error:
+        console.print(f"[red]error[/red] {res.error}")
 
 
 @app.command("list-markets")
@@ -128,6 +140,46 @@ def list_signals(
             str(r["status"]),
         )
 
+    console.print(tb)
+
+
+@app.command("backtest")
+def backtest(
+    strategies: str = typer.Option("s1,s2,s4,s8", help="Comma-separated strategy ids"),
+    from_ts: str = typer.Option(..., "--from", help="Inclusive ISO timestamp"),
+    to_ts: str = typer.Option(..., "--to", help="Inclusive ISO timestamp"),
+    slippage_bps: float = typer.Option(5.0, min=0.0),
+    fee_bps: float = typer.Option(0.0, min=0.0),
+    config: str | None = typer.Option(None),
+) -> None:
+    _, storage = _ctx(config)
+    storage.init_db()
+
+    selected = [s.strip().lower() for s in strategies.split(",") if s.strip()]
+    engine = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=slippage_bps, fee_bps=fee_bps),
+    )
+    report = engine.run(selected, from_ts=from_ts, to_ts=to_ts)
+
+    console.print(
+        f"backtest signals={report.total_signals} from={report.from_ts} to={report.to_ts}"
+    )
+    tb = Table(title="Backtest attribution")
+    tb.add_column("strategy")
+    tb.add_column("pnl")
+    tb.add_column("winrate")
+    tb.add_column("max_drawdown")
+    tb.add_column("trades")
+
+    for result in report.results:
+        tb.add_row(
+            result.strategy,
+            f"{result.pnl:.4f}",
+            f"{result.winrate:.2%}",
+            f"{result.max_drawdown:.4f}",
+            str(result.trade_count),
+        )
     console.print(tb)
 
 

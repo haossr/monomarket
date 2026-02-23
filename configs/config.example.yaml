@@ -19,6 +19,9 @@ data:
   data_base_url: https://data-api.polymarket.com
   clob_base_url: https://clob.polymarket.com
   timeout_sec: 15
+  max_retries: 2
+  backoff_base_sec: 0.5
+  rate_limit_per_sec: 4.0
 
 strategies:
   s1:
