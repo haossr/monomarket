@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from typing import Any
 
 SUPPORTED_BACKTEST_SCHEMA_MAJOR = 1
@@ -20,11 +21,14 @@ REQUIRED_BACKTEST_JSON_FIELDS_V1 = {
     "replay",
 }
 
-# Placeholder contract for upcoming v2 migration lane.
+# Placeholder v2 contract for migration rehearsal.
 REQUIRED_BACKTEST_JSON_FIELDS_V2 = {
     "schema_version",
     "meta",
-    "results",
+    "summary",
+    "configs",
+    "attribution",
+    "replay",
 }
 
 BacktestJsonArtifactValidator = Callable[[Mapping[str, Any]], None]
@@ -80,8 +84,43 @@ def validate_backtest_json_artifact_v2(payload: Mapping[str, Any]) -> None:
 
     if not isinstance(payload.get("meta"), Mapping):
         raise ValueError("v2 meta must be an object")
-    if not isinstance(payload.get("results"), list):
-        raise ValueError("v2 results must be an array")
+    if not isinstance(payload.get("summary"), Mapping):
+        raise ValueError("v2 summary must be an object")
+    if not isinstance(payload.get("configs"), Mapping):
+        raise ValueError("v2 configs must be an object")
+    if not isinstance(payload.get("attribution"), Mapping):
+        raise ValueError("v2 attribution must be an object")
+    if not isinstance(payload.get("replay"), list):
+        raise ValueError("v2 replay must be an array")
+
+
+def migrate_backtest_artifact_v1_to_v2(payload: Mapping[str, Any]) -> dict[str, Any]:
+    validate_backtest_json_artifact_v1(payload)
+
+    return {
+        "schema_version": "2.0",
+        "meta": {
+            "migration": "v1_to_v2",
+            "source_schema_version": str(payload["schema_version"]),
+        },
+        "summary": {
+            "generated_at": payload["generated_at"],
+            "from_ts": payload["from_ts"],
+            "to_ts": payload["to_ts"],
+            "total_signals": payload["total_signals"],
+            "executed_signals": payload["executed_signals"],
+            "rejected_signals": payload["rejected_signals"],
+        },
+        "configs": {
+            "execution": deepcopy(payload["execution_config"]),
+            "risk": deepcopy(payload["risk_config"]),
+        },
+        "attribution": {
+            "strategy": deepcopy(payload["results"]),
+            "event": deepcopy(payload["event_results"]),
+        },
+        "replay": deepcopy(payload["replay"]),
+    }
 
 
 DEFAULT_BACKTEST_JSON_VALIDATORS: dict[int, BacktestJsonArtifactValidator] = {

@@ -12,6 +12,7 @@ from monomarket.backtest import (
     SUPPORTED_BACKTEST_SCHEMA_MAJOR,
     assert_schema_compatible,
     is_schema_compatible,
+    migrate_backtest_artifact_v1_to_v2,
     parse_schema_version,
     validate_backtest_json_artifact,
     validate_backtest_json_artifact_v1,
@@ -49,8 +50,8 @@ def test_assert_schema_compatible_reject_new_major() -> None:
         assert_schema_compatible("2.0")
 
 
-def test_validate_backtest_json_artifact_v1_ok() -> None:
-    payload = {
+def _v1_payload() -> dict[str, object]:
+    return {
         "schema_version": "1.0",
         "generated_at": "2026-02-20T00:00:00+00:00",
         "from_ts": "2026-02-20T00:00:00+00:00",
@@ -64,7 +65,10 @@ def test_validate_backtest_json_artifact_v1_ok() -> None:
         "event_results": [],
         "replay": [],
     }
-    major, minor = validate_backtest_json_artifact(payload)
+
+
+def test_validate_backtest_json_artifact_v1_ok() -> None:
+    major, minor = validate_backtest_json_artifact(_v1_payload())
     assert (major, minor) == (1, 0)
 
 
@@ -113,32 +117,22 @@ def test_validate_backtest_json_artifact_unknown_major_without_validator() -> No
         validate_backtest_json_artifact(
             {"schema_version": "3.0"},
             supported_major=None,
+            validators={1: validate_backtest_json_artifact_v1},
         )
 
 
 def test_validate_backtest_json_artifact_v1_helper_reuse() -> None:
-    payload = {
-        "schema_version": "1.0",
-        "generated_at": "2026-02-20T00:00:00+00:00",
-        "from_ts": "2026-02-20T00:00:00+00:00",
-        "to_ts": "2026-02-20T01:00:00+00:00",
-        "total_signals": 1,
-        "executed_signals": 1,
-        "rejected_signals": 0,
-        "execution_config": {},
-        "risk_config": {},
-        "results": [],
-        "event_results": [],
-        "replay": [],
-    }
-    validate_backtest_json_artifact_v1(payload)
+    validate_backtest_json_artifact_v1(_v1_payload())
 
 
 def test_validate_backtest_json_artifact_v2_helper_reuse() -> None:
     payload = {
         "schema_version": "2.0",
         "meta": {},
-        "results": [],
+        "summary": {},
+        "configs": {},
+        "attribution": {},
+        "replay": [],
     }
     validate_backtest_json_artifact_v2(payload)
 
@@ -146,11 +140,23 @@ def test_validate_backtest_json_artifact_v2_helper_reuse() -> None:
 def test_validate_backtest_json_artifact_v2_missing_required() -> None:
     payload = {k: {} for k in REQUIRED_BACKTEST_JSON_FIELDS_V2}
     payload["schema_version"] = "2.0"
-    payload["results"] = []
+    payload["replay"] = []
     payload.pop("meta")
 
     with pytest.raises(ValueError):
         validate_backtest_json_artifact_v2(payload)
+
+
+def test_migrate_backtest_artifact_v1_to_v2() -> None:
+    migrated = migrate_backtest_artifact_v1_to_v2(_v1_payload())
+
+    assert migrated["schema_version"] == "2.0"
+    assert migrated["meta"]["migration"] == "v1_to_v2"
+    assert migrated["summary"]["total_signals"] == 1
+    assert migrated["configs"]["execution"] == {}
+    assert migrated["attribution"]["strategy"] == []
+
+    assert validate_backtest_json_artifact(migrated, supported_major=None) == (2, 0)
 
 
 def test_validate_backtest_json_artifact_fixture_samples() -> None:

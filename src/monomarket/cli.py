@@ -14,6 +14,8 @@ from monomarket.backtest import (
     BacktestExecutionConfig,
     BacktestReport,
     BacktestRiskConfig,
+    migrate_backtest_artifact_v1_to_v2,
+    validate_backtest_json_artifact,
 )
 from monomarket.config import Settings, load_settings
 from monomarket.data import IngestionService, MarketDataClients
@@ -562,6 +564,27 @@ def backtest(
     if out_event_csv:
         _write_backtest_event_csv(report, out_event_csv)
         console.print(f"[green]event csv exported[/green] {out_event_csv}")
+
+
+@app.command("backtest-migrate-v1-to-v2")
+def backtest_migrate_v1_to_v2(
+    in_json: str = typer.Option(..., "--in", help="Input v1 backtest JSON artifact"),
+    out_json: str = typer.Option(..., "--out", help="Output v2 backtest JSON artifact"),
+) -> None:
+    in_path = Path(in_json)
+    payload = json.loads(in_path.read_text())
+    migrated = migrate_backtest_artifact_v1_to_v2(payload)
+
+    # sanity check using dual-stack validator path
+    validate_backtest_json_artifact(migrated, supported_major=None)
+
+    out_path = Path(out_json)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(migrated, ensure_ascii=False, indent=2) + "\n")
+
+    console.print(
+        "[green]migrated[/green] " f"{in_path} -> {out_path} schema={migrated['schema_version']}"
+    )
 
 
 @app.command("execute-signal")

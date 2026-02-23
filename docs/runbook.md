@@ -121,6 +121,14 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   - 双栈校验可传 `supported_major=None` 并注入 `validators={2: ...}`
   - 内置占位校验器：`monomarket.backtest.validate_backtest_json_artifact_v2`
 
+v1 -> v2 迁移命令：
+
+```bash
+monomarket backtest-migrate-v1-to-v2 \
+  --in artifacts/backtest/latest.json \
+  --out artifacts/backtest/latest.v2.json
+```
+
 ## 8) 停机保护
 
 ```bash

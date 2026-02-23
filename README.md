@@ -64,6 +64,14 @@ monomarket backtest --strategies s1,s2,s4,s8 \
 JSON 额外包含 `execution_config` / `risk_config` 快照，用于可重复回放与参数审计。
 归因结果可分别导出 strategy/event CSV，便于接审计流水线与 BI。
 
+v1->v2 迁移（校验 + 转换）：
+
+```bash
+monomarket backtest-migrate-v1-to-v2 \
+  --in artifacts/backtest/latest.json \
+  --out artifacts/backtest/latest.v2.json
+```
+
 ## 交易控制开关（Rocky 可独立控制）
 
 支持 3 个统一开关：

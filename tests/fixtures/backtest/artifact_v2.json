@@ -1,7 +1,24 @@
 {
   "schema_version": "2.0",
   "meta": {
-    "note": "v2 placeholder fixture"
+    "migration": "v1_to_v2",
+    "source_schema_version": "1.0"
   },
-  "results": []
+  "summary": {
+    "generated_at": "2026-02-20T00:00:00+00:00",
+    "from_ts": "2026-02-20T00:00:00+00:00",
+    "to_ts": "2026-02-20T01:00:00+00:00",
+    "total_signals": 1,
+    "executed_signals": 1,
+    "rejected_signals": 0
+  },
+  "configs": {
+    "execution": {},
+    "risk": {}
+  },
+  "attribution": {
+    "strategy": [],
+    "event": []
+  },
+  "replay": []
 }

@@ -21,6 +21,7 @@
 - 如需双栈校验，可用 `validate_backtest_json_artifact(payload, supported_major=None, validators={2: ...})` 按 major 分派
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`
+- 迁移助手：`migrate_backtest_artifact_v1_to_v2(payload)`（CLI: `backtest-migrate-v1-to-v2`）
 
 ## v2 Breaking Changes Checklist（草案）
 

@@ -432,3 +432,43 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert len(event_rows) == 2
     assert all(x["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION for x in event_rows)
     assert {x["event_id"] for x in event_rows} == {"e1", "e2"}
+
+
+def test_cli_backtest_migrate_v1_to_v2(tmp_path: Path) -> None:
+    v1 = {
+        "schema_version": "1.0",
+        "generated_at": "2026-02-20T00:00:00+00:00",
+        "from_ts": "2026-02-20T00:00:00+00:00",
+        "to_ts": "2026-02-20T01:00:00+00:00",
+        "total_signals": 1,
+        "executed_signals": 1,
+        "rejected_signals": 0,
+        "execution_config": {},
+        "risk_config": {},
+        "results": [],
+        "event_results": [],
+        "replay": [],
+    }
+    in_path = tmp_path / "v1.json"
+    out_path = tmp_path / "v2.json"
+    in_path.write_text(json.dumps(v1))
+
+    runner = CliRunner()
+    res = runner.invoke(
+        app,
+        [
+            "backtest-migrate-v1-to-v2",
+            "--in",
+            str(in_path),
+            "--out",
+            str(out_path),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert "migrated" in res.output
+
+    payload_v2 = json.loads(out_path.read_text())
+    assert payload_v2["schema_version"] == "2.0"
+    assert payload_v2["meta"]["migration"] == "v1_to_v2"
+    assert validate_backtest_json_artifact(payload_v2, supported_major=None) == (2, 0)
