@@ -153,10 +153,13 @@ CREATE TABLE IF NOT EXISTS fills (
     price REAL NOT NULL,
     qty REAL NOT NULL,
     fee REAL NOT NULL DEFAULT 0,
+    external_fill_id TEXT,
+    raw_report_json TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     FOREIGN KEY(order_id) REFERENCES orders(id)
 );
 CREATE INDEX IF NOT EXISTS idx_fills_strategy ON fills(strategy);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fills_external_fill_id ON fills(external_fill_id);
 
 CREATE TABLE IF NOT EXISTS positions (
     strategy TEXT NOT NULL,
@@ -191,6 +194,7 @@ class Storage:
         with self.conn() as conn:
             conn.executescript(SCHEMA_SQL)
             self._ensure_ingestion_runs_columns(conn)
+            self._ensure_fills_columns(conn)
 
     @staticmethod
     def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -212,6 +216,18 @@ class Storage:
             conn.execute(
                 "ALTER TABLE ingestion_runs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0"
             )
+
+    def _ensure_fills_columns(self, conn: sqlite3.Connection) -> None:
+        cols = self._table_columns(conn, "fills")
+
+        if "external_fill_id" not in cols:
+            conn.execute("ALTER TABLE fills ADD COLUMN external_fill_id TEXT")
+        if "raw_report_json" not in cols:
+            conn.execute("ALTER TABLE fills ADD COLUMN raw_report_json TEXT NOT NULL DEFAULT ''")
+
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fills_external_fill_id ON fills(external_fill_id)"
+        )
 
     @staticmethod
     def _now() -> str:
@@ -951,6 +967,57 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_order(self, order_id: int) -> dict[str, Any] | None:
+        with self.conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, strategy, market_id, event_id, token_id, side, action, mode,
+                       price, qty, status, external_id, message, created_at
+                FROM orders
+                WHERE id = ?
+                """,
+                (order_id,),
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def list_orders(
+        self,
+        mode: str | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        with self.conn() as conn:
+            if mode:
+                rows = conn.execute(
+                    """
+                    SELECT id, strategy, market_id, event_id, token_id, side, action, mode,
+                           price, qty, status, external_id, message, created_at
+                    FROM orders
+                    WHERE mode = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (mode, max(1, limit * 5)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, strategy, market_id, event_id, token_id, side, action, mode,
+                           price, qty, status, external_id, message, created_at
+                    FROM orders
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (max(1, limit * 5),),
+                ).fetchall()
+
+        out = [dict(row) for row in rows]
+        if statuses:
+            allowed = {x.lower() for x in statuses}
+            out = [row for row in out if str(row["status"]).lower() in allowed]
+
+        return out[: max(1, limit)]
+
     def insert_order(
         self,
         req: OrderRequest,
@@ -1016,26 +1083,39 @@ class Storage:
         price: float,
         qty: float,
         fee: float = 0.0,
+        external_fill_id: str | None = None,
+        raw_report_json: str = "",
     ) -> None:
         with self.conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO fills(order_id, strategy, market_id, event_id, token_id, side, price, qty, fee, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    order_id,
-                    strategy,
-                    market_id,
-                    event_id,
-                    token_id,
-                    side,
-                    price,
-                    qty,
-                    fee,
-                    self._now(),
-                ),
-            )
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO fills(
+                        order_id, strategy, market_id, event_id, token_id, side,
+                        price, qty, fee, external_fill_id, raw_report_json, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        order_id,
+                        strategy,
+                        market_id,
+                        event_id,
+                        token_id,
+                        side,
+                        price,
+                        qty,
+                        fee,
+                        external_fill_id,
+                        raw_report_json,
+                        self._now(),
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                if external_fill_id:
+                    return
+                raise
+
             self._apply_fill_to_position(
                 conn,
                 strategy=strategy,
@@ -1124,12 +1204,22 @@ class Storage:
 
     def get_positions(self) -> list[dict[str, Any]]:
         with self.conn() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT strategy, market_id, event_id, token_id, net_qty, avg_price, realized_pnl, updated_at
                 FROM positions
                 ORDER BY strategy, market_id, token_id
-                """).fetchall()
+                """
+            ).fetchall()
         return [dict(row) for row in rows]
+
+    def order_filled_qty(self, order_id: int) -> float:
+        with self.conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(qty), 0) AS v FROM fills WHERE order_id = ?",
+                (order_id,),
+            ).fetchone()
+        return float(row["v"] if row else 0.0)
 
     def total_realized_pnl(self) -> float:
         with self.conn() as conn:
@@ -1171,13 +1261,15 @@ class Storage:
 
     def order_stats(self) -> dict[str, float]:
         with self.conn() as conn:
-            row = conn.execute("""
+            row = conn.execute(
+                """
                 SELECT
                     COUNT(1) AS total,
                     SUM(CASE WHEN status IN ('filled', 'accepted') THEN 1 ELSE 0 END) AS filled,
                     SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected
                 FROM orders
-                """).fetchone()
+                """
+            ).fetchone()
         total = int(row["total"] or 0)
         filled = int(row["filled"] or 0)
         rejected = int(row["rejected"] or 0)

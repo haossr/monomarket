@@ -35,7 +35,11 @@ class ExecutionRouter:
         self.settings = settings
         self.risk = UnifiedRiskGuard(storage, settings)
         self.paper = PaperExecutor(storage)
-        self.live = LiveExecutor(storage)
+        self.live = LiveExecutor(
+            storage,
+            base_url=settings.data.clob_base_url,
+            timeout_sec=settings.data.timeout_sec,
+        )
 
     def resolve_switches(self) -> Switches:
         # config defaults
@@ -110,3 +114,9 @@ class ExecutionRouter:
         if mode == "live":
             return self.live.execute(req)
         return self.paper.execute(req)
+
+    def cancel_live_order(self, order_id: int) -> OrderResult:
+        return self.live.cancel(order_id)
+
+    def sync_live_orders(self, limit: int = 100) -> dict[str, int | float]:
+        return self.live.sync_open_orders(limit=limit)

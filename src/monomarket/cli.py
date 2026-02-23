@@ -753,6 +753,36 @@ def place_order(
     )
 
 
+@app.command("live-cancel")
+def live_cancel(
+    order_id: int = typer.Argument(..., help="Local order id"),
+    config: str | None = typer.Option(None),
+) -> None:
+    settings, storage = _ctx(config)
+    storage.init_db()
+    res = ExecutionRouter(storage, settings).cancel_live_order(order_id)
+    console.print(
+        f"status={res.status} accepted={res.accepted} order_id={res.order_id} message={res.message}"
+    )
+
+
+@app.command("live-sync")
+def live_sync(
+    limit: int = typer.Option(100, min=1, max=1000),
+    config: str | None = typer.Option(None),
+) -> None:
+    settings, storage = _ctx(config)
+    storage.init_db()
+    summary = ExecutionRouter(storage, settings).sync_live_orders(limit=limit)
+    console.print(
+        "live-sync "
+        f"scanned={summary['orders_scanned']} "
+        f"updated={summary['orders_updated']} "
+        f"errors={summary['errors']} "
+        f"filled_delta_qty={summary['filled_delta_qty']}"
+    )
+
+
 @app.command("switches")
 def switches(config: str | None = typer.Option(None)) -> None:
     settings, storage = _ctx(config)
