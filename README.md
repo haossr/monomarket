@@ -116,4 +116,5 @@ bash scripts/ci_local.sh
 
 - `docs/architecture.md`：架构图与模块说明
 - `docs/runbook.md`：运行手册
+- `docs/backtest-schema.md`：回测导出 schema 与迁移约定
 - `docs/strategies.md`：S1/S2/S4/S8 策略细节

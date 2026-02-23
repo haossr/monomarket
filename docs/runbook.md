@@ -99,6 +99,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   - `--out-strategy-csv`：策略维度归因 CSV
   - `--out-event-csv`：事件维度归因 CSV
   - 导出工件统一带 `schema_version` 字段（兼容解析）
+  - 解析端可使用 `monomarket.backtest.parse_schema_version` / `assert_schema_compatible`
 
 ## 8) 停机保护
 

@@ -379,6 +379,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     )
 
     assert res.exit_code == 0, res.output
+    assert f"schema={BACKTEST_ARTIFACT_SCHEMA_VERSION}" in res.output
     assert "Backtest attribution" in res.output
     assert "Backtest event attribution" in res.output
     assert "Backtest replay ledger" in res.output
