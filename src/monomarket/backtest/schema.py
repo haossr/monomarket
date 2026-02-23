@@ -5,6 +5,7 @@ from copy import deepcopy
 from typing import Any, TypedDict
 
 SUPPORTED_BACKTEST_SCHEMA_MAJOR = 1
+BACKTEST_MIGRATION_MAP_SCHEMA_VERSION = "1.0"
 
 REQUIRED_BACKTEST_JSON_FIELDS_V1 = {
     "schema_version",
@@ -225,6 +226,24 @@ def backtest_migration_v1_to_v2_field_map() -> list[BacktestMigrationFieldMappin
             "note": "回放明细",
         },
     ]
+
+
+def build_backtest_migration_map_artifact() -> dict[str, Any]:
+    mappings = backtest_migration_v1_to_v2_field_map()
+    reversible_count = sum(1 for x in mappings if x["reversible"])
+
+    return {
+        "schema_version": BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
+        "kind": "backtest_migration_map",
+        "from_schema_major": 1,
+        "to_schema_major": 2,
+        "mappings": mappings,
+        "summary": {
+            "total_fields": len(mappings),
+            "reversible_fields": reversible_count,
+            "non_reversible_fields": len(mappings) - reversible_count,
+        },
+    }
 
 
 DEFAULT_BACKTEST_JSON_VALIDATORS: dict[int, BacktestJsonArtifactValidator] = {

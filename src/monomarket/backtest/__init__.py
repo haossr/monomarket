@@ -9,6 +9,7 @@ from monomarket.backtest.engine import (
     BacktestStrategyResult,
 )
 from monomarket.backtest.schema import (
+    BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
     DEFAULT_BACKTEST_JSON_VALIDATORS,
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
     REQUIRED_BACKTEST_JSON_FIELDS_V2,
@@ -17,6 +18,7 @@ from monomarket.backtest.schema import (
     BacktestMigrationFieldMapping,
     assert_schema_compatible,
     backtest_migration_v1_to_v2_field_map,
+    build_backtest_migration_map_artifact,
     is_schema_compatible,
     migrate_backtest_artifact_v1_to_v2,
     parse_schema_version,
@@ -30,6 +32,7 @@ __all__ = [
     "SUPPORTED_BACKTEST_SCHEMA_MAJOR",
     "REQUIRED_BACKTEST_JSON_FIELDS_V1",
     "REQUIRED_BACKTEST_JSON_FIELDS_V2",
+    "BACKTEST_MIGRATION_MAP_SCHEMA_VERSION",
     "BacktestJsonArtifactValidator",
     "BacktestMigrationFieldMapping",
     "DEFAULT_BACKTEST_JSON_VALIDATORS",
@@ -41,6 +44,7 @@ __all__ = [
     "validate_backtest_json_artifact",
     "migrate_backtest_artifact_v1_to_v2",
     "backtest_migration_v1_to_v2_field_map",
+    "build_backtest_migration_map_artifact",
     "BacktestEngine",
     "BacktestExecutionConfig",
     "BacktestRiskConfig",

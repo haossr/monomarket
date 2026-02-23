@@ -15,6 +15,7 @@ from monomarket.backtest import (
     BacktestReport,
     BacktestRiskConfig,
     backtest_migration_v1_to_v2_field_map,
+    build_backtest_migration_map_artifact,
     migrate_backtest_artifact_v1_to_v2,
     validate_backtest_json_artifact,
 )
@@ -589,9 +590,19 @@ def backtest_migrate_v1_to_v2(
 
 
 @app.command("backtest-migration-map")
-def backtest_migration_map(format: str = typer.Option("table", help="table|json")) -> None:
+def backtest_migration_map(
+    format: str = typer.Option("table", help="table|json"),
+    out_json: str | None = typer.Option(None, help="Optional path to write mapping artifact JSON"),
+) -> None:
     rows = backtest_migration_v1_to_v2_field_map()
+    artifact = build_backtest_migration_map_artifact()
     fmt = format.strip().lower()
+
+    if out_json:
+        out_path = Path(out_json)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n")
+        console.print(f"[green]migration map exported[/green] {out_path}")
 
     if fmt == "json":
         console.print_json(json.dumps(rows, ensure_ascii=False, indent=2))

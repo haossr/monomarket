@@ -34,7 +34,10 @@
 ```bash
 monomarket backtest-migration-map
 monomarket backtest-migration-map --format json
+monomarket backtest-migration-map --format json --out-json artifacts/backtest/migration-map.json
 ```
+
+mapping artifact 含：`schema_version/kind/from_schema_major/to_schema_major/mappings/summary`。
 
 ## v2 Breaking Changes Checklist（草案）
 

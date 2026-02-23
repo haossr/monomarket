@@ -7,11 +7,13 @@ from pathlib import Path
 import pytest
 
 from monomarket.backtest import (
+    BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
     REQUIRED_BACKTEST_JSON_FIELDS_V2,
     SUPPORTED_BACKTEST_SCHEMA_MAJOR,
     assert_schema_compatible,
     backtest_migration_v1_to_v2_field_map,
+    build_backtest_migration_map_artifact,
     is_schema_compatible,
     migrate_backtest_artifact_v1_to_v2,
     parse_schema_version,
@@ -170,6 +172,17 @@ def test_backtest_migration_v1_to_v2_field_map_contract() -> None:
 
     assert any(row["v1_path"] == "schema_version" for row in rows)
     assert any(row["reversible"] is False for row in rows)
+
+
+def test_build_backtest_migration_map_artifact() -> None:
+    artifact = build_backtest_migration_map_artifact()
+
+    assert artifact["schema_version"] == BACKTEST_MIGRATION_MAP_SCHEMA_VERSION
+    assert artifact["kind"] == "backtest_migration_map"
+    assert artifact["from_schema_major"] == 1
+    assert artifact["to_schema_major"] == 2
+    assert isinstance(artifact["mappings"], list)
+    assert artifact["summary"]["total_fields"] == len(artifact["mappings"])
 
 
 def test_validate_backtest_json_artifact_fixture_samples() -> None:
