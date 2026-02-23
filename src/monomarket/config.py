@@ -42,6 +42,8 @@ class DataSettings:
     max_retries: int = 2
     backoff_base_sec: float = 0.5
     rate_limit_per_sec: float = 4.0
+    breaker_failure_threshold: int = 3
+    breaker_cooldown_sec: int = 90
 
 
 @dataclass(slots=True)
@@ -153,6 +155,11 @@ def load_settings(config_path: str | None = None) -> Settings:
             max_retries=max(0, _as_int(data_raw.get("max_retries"), 2)),
             backoff_base_sec=max(0.0, _as_float(data_raw.get("backoff_base_sec"), 0.5)),
             rate_limit_per_sec=max(0.1, _as_float(data_raw.get("rate_limit_per_sec"), 4.0)),
+            breaker_failure_threshold=max(
+                1,
+                _as_int(data_raw.get("breaker_failure_threshold"), 3),
+            ),
+            breaker_cooldown_sec=max(1, _as_int(data_raw.get("breaker_cooldown_sec"), 90)),
         ),
         strategies=raw.get("strategies", {}),
     )

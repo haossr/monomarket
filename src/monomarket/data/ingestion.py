@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from monomarket.data.clients import FetchBatch, MarketDataClients
 from monomarket.db.storage import Storage
@@ -18,6 +18,7 @@ class IngestionResult:
     request_count: int = 0
     failure_count: int = 0
     retry_count: int = 0
+    error_buckets: dict[str, int] = field(default_factory=dict)
 
 
 def _parse_iso_ts(value: str | None) -> datetime | None:
@@ -36,9 +37,17 @@ def _parse_iso_ts(value: str | None) -> datetime | None:
 
 
 class IngestionService:
-    def __init__(self, clients: MarketDataClients, storage: Storage):
+    def __init__(
+        self,
+        clients: MarketDataClients,
+        storage: Storage,
+        breaker_failure_threshold: int = 3,
+        breaker_cooldown_sec: int = 90,
+    ):
         self.clients = clients
         self.storage = storage
+        self.breaker_failure_threshold = max(1, breaker_failure_threshold)
+        self.breaker_cooldown_sec = max(1, breaker_cooldown_sec)
 
     def _fetch_one(self, source: str, limit: int, incremental: bool) -> FetchBatch:
         since = (
@@ -52,6 +61,47 @@ class IngestionService:
         if source == "clob":
             return self.clients.fetch_clob(limit, since=since, incremental=incremental)
         raise ValueError(f"Unsupported source: {source}")
+
+    def _is_breaker_open(self, source: str) -> tuple[bool, str]:
+        row = self.storage.get_ingestion_breaker(source)
+        if row is None:
+            return False, ""
+
+        open_until = _parse_iso_ts(str(row.get("open_until_ts") or ""))
+        if open_until is None:
+            return False, ""
+
+        now = datetime.now(UTC)
+        if now < open_until:
+            return True, f"circuit open until {open_until.isoformat()}"
+
+        return False, ""
+
+    def _note_failure(self, source: str, error_bucket: str) -> None:
+        row = self.storage.get_ingestion_breaker(source)
+        consecutive = int(row["consecutive_failures"]) if row is not None else 0
+        consecutive += 1
+
+        open_until: str | None = None
+        if consecutive >= self.breaker_failure_threshold:
+            open_until = (
+                datetime.now(UTC) + timedelta(seconds=self.breaker_cooldown_sec)
+            ).isoformat()
+
+        self.storage.set_ingestion_breaker(
+            source=source,
+            consecutive_failures=consecutive,
+            open_until_ts=open_until,
+            last_error_bucket=error_bucket,
+        )
+
+    def _note_success(self, source: str) -> None:
+        self.storage.set_ingestion_breaker(
+            source=source,
+            consecutive_failures=0,
+            open_until_ts=None,
+            last_error_bucket="",
+        )
 
     def ingest(self, source: str, limit: int = 200, incremental: bool = True) -> IngestionResult:
         started = datetime.now(UTC).isoformat()
@@ -70,8 +120,21 @@ class IngestionService:
             fail_count = 0
             retry_count = 0
             errors: list[str] = []
+            error_buckets: dict[str, int] = {}
 
             for target in targets:
+                is_open, breaker_msg = self._is_breaker_open(target)
+                if is_open:
+                    errors.append(f"{target}: {breaker_msg}")
+                    error_buckets["circuit_open"] = error_buckets.get("circuit_open", 0) + 1
+                    self.storage.update_ingestion_error_bucket(
+                        source=target,
+                        error_bucket="circuit_open",
+                        count=1,
+                        last_error=breaker_msg,
+                    )
+                    continue
+
                 batch = self._fetch_one(target, limit=limit, incremental=incremental)
                 inserted += self.storage.upsert_markets(batch.rows)
                 req_count += batch.stats.requests
@@ -86,8 +149,21 @@ class IngestionService:
                     failure_count=batch.stats.failures,
                 )
 
+                for bucket, count in batch.stats.error_buckets.items():
+                    error_buckets[bucket] = error_buckets.get(bucket, 0) + count
+                    self.storage.update_ingestion_error_bucket(
+                        source=target,
+                        error_bucket=bucket,
+                        count=count,
+                        last_error=batch.error,
+                    )
+
                 if batch.error:
                     errors.append(f"{target}: {batch.error}")
+                    failure_bucket = batch.stats.last_error_bucket or "unknown"
+                    self._note_failure(target, failure_bucket)
+                else:
+                    self._note_success(target)
 
             finished = datetime.now(UTC).isoformat()
             status = "partial" if errors else "ok"
@@ -109,6 +185,7 @@ class IngestionService:
                 request_count=req_count,
                 failure_count=fail_count,
                 retry_count=retry_count,
+                error_buckets=error_buckets,
             )
         except Exception as exc:  # noqa: BLE001
             finished = datetime.now(UTC).isoformat()

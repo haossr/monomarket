@@ -10,7 +10,7 @@ monomarket init-db
 ## 2) 数据抓取
 
 ```bash
-# 默认增量抓取（带重试退避、基础限流）
+# 默认增量抓取（带重试退避、基础限流、错误分类、source 级熔断）
 monomarket ingest --source gamma --limit 300 --incremental
 monomarket ingest --source data --limit 300 --incremental
 monomarket ingest --source clob --limit 300 --incremental
@@ -20,6 +20,8 @@ monomarket ingest --source all --limit 300 --incremental
 # 强制全量（忽略 checkpoint）
 monomarket ingest --source all --limit 300 --full
 ```
+
+`ingest` 输出会额外包含 `error_buckets`（如 `http_429/http_5xx/circuit_open`），用于观测分级重试与熔断恢复状态。
 
 ## 3) 生成与查看信号
 

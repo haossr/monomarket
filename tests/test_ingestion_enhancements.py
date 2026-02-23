@@ -38,6 +38,17 @@ class _FakeResponse:
         return self._payload
 
 
+class _FakeErrorResponse:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        raise requests.HTTPError(f"status={self.status_code}", response=self)
+
+    def json(self) -> dict[str, object]:
+        return {}
+
+
 def test_source_client_retry_and_backoff(monkeypatch) -> None:
     client = SourceClient(
         base_url="https://example.com",
@@ -69,6 +80,32 @@ def test_source_client_retry_and_backoff(monkeypatch) -> None:
     assert stats.retries == 1
     assert sleeps
     assert abs(sleeps[0] - 0.1) < 1e-6
+
+
+def test_source_client_http_4xx_no_retry(monkeypatch) -> None:
+    client = SourceClient(
+        base_url="https://example.com",
+        timeout_sec=2,
+        max_retries=3,
+        backoff_base_sec=0.1,
+        rate_limit_per_sec=1000,
+    )
+
+    calls = {"n": 0}
+
+    def _fake_get(*_args, **_kwargs):
+        calls["n"] += 1
+        return _FakeErrorResponse(400)
+
+    monkeypatch.setattr(requests, "get", _fake_get)
+    payload, stats, err = client.get_json("/markets", {"limit": 1})
+
+    assert payload == []
+    assert "HTTP 400" in err
+    assert stats.requests == 1
+    assert stats.retries == 0
+    assert stats.failures == 1
+    assert stats.error_buckets.get("http_4xx") == 1
 
 
 def test_source_client_rate_limit_throttle(monkeypatch) -> None:
@@ -113,6 +150,19 @@ class _FakeClients:
         )
 
 
+class _BreakerFakeClients:
+    def __init__(self):
+        self.calls = 0
+
+    def fetch_gamma(self, limit: int, since=None, incremental: bool = False) -> FetchBatch:
+        del limit, since, incremental
+        self.calls += 1
+        stats = RequestStats(requests=1, failures=1, retries=0)
+        stats.error_buckets["http_5xx"] = 1
+        stats.last_error_bucket = "http_5xx"
+        return FetchBatch(rows=[], stats=stats, error="HTTP 503")
+
+
 def test_ingestion_incremental_checkpoint(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
@@ -140,3 +190,39 @@ def test_ingestion_incremental_checkpoint(tmp_path: Path) -> None:
     assert row is not None
     assert int(row["total_requests"]) == 2
     assert int(row["total_failures"]) == 0
+
+
+def test_ingestion_circuit_breaker_and_error_buckets(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    fake_clients = _BreakerFakeClients()
+    svc = IngestionService(
+        fake_clients,
+        storage,
+        breaker_failure_threshold=1,
+        breaker_cooldown_sec=600,
+    )
+
+    r1 = svc.ingest("gamma", limit=1, incremental=True)
+    r2 = svc.ingest("gamma", limit=1, incremental=True)
+
+    assert r1.status == "partial"
+    assert r1.error_buckets.get("http_5xx") == 1
+
+    assert r2.status == "partial"
+    assert r2.error_buckets.get("circuit_open") == 1
+    assert fake_clients.calls == 1
+
+    with storage.conn() as conn:
+        b1 = conn.execute("""
+            SELECT total_count FROM ingestion_error_buckets
+            WHERE source='gamma' AND error_bucket='http_5xx'
+            """).fetchone()
+        b2 = conn.execute("""
+            SELECT total_count FROM ingestion_error_buckets
+            WHERE source='gamma' AND error_bucket='circuit_open'
+            """).fetchone()
+    assert b1 is not None and int(b1["total_count"]) == 1
+    assert b2 is not None and int(b2["total_count"]) == 1

@@ -17,6 +17,8 @@ class RequestStats:
     failures: int = 0
     retries: int = 0
     throttled_sec: float = 0.0
+    error_buckets: dict[str, int] = field(default_factory=dict)
+    last_error_bucket: str = ""
 
 
 @dataclass(slots=True)
@@ -52,6 +54,42 @@ class SourceClient:
             time.sleep(sleep_for)
             stats.throttled_sec += sleep_for
 
+    @staticmethod
+    def _classify_error(exc: Exception) -> str:
+        if isinstance(exc, requests.Timeout):
+            return "timeout"
+
+        if isinstance(exc, requests.HTTPError):
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code == 429:
+                return "http_429"
+            if status_code is not None and 500 <= status_code <= 599:
+                return "http_5xx"
+            if status_code is not None and 400 <= status_code <= 499:
+                return "http_4xx"
+            return "http_other"
+
+        if isinstance(exc, requests.ConnectionError):
+            return "network"
+
+        if isinstance(exc, requests.RequestException):
+            return "request"
+
+        if isinstance(exc, ValueError):
+            return "decode"
+
+        return "unknown"
+
+    @staticmethod
+    def _error_message(exc: Exception) -> str:
+        if isinstance(exc, requests.HTTPError) and exc.response is not None:
+            status_code = exc.response.status_code
+            text = str(exc).strip()
+            if text:
+                return f"HTTP {status_code}: {text}"
+            return f"HTTP {status_code}"
+        return str(exc)
+
     def get_json(
         self, path: str, params: dict[str, Any] | None = None
     ) -> tuple[Any, RequestStats, str]:
@@ -69,10 +107,23 @@ class SourceClient:
             except (requests.RequestException, ValueError) as exc:
                 self._last_request_monotonic = time.monotonic()
                 stats.failures += 1
-                if attempt >= self.max_retries:
-                    return [], stats, str(exc)
 
-                backoff = self.backoff_base_sec * (2**attempt)
+                bucket = self._classify_error(exc)
+                stats.last_error_bucket = bucket
+                stats.error_buckets[bucket] = stats.error_buckets.get(bucket, 0) + 1
+                error_message = self._error_message(exc)
+
+                retryable = bucket not in {"http_4xx"}
+                if attempt >= self.max_retries or not retryable:
+                    return [], stats, error_message
+
+                backoff_multiplier = 1.0
+                if bucket == "http_429":
+                    backoff_multiplier = 4.0
+                elif bucket == "http_5xx":
+                    backoff_multiplier = 2.0
+
+                backoff = self.backoff_base_sec * (2**attempt) * backoff_multiplier
                 if backoff > 0:
                     time.sleep(backoff)
                 stats.retries += 1

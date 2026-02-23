@@ -22,6 +22,8 @@ data:
   max_retries: 2
   backoff_base_sec: 0.5
   rate_limit_per_sec: 4.0
+  breaker_failure_threshold: 3
+  breaker_cooldown_sec: 90
 
 strategies:
   s1:

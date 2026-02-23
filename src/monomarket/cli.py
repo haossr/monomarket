@@ -165,7 +165,12 @@ def ingest(
 ) -> None:
     settings, storage = _ctx(config)
     storage.init_db()
-    svc = IngestionService(MarketDataClients(settings.data), storage)
+    svc = IngestionService(
+        MarketDataClients(settings.data),
+        storage,
+        breaker_failure_threshold=settings.data.breaker_failure_threshold,
+        breaker_cooldown_sec=settings.data.breaker_cooldown_sec,
+    )
     res = svc.ingest(source, limit, incremental=incremental)
 
     if res.status == "ok":
@@ -179,6 +184,9 @@ def ingest(
         f"[{color}]ingest {res.status}[/{color}] source={res.source} rows={res.rows} "
         f"requests={res.request_count} retries={res.retry_count} failures={res.failure_count}"
     )
+    if res.error_buckets:
+        parts = [f"{k}:{v}" for k, v in sorted(res.error_buckets.items())]
+        console.print("error_buckets=" + ", ".join(parts))
     if res.error:
         console.print(f"[red]error[/red] {res.error}")
 

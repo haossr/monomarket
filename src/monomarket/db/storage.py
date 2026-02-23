@@ -31,6 +31,23 @@ CREATE TABLE IF NOT EXISTS ingestion_state (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ingestion_error_buckets (
+    source TEXT NOT NULL,
+    error_bucket TEXT NOT NULL,
+    total_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(source, error_bucket)
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_breakers (
+    source TEXT PRIMARY KEY,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    open_until_ts TEXT,
+    last_error_bucket TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS markets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
@@ -225,6 +242,71 @@ class Storage:
                     updated_at = excluded.updated_at
                 """,
                 (source.lower(), request_count, failure_count, now),
+            )
+
+    def update_ingestion_error_bucket(
+        self,
+        source: str,
+        error_bucket: str,
+        count: int,
+        last_error: str,
+    ) -> None:
+        if count <= 0:
+            return
+        now = self._now()
+        with self.conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO ingestion_error_buckets(source, error_bucket, total_count, last_error, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(source, error_bucket) DO UPDATE SET
+                    total_count = ingestion_error_buckets.total_count + excluded.total_count,
+                    last_error = excluded.last_error,
+                    updated_at = excluded.updated_at
+                """,
+                (source.lower(), error_bucket, count, last_error, now),
+            )
+
+    def get_ingestion_breaker(self, source: str) -> dict[str, Any] | None:
+        with self.conn() as conn:
+            row = conn.execute(
+                """
+                SELECT source, consecutive_failures, open_until_ts, last_error_bucket, updated_at
+                FROM ingestion_breakers
+                WHERE source = ?
+                """,
+                (source.lower(),),
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def set_ingestion_breaker(
+        self,
+        source: str,
+        consecutive_failures: int,
+        open_until_ts: str | None,
+        last_error_bucket: str,
+    ) -> None:
+        now = self._now()
+        with self.conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO ingestion_breakers(
+                    source, consecutive_failures, open_until_ts, last_error_bucket, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                    consecutive_failures = excluded.consecutive_failures,
+                    open_until_ts = excluded.open_until_ts,
+                    last_error_bucket = excluded.last_error_bucket,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    source.lower(),
+                    max(0, consecutive_failures),
+                    open_until_ts,
+                    last_error_bucket,
+                    now,
+                ),
             )
 
     def upsert_markets(self, markets: list[MarketView], snapshot_at: str | None = None) -> int:
