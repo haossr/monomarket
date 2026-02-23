@@ -265,6 +265,39 @@ def test_backtest_fill_probability_model(tmp_path: Path) -> None:
     assert abs(report.results[0].pnl - 1.51525) < 1e-9
 
 
+def test_backtest_dynamic_slippage_model(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+    _seed_signals(storage)
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(
+            slippage_bps=0.0,
+            fee_bps=0.0,
+            enable_dynamic_slippage=True,
+            spread_slippage_weight_bps=50.0,
+            liquidity_slippage_weight_bps=100.0,
+            liquidity_reference=1000.0,
+        ),
+    ).run(["s1"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
+
+    assert report.total_signals == 4
+    assert report.executed_signals == 4
+    assert report.rejected_signals == 0
+
+    # m1 liquidity=1000 => no dynamic addition; m2 liquidity=900 => +10 bps
+    m1_rows = [x for x in report.replay if x.market_id == "m1"]
+    m2_rows = [x for x in report.replay if x.market_id == "m2"]
+    assert all(abs(x.slippage_bps_applied - 0.0) < 1e-9 for x in m1_rows)
+    assert all(abs(x.slippage_bps_applied - 10.0) < 1e-9 for x in m2_rows)
+
+    # deterministic pnl under current toy execution model
+    assert abs(report.results[0].pnl - 1.4975) < 1e-9
+
+
 def test_backtest_risk_replay_rejection(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
@@ -375,6 +408,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert abs(float(rows[0]["executed_qty"]) - float(rows[0]["qty"])) < 1e-9
     assert abs(float(rows[0]["fill_ratio"]) - 1.0) < 1e-9
     assert abs(float(rows[0]["fill_probability"]) - 1.0) < 1e-9
+    assert abs(float(rows[0]["slippage_bps_applied"]) - 0.0) < 1e-9
 
     with strategy_csv_out.open() as f:
         strategy_rows = list(csv.DictReader(f))

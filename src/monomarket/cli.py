@@ -72,6 +72,7 @@ def _write_backtest_replay_csv(report: BacktestReport, output_path: str) -> None
                 "executed_qty",
                 "fill_ratio",
                 "fill_probability",
+                "slippage_bps_applied",
                 "target_price",
                 "fill_price",
                 "realized_change",
@@ -297,6 +298,26 @@ def backtest(
         max=1.0,
         help="Minimum fill probability when probability model is enabled",
     ),
+    dynamic_slippage: bool = typer.Option(
+        False,
+        "--dynamic-slippage/--no-dynamic-slippage",
+        help="Enable spread/liquidity layered slippage",
+    ),
+    spread_slippage_weight_bps: float = typer.Option(
+        50.0,
+        min=0.0,
+        help="Spread proxy weight for dynamic slippage (bps)",
+    ),
+    liquidity_slippage_weight_bps: float = typer.Option(
+        25.0,
+        min=0.0,
+        help="Liquidity penalty weight for dynamic slippage (bps)",
+    ),
+    slippage_liquidity_reference: float = typer.Option(
+        1000.0,
+        min=1.0,
+        help="Liquidity reference used by dynamic slippage",
+    ),
     replay_limit: int = typer.Option(20, min=0, help="Rows to print from replay ledger (0=skip)"),
     out_json: str | None = typer.Option(None, help="Write full backtest report as JSON"),
     out_replay_csv: str | None = typer.Option(None, help="Write replay ledger as CSV"),
@@ -324,6 +345,10 @@ def backtest(
             min_fill_ratio=min_fill_ratio,
             enable_fill_probability=fill_probability,
             min_fill_probability=min_fill_probability,
+            enable_dynamic_slippage=dynamic_slippage,
+            spread_slippage_weight_bps=spread_slippage_weight_bps,
+            liquidity_slippage_weight_bps=liquidity_slippage_weight_bps,
+            liquidity_reference=slippage_liquidity_reference,
         ),
         risk=BacktestRiskConfig(
             max_daily_loss=settings.risk.max_daily_loss,
@@ -389,6 +414,7 @@ def backtest(
         replay_tb.add_column("filled")
         replay_tb.add_column("fill_ratio")
         replay_tb.add_column("fill_prob")
+        replay_tb.add_column("slip_bps")
         replay_tb.add_column("target")
         replay_tb.add_column("fill")
         replay_tb.add_column("realized")
@@ -409,6 +435,7 @@ def backtest(
                 f"{replay_row.executed_qty:.4f}",
                 f"{replay_row.fill_ratio:.2%}",
                 f"{replay_row.fill_probability:.2%}",
+                f"{replay_row.slippage_bps_applied:.2f}",
                 f"{replay_row.target_price:.4f}",
                 f"{replay_row.fill_price:.4f}",
                 f"{replay_row.realized_change:.4f}",

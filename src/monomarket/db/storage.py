@@ -581,6 +581,37 @@ class Storage:
             return None
         return float(row["v"])
 
+    def get_snapshot_yes_no_at(self, market_id: str, ts: str) -> tuple[float | None, float | None]:
+        with self.conn() as conn:
+            row = conn.execute(
+                """
+                SELECT yes_price, no_price
+                FROM market_snapshots
+                WHERE market_id = ? AND captured_at <= ?
+                ORDER BY captured_at DESC
+                LIMIT 1
+                """,
+                (market_id, ts),
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    """
+                    SELECT yes_price, no_price
+                    FROM market_snapshots
+                    WHERE market_id = ?
+                    ORDER BY captured_at ASC
+                    LIMIT 1
+                    """,
+                    (market_id,),
+                ).fetchone()
+
+        if row is None:
+            return None, None
+
+        yes_px = float(row["yes_price"]) if row["yes_price"] is not None else None
+        no_px = float(row["no_price"]) if row["no_price"] is not None else None
+        return yes_px, no_px
+
     def update_signal_status(self, signal_id: int, status: str) -> None:
         with self.conn() as conn:
             conn.execute(

@@ -20,6 +20,10 @@ class BacktestExecutionConfig:
     min_fill_ratio: float = 0.1
     enable_fill_probability: bool = False
     min_fill_probability: float = 0.05
+    enable_dynamic_slippage: bool = False
+    spread_slippage_weight_bps: float = 50.0
+    liquidity_slippage_weight_bps: float = 25.0
+    liquidity_reference: float = 1000.0
 
 
 @dataclass(slots=True)
@@ -65,6 +69,7 @@ class BacktestReplayRow:
     executed_qty: float
     fill_ratio: float
     fill_probability: float
+    slippage_bps_applied: float
     target_price: float
     fill_price: float
     realized_change: float
@@ -180,7 +185,12 @@ class BacktestEngine:
             event_key = (strategy, event_id)
 
             token_id, target_price, requested_qty = self._signal_execution_fields(row)
-            fill_price = self._fill_price(target_price, side)
+            fill_price, applied_slippage_bps = self._fill_price(
+                market_id=market_id,
+                ts=created_at,
+                target_price=target_price,
+                side=side,
+            )
             executed_qty, fill_ratio, fill_probability = self._effective_fill_qty(
                 market_id=market_id,
                 ts=created_at,
@@ -229,6 +239,7 @@ class BacktestEngine:
                         executed_qty=0.0,
                         fill_ratio=0.0,
                         fill_probability=0.0,
+                        slippage_bps_applied=applied_slippage_bps,
                         target_price=target_price,
                         fill_price=fill_price,
                         realized_change=0.0,
@@ -279,6 +290,7 @@ class BacktestEngine:
                         executed_qty=0.0,
                         fill_ratio=0.0,
                         fill_probability=0.0,
+                        slippage_bps_applied=applied_slippage_bps,
                         target_price=target_price,
                         fill_price=fill_price,
                         realized_change=0.0,
@@ -353,6 +365,7 @@ class BacktestEngine:
                     executed_qty=executed_qty,
                     fill_ratio=fill_ratio,
                     fill_probability=fill_probability,
+                    slippage_bps_applied=applied_slippage_bps,
                     target_price=target_price,
                     fill_price=fill_price,
                     realized_change=realized_change,
@@ -465,12 +478,45 @@ class BacktestEngine:
 
         return token, target_price, qty
 
-    def _fill_price(self, target_price: float, side: str) -> float:
+    def _fill_price(
+        self,
+        *,
+        market_id: str,
+        ts: str,
+        target_price: float,
+        side: str,
+    ) -> tuple[float, float]:
         px = max(0.01, min(0.99, target_price))
-        slippage = px * max(0.0, self.execution.slippage_bps) / 10000.0
+        total_bps = max(0.0, self.execution.slippage_bps)
+
+        if self.execution.enable_dynamic_slippage:
+            total_bps += self._dynamic_slippage_bps(market_id=market_id, ts=ts)
+
+        slippage = px * total_bps / 10000.0
         if side == "buy":
-            return min(0.99, px + slippage)
-        return max(0.01, px - slippage)
+            return min(0.99, px + slippage), total_bps
+        return max(0.01, px - slippage), total_bps
+
+    def _dynamic_slippage_bps(self, *, market_id: str, ts: str) -> float:
+        yes_px, no_px = self.storage.get_snapshot_yes_no_at(market_id, ts)
+        liquidity = self.storage.get_snapshot_liquidity_at(market_id, ts)
+
+        spread_proxy = 0.0
+        if yes_px is not None and no_px is not None:
+            spread_proxy = abs(1.0 - (yes_px + no_px))
+
+        spread_component = spread_proxy * max(0.0, self.execution.spread_slippage_weight_bps)
+
+        if liquidity is None:
+            liquidity_component = 0.0
+        else:
+            liq_ref = max(1e-9, self.execution.liquidity_reference)
+            illiquid_ratio = max(0.0, min(1.0, 1.0 - (float(liquidity) / liq_ref)))
+            liquidity_component = illiquid_ratio * max(
+                0.0, self.execution.liquidity_slippage_weight_bps
+            )
+
+        return spread_component + liquidity_component
 
     def _effective_fill_qty(
         self,
