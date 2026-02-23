@@ -81,7 +81,9 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z \
   --replay-limit 30 \
   --out-json artifacts/backtest/latest.json \
-  --out-replay-csv artifacts/backtest/replay.csv
+  --out-replay-csv artifacts/backtest/replay.csv \
+  --out-strategy-csv artifacts/backtest/strategy.csv \
+  --out-event-csv artifacts/backtest/event.csv
 ```
 
 输出包含：
@@ -91,6 +93,8 @@ monomarket backtest --strategies s1,s2,s4,s8 \
 - 机器可读导出：
   - `--out-json`：完整报告（summary + strategy/event attribution + replay rows）
   - `--out-replay-csv`：replay ledger CSV（便于审计/外部分析）
+  - `--out-strategy-csv`：策略维度归因 CSV
+  - `--out-event-csv`：事件维度归因 CSV
 
 ## 8) 停机保护
 

@@ -240,6 +240,8 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
 
     json_out = tmp_path / "artifacts" / "backtest.json"
     csv_out = tmp_path / "artifacts" / "replay.csv"
+    strategy_csv_out = tmp_path / "artifacts" / "strategy.csv"
+    event_csv_out = tmp_path / "artifacts" / "event.csv"
 
     runner = CliRunner()
     res = runner.invoke(
@@ -258,6 +260,10 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
             str(json_out),
             "--out-replay-csv",
             str(csv_out),
+            "--out-strategy-csv",
+            str(strategy_csv_out),
+            "--out-event-csv",
+            str(event_csv_out),
             "--config",
             str(config_path),
         ],
@@ -269,6 +275,8 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert "Backtest replay ledger" in res.output
     assert "json exported" in res.output
     assert "replay csv exported" in res.output
+    assert "strategy csv exported" in res.output
+    assert "event csv exported" in res.output
     assert "s1" in res.output
 
     payload = json.loads(json_out.read_text())
@@ -286,3 +294,14 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert rows[0]["event_id"] == "e1"
     assert rows[0]["risk_allowed"] == "True"
     assert rows[0]["risk_reason"] == "ok"
+
+    with strategy_csv_out.open() as f:
+        strategy_rows = list(csv.DictReader(f))
+    assert len(strategy_rows) == 1
+    assert strategy_rows[0]["strategy"] == "s1"
+    assert abs(float(strategy_rows[0]["pnl"]) - 1.5) < 1e-9
+
+    with event_csv_out.open() as f:
+        event_rows = list(csv.DictReader(f))
+    assert len(event_rows) == 2
+    assert {x["event_id"] for x in event_rows} == {"e1", "e2"}

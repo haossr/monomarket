@@ -48,10 +48,13 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z \
   --replay-limit 30 \
   --out-json artifacts/backtest/latest.json \
-  --out-replay-csv artifacts/backtest/replay.csv
+  --out-replay-csv artifacts/backtest/replay.csv \
+  --out-strategy-csv artifacts/backtest/strategy.csv \
+  --out-event-csv artifacts/backtest/event.csv
 ```
 
 回放账本（终端 + CSV）包含风控决策字段：`risk_allowed` / `risk_reason` 及阈值快照，便于离线审计。
+归因结果可分别导出 strategy/event CSV，便于接审计流水线与 BI。
 
 ## 交易控制开关（Rocky 可独立控制）
 

@@ -90,6 +90,49 @@ def _write_backtest_replay_csv(report: BacktestReport, output_path: str) -> None
             writer.writerow(asdict(replay_row))
 
 
+def _write_backtest_strategy_csv(report: BacktestReport, output_path: str) -> None:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "strategy",
+                "pnl",
+                "winrate",
+                "max_drawdown",
+                "trade_count",
+                "wins",
+                "losses",
+            ],
+        )
+        writer.writeheader()
+        for row in report.results:
+            writer.writerow(asdict(row))
+
+
+def _write_backtest_event_csv(report: BacktestReport, output_path: str) -> None:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "strategy",
+                "event_id",
+                "pnl",
+                "winrate",
+                "max_drawdown",
+                "trade_count",
+                "wins",
+                "losses",
+            ],
+        )
+        writer.writeheader()
+        for row in report.event_results:
+            writer.writerow(asdict(row))
+
+
 @app.command("init-db")
 def init_db(config: str | None = typer.Option(None, help="Config yaml path")) -> None:
     _, storage = _ctx(config)
@@ -217,6 +260,14 @@ def backtest(
     replay_limit: int = typer.Option(20, min=0, help="Rows to print from replay ledger (0=skip)"),
     out_json: str | None = typer.Option(None, help="Write full backtest report as JSON"),
     out_replay_csv: str | None = typer.Option(None, help="Write replay ledger as CSV"),
+    out_strategy_csv: str | None = typer.Option(
+        None,
+        help="Write strategy attribution as CSV",
+    ),
+    out_event_csv: str | None = typer.Option(
+        None,
+        help="Write event attribution as CSV",
+    ),
     config: str | None = typer.Option(None),
 ) -> None:
     settings, storage = _ctx(config)
@@ -321,6 +372,14 @@ def backtest(
     if out_replay_csv:
         _write_backtest_replay_csv(report, out_replay_csv)
         console.print(f"[green]replay csv exported[/green] {out_replay_csv}")
+
+    if out_strategy_csv:
+        _write_backtest_strategy_csv(report, out_strategy_csv)
+        console.print(f"[green]strategy csv exported[/green] {out_strategy_csv}")
+
+    if out_event_csv:
+        _write_backtest_event_csv(report, out_event_csv)
+        console.print(f"[green]event csv exported[/green] {out_event_csv}")
 
 
 @app.command("execute-signal")
