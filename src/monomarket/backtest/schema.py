@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any, TypedDict
 
 SUPPORTED_BACKTEST_SCHEMA_MAJOR = 1
 BACKTEST_MIGRATION_MAP_SCHEMA_VERSION = "1.0"
+BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO = "sha256"
 
 REQUIRED_BACKTEST_JSON_FIELDS_V1 = {
     "schema_version",
@@ -228,13 +231,28 @@ def backtest_migration_v1_to_v2_field_map() -> list[BacktestMigrationFieldMappin
     ]
 
 
-def build_backtest_migration_map_artifact() -> dict[str, Any]:
+def _canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+
+
+def compute_backtest_migration_map_checksum(payload: Mapping[str, Any]) -> str:
+    # checksum field itself is excluded from digest material
+    normalized = dict(payload)
+    normalized.pop("checksum_sha256", None)
+    digest = hashlib.sha256(_canonical_json_bytes(normalized)).hexdigest()
+    return digest
+
+
+def build_backtest_migration_map_artifact(*, with_checksum: bool = False) -> dict[str, Any]:
     mappings = backtest_migration_v1_to_v2_field_map()
     reversible_count = sum(1 for x in mappings if x["reversible"])
 
-    return {
+    artifact = {
         "schema_version": BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
         "kind": "backtest_migration_map",
+        "checksum_algo": BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO,
         "from_schema_major": 1,
         "to_schema_major": 2,
         "mappings": mappings,
@@ -244,6 +262,18 @@ def build_backtest_migration_map_artifact() -> dict[str, Any]:
             "non_reversible_fields": len(mappings) - reversible_count,
         },
     }
+
+    if with_checksum:
+        artifact["checksum_sha256"] = compute_backtest_migration_map_checksum(artifact)
+
+    return artifact
+
+
+def verify_backtest_migration_map_checksum(payload: Mapping[str, Any]) -> bool:
+    checksum = payload.get("checksum_sha256")
+    if not isinstance(checksum, str) or not checksum:
+        return False
+    return checksum == compute_backtest_migration_map_checksum(payload)
 
 
 DEFAULT_BACKTEST_JSON_VALIDATORS: dict[int, BacktestJsonArtifactValidator] = {

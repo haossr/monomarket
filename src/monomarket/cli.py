@@ -617,16 +617,22 @@ def backtest_migrate_v1_to_v2(
 def backtest_migration_map(
     format: str = typer.Option("table", help="table|json"),
     out_json: str | None = typer.Option(None, help="Optional path to write mapping artifact JSON"),
+    with_checksum: bool = typer.Option(
+        False,
+        "--with-checksum/--no-checksum",
+        help="Attach checksum_sha256 into exported mapping artifact",
+    ),
 ) -> None:
     rows = backtest_migration_v1_to_v2_field_map()
-    artifact = build_backtest_migration_map_artifact()
+    artifact = build_backtest_migration_map_artifact(with_checksum=with_checksum)
     fmt = format.strip().lower()
 
     if out_json:
         out_path = Path(out_json)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n")
-        console.print(f"[green]migration map exported[/green] {out_path}")
+        checksum_msg = f" checksum={artifact['checksum_sha256']}" if with_checksum else ""
+        console.print(f"[green]migration map exported[/green] {out_path}{checksum_msg}")
 
     if fmt == "json":
         console.print_json(json.dumps(rows, ensure_ascii=False, indent=2))

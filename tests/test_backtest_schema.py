@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from monomarket.backtest import (
+    BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO,
     BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
     REQUIRED_BACKTEST_JSON_FIELDS_V2,
@@ -14,12 +15,14 @@ from monomarket.backtest import (
     assert_schema_compatible,
     backtest_migration_v1_to_v2_field_map,
     build_backtest_migration_map_artifact,
+    compute_backtest_migration_map_checksum,
     is_schema_compatible,
     migrate_backtest_artifact_v1_to_v2,
     parse_schema_version,
     validate_backtest_json_artifact,
     validate_backtest_json_artifact_v1,
     validate_backtest_json_artifact_v2,
+    verify_backtest_migration_map_checksum,
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "backtest"
@@ -175,14 +178,26 @@ def test_backtest_migration_v1_to_v2_field_map_contract() -> None:
 
 
 def test_build_backtest_migration_map_artifact() -> None:
-    artifact = build_backtest_migration_map_artifact()
+    artifact = build_backtest_migration_map_artifact(with_checksum=True)
 
     assert artifact["schema_version"] == BACKTEST_MIGRATION_MAP_SCHEMA_VERSION
     assert artifact["kind"] == "backtest_migration_map"
+    assert artifact["checksum_algo"] == BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO
     assert artifact["from_schema_major"] == 1
     assert artifact["to_schema_major"] == 2
     assert isinstance(artifact["mappings"], list)
     assert artifact["summary"]["total_fields"] == len(artifact["mappings"])
+    assert isinstance(artifact["checksum_sha256"], str)
+    assert len(artifact["checksum_sha256"]) == 64
+
+    assert verify_backtest_migration_map_checksum(artifact)
+    assert artifact["checksum_sha256"] == compute_backtest_migration_map_checksum(artifact)
+
+
+def test_verify_backtest_migration_map_checksum_tampered() -> None:
+    artifact = build_backtest_migration_map_artifact(with_checksum=True)
+    artifact["summary"]["total_fields"] = int(artifact["summary"]["total_fields"]) + 1
+    assert not verify_backtest_migration_map_checksum(artifact)
 
 
 def test_validate_backtest_json_artifact_fixture_samples() -> None:

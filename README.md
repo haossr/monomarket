@@ -73,8 +73,9 @@ monomarket backtest-migrate-v1-to-v2 \
 
 # 查看字段映射与可逆性
 monomarket backtest-migration-map
-# 导出 machine-readable mapping artifact
-monomarket backtest-migration-map --format json --out-json artifacts/backtest/migration-map.json
+# 导出 machine-readable mapping artifact（含校验和）
+monomarket backtest-migration-map --format json --with-checksum \
+  --out-json artifacts/backtest/migration-map.json
 ```
 
 ## 交易控制开关（Rocky 可独立控制）

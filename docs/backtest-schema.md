@@ -37,7 +37,8 @@ monomarket backtest-migration-map --format json
 monomarket backtest-migration-map --format json --out-json artifacts/backtest/migration-map.json
 ```
 
-mapping artifact 含：`schema_version/kind/from_schema_major/to_schema_major/mappings/summary`。
+mapping artifact 含：`schema_version/kind/checksum_algo/from_schema_major/to_schema_major/mappings/summary`。
+使用 `--with-checksum` 时会附带 `checksum_sha256`，用于跨系统完整性校验。
 
 ## v2 Breaking Changes Checklist（草案）
 

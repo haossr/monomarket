@@ -480,18 +480,26 @@ def test_cli_backtest_migration_map_table_and_json(tmp_path: Path) -> None:
     map_out = tmp_path / "migration_map.json"
     table_res = runner.invoke(
         app,
-        ["backtest-migration-map", "--out-json", str(map_out)],
+        [
+            "backtest-migration-map",
+            "--with-checksum",
+            "--out-json",
+            str(map_out),
+        ],
     )
     assert table_res.exit_code == 0, table_res.output
     assert "Backtest v1 -> v2 field mapping" in table_res.output
     assert "schema_version" in table_res.output
     assert "migration map exported" in table_res.output
+    assert "checksum=" in table_res.output
 
     payload = json.loads(map_out.read_text())
     assert payload["kind"] == "backtest_migration_map"
     assert payload["from_schema_major"] == 1
     assert payload["to_schema_major"] == 2
     assert isinstance(payload["mappings"], list)
+    assert isinstance(payload["checksum_sha256"], str)
+    assert len(payload["checksum_sha256"]) == 64
 
     json_res = runner.invoke(app, ["backtest-migration-map", "--format", "json"])
     assert json_res.exit_code == 0, json_res.output

@@ -133,7 +133,8 @@ monomarket backtest-migrate-v1-to-v2 \
 monomarket backtest-migration-map
 monomarket backtest-migration-map --format json
 # 导出 machine-readable mapping artifact
-monomarket backtest-migration-map --format json --out-json artifacts/backtest/migration-map.json
+monomarket backtest-migration-map --format json --with-checksum \
+  --out-json artifacts/backtest/migration-map.json
 ```
 
 ## 8) 停机保护
