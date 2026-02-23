@@ -189,6 +189,38 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert all(x.risk_reason == "ok" for x in report.replay)
 
 
+def test_backtest_partial_fill_model(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+    _seed_signals(storage)
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(
+            slippage_bps=0.0,
+            fee_bps=0.0,
+            enable_partial_fill=True,
+            liquidity_full_fill=1000.0,
+            min_fill_ratio=0.0,
+        ),
+    ).run(["s1"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
+
+    assert report.total_signals == 4
+    assert report.executed_signals == 4
+    assert report.rejected_signals == 0
+
+    r = report.results[0]
+    assert abs(r.pnl - 1.55) < 1e-9
+
+    # m2 liquidity=900 => fill ratio 90%
+    m2_rows = [x for x in report.replay if x.market_id == "m2"]
+    assert len(m2_rows) == 2
+    assert all(abs(x.fill_ratio - 0.9) < 1e-9 for x in m2_rows)
+    assert all(abs(x.executed_qty - 4.5) < 1e-9 for x in m2_rows)
+
+
 def test_backtest_risk_replay_rejection(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
@@ -294,6 +326,8 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert rows[0]["event_id"] == "e1"
     assert rows[0]["risk_allowed"] == "True"
     assert rows[0]["risk_reason"] == "ok"
+    assert abs(float(rows[0]["executed_qty"]) - float(rows[0]["qty"])) < 1e-9
+    assert abs(float(rows[0]["fill_ratio"]) - 1.0) < 1e-9
 
     with strategy_csv_out.open() as f:
         strategy_rows = list(csv.DictReader(f))

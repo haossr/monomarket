@@ -8,7 +8,7 @@ Monomarket 是一个面向二元市场（Polymarket 风格）的可运行交易 
 - 执行路由（paper/live 双模式，默认 paper）
 - 统一风控（全局止损、单策略上限、单事件上限、熔断）
 - PnL + 指标报表
-- 时间窗口回测（signals replay + paper fills + 策略归因 + 事件级归因 + 风控决策轨迹 + JSON/CSV 导出）
+- 时间窗口回测（signals replay + paper fills + 可选 liquidity partial fill + 策略归因 + 事件级归因 + 风控决策轨迹 + JSON/CSV 导出）
 
 > 安全默认值：`paper`，且 `ENABLE_LIVE_TRADING=false`。
 
@@ -46,6 +46,7 @@ monomarket metrics-report
 # 7) 时间窗口回测（按策略/事件归因 + 回放账本）
 monomarket backtest --strategies s1,s2,s4,s8 \
   --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z \
+  --partial-fill --liquidity-full-fill 1000 --min-fill-ratio 0.10 \
   --replay-limit 30 \
   --out-json artifacts/backtest/latest.json \
   --out-replay-csv artifacts/backtest/replay.csv \

@@ -67,6 +67,8 @@ def _write_backtest_replay_csv(report: BacktestReport, output_path: str) -> None
                 "token_id",
                 "side",
                 "qty",
+                "executed_qty",
+                "fill_ratio",
                 "target_price",
                 "fill_price",
                 "realized_change",
@@ -257,6 +259,22 @@ def backtest(
     to_ts: str = typer.Option(..., "--to", help="Inclusive ISO timestamp"),
     slippage_bps: float = typer.Option(5.0, min=0.0),
     fee_bps: float = typer.Option(0.0, min=0.0),
+    partial_fill: bool = typer.Option(
+        False,
+        "--partial-fill/--no-partial-fill",
+        help="Enable liquidity-based partial fills in replay",
+    ),
+    liquidity_full_fill: float = typer.Option(
+        1000.0,
+        min=1.0,
+        help="Liquidity threshold where fills become 100%",
+    ),
+    min_fill_ratio: float = typer.Option(
+        0.1,
+        min=0.0,
+        max=1.0,
+        help="Minimum fill ratio when partial fill is enabled",
+    ),
     replay_limit: int = typer.Option(20, min=0, help="Rows to print from replay ledger (0=skip)"),
     out_json: str | None = typer.Option(None, help="Write full backtest report as JSON"),
     out_replay_csv: str | None = typer.Option(None, help="Write replay ledger as CSV"),
@@ -276,7 +294,13 @@ def backtest(
     selected = [s.strip().lower() for s in strategies.split(",") if s.strip()]
     engine = BacktestEngine(
         storage,
-        execution=BacktestExecutionConfig(slippage_bps=slippage_bps, fee_bps=fee_bps),
+        execution=BacktestExecutionConfig(
+            slippage_bps=slippage_bps,
+            fee_bps=fee_bps,
+            enable_partial_fill=partial_fill,
+            liquidity_full_fill=liquidity_full_fill,
+            min_fill_ratio=min_fill_ratio,
+        ),
         risk=BacktestRiskConfig(
             max_daily_loss=settings.risk.max_daily_loss,
             max_strategy_notional=settings.risk.max_strategy_notional,
@@ -338,6 +362,8 @@ def backtest(
         replay_tb.add_column("token")
         replay_tb.add_column("side")
         replay_tb.add_column("qty")
+        replay_tb.add_column("filled")
+        replay_tb.add_column("fill_ratio")
         replay_tb.add_column("target")
         replay_tb.add_column("fill")
         replay_tb.add_column("realized")
@@ -355,6 +381,8 @@ def backtest(
                 replay_row.token_id,
                 replay_row.side,
                 f"{replay_row.qty:.4f}",
+                f"{replay_row.executed_qty:.4f}",
+                f"{replay_row.fill_ratio:.2%}",
                 f"{replay_row.target_price:.4f}",
                 f"{replay_row.fill_price:.4f}",
                 f"{replay_row.realized_change:.4f}",

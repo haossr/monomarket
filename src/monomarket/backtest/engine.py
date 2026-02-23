@@ -14,6 +14,9 @@ OUTCOME_TOKEN_YES = "YES"  # nosec B105
 class BacktestExecutionConfig:
     slippage_bps: float = 5.0
     fee_bps: float = 0.0
+    enable_partial_fill: bool = False
+    liquidity_full_fill: float = 1000.0
+    min_fill_ratio: float = 0.1
 
 
 @dataclass(slots=True)
@@ -56,6 +59,8 @@ class BacktestReplayRow:
     token_id: str
     side: str
     qty: float
+    executed_qty: float
+    fill_ratio: float
     target_price: float
     fill_price: float
     realized_change: float
@@ -169,11 +174,16 @@ class BacktestEngine:
             strategy_market_event[(strategy, market_id)] = event_id
             event_key = (strategy, event_id)
 
-            token_id, target_price, qty = self._signal_execution_fields(row)
+            token_id, target_price, requested_qty = self._signal_execution_fields(row)
             fill_price = self._fill_price(target_price, side)
+            executed_qty, fill_ratio = self._effective_fill_qty(
+                market_id=market_id,
+                ts=created_at,
+                requested_qty=requested_qty,
+            )
 
             risk_decision = self._risk_check(
-                qty=qty,
+                qty=requested_qty,
                 price=fill_price,
                 strategy=strategy,
                 event_id=event_id,
@@ -209,7 +219,9 @@ class BacktestEngine:
                         market_id=market_id,
                         token_id=token_id,
                         side=side,
-                        qty=qty,
+                        qty=requested_qty,
+                        executed_qty=0.0,
+                        fill_ratio=0.0,
                         target_price=target_price,
                         fill_price=fill_price,
                         realized_change=0.0,
@@ -230,7 +242,56 @@ class BacktestEngine:
                 )
                 continue
 
-            fee = fill_price * qty * max(0.0, self.execution.fee_bps) / 10000.0
+            if executed_qty <= 1e-12:
+                rejection_count += 1
+                strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
+                    positions,
+                    strategy,
+                    created_at,
+                )
+                event_equity = realized_by_event[event_key] + self._event_unrealized(
+                    positions,
+                    strategy,
+                    event_id,
+                    created_at,
+                    strategy_market_event,
+                )
+
+                equity_curve[strategy].append(strategy_equity)
+                event_equity_curve[event_key].append(event_equity)
+
+                replay.append(
+                    BacktestReplayRow(
+                        ts=created_at,
+                        strategy=strategy,
+                        event_id=event_id,
+                        market_id=market_id,
+                        token_id=token_id,
+                        side=side,
+                        qty=requested_qty,
+                        executed_qty=0.0,
+                        fill_ratio=0.0,
+                        target_price=target_price,
+                        fill_price=fill_price,
+                        realized_change=0.0,
+                        strategy_equity=strategy_equity,
+                        event_equity=event_equity,
+                        risk_allowed=False,
+                        risk_reason="no executable liquidity",
+                        risk_notional=risk_decision.notional,
+                        risk_realized_pnl_before=risk_decision.realized_pnl_before,
+                        risk_strategy_notional_before=risk_decision.strategy_notional_before,
+                        risk_event_notional_before=risk_decision.event_notional_before,
+                        risk_rejections_before=risk_decision.rejections_before,
+                        risk_max_daily_loss=self.risk.max_daily_loss,
+                        risk_max_strategy_notional=self.risk.max_strategy_notional,
+                        risk_max_event_notional=self.risk.max_event_notional,
+                        risk_circuit_breaker_rejections=self.risk.circuit_breaker_rejections,
+                    )
+                )
+                continue
+
+            fee = fill_price * executed_qty * max(0.0, self.execution.fee_bps) / 10000.0
 
             key = (strategy, market_id, token_id)
             pos = positions.get(key)
@@ -238,7 +299,7 @@ class BacktestEngine:
                 pos = _Position()
                 positions[key] = pos
 
-            outcome = self._apply_fill(pos, side=side, price=fill_price, qty=qty)
+            outcome = self._apply_fill(pos, side=side, price=fill_price, qty=executed_qty)
             realized_change = outcome.realized_delta - fee
 
             realized_by_strategy[strategy] += realized_change
@@ -280,7 +341,9 @@ class BacktestEngine:
                     market_id=market_id,
                     token_id=token_id,
                     side=side,
-                    qty=qty,
+                    qty=requested_qty,
+                    executed_qty=executed_qty,
+                    fill_ratio=fill_ratio,
                     target_price=target_price,
                     fill_price=fill_price,
                     realized_change=realized_change,
@@ -398,6 +461,30 @@ class BacktestEngine:
         if side == "buy":
             return min(0.99, px + slippage)
         return max(0.01, px - slippage)
+
+    def _effective_fill_qty(
+        self,
+        *,
+        market_id: str,
+        ts: str,
+        requested_qty: float,
+    ) -> tuple[float, float]:
+        if requested_qty <= 0:
+            return 0.0, 0.0
+
+        if not self.execution.enable_partial_fill:
+            return requested_qty, 1.0
+
+        full_fill_liq = max(1e-9, self.execution.liquidity_full_fill)
+        liquidity = self.storage.get_snapshot_liquidity_at(market_id, ts)
+        if liquidity is None:
+            return requested_qty, 1.0
+
+        raw_ratio = max(0.0, min(1.0, float(liquidity) / full_fill_liq))
+        min_ratio = max(0.0, min(1.0, self.execution.min_fill_ratio))
+        ratio = max(min_ratio, raw_ratio)
+        executed_qty = requested_qty * ratio
+        return executed_qty, ratio
 
     @staticmethod
     def _apply_fill(pos: _Position, side: str, price: float, qty: float) -> _FillOutcome:

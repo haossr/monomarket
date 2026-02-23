@@ -554,6 +554,33 @@ class Storage:
             return None
         return float(row["px"])
 
+    def get_snapshot_liquidity_at(self, market_id: str, ts: str) -> float | None:
+        with self.conn() as conn:
+            row = conn.execute(
+                """
+                SELECT liquidity AS v
+                FROM market_snapshots
+                WHERE market_id = ? AND captured_at <= ?
+                ORDER BY captured_at DESC
+                LIMIT 1
+                """,
+                (market_id, ts),
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    """
+                    SELECT liquidity AS v
+                    FROM market_snapshots
+                    WHERE market_id = ?
+                    ORDER BY captured_at ASC
+                    LIMIT 1
+                    """,
+                    (market_id,),
+                ).fetchone()
+        if row is None:
+            return None
+        return float(row["v"])
+
     def update_signal_status(self, signal_id: int, status: str) -> None:
         with self.conn() as conn:
             conn.execute(
