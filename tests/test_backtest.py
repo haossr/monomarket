@@ -6,7 +6,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from monomarket.backtest import BacktestEngine, BacktestExecutionConfig
+from monomarket.backtest import BacktestEngine, BacktestExecutionConfig, BacktestRiskConfig
 from monomarket.cli import app
 from monomarket.db.storage import Storage
 from monomarket.models import MarketView, Signal
@@ -164,6 +164,8 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     ).run(["s1"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
 
     assert report.total_signals == 4
+    assert report.executed_signals == 4
+    assert report.rejected_signals == 0
     assert len(report.results) == 1
     r = report.results[0]
     assert r.strategy == "s1"
@@ -183,6 +185,38 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert report.replay[0].event_id == "e1"
     assert report.replay[-1].event_id == "e2"
     assert abs(report.replay[-1].realized_change + 0.5) < 1e-9
+    assert all(x.risk_allowed for x in report.replay)
+    assert all(x.risk_reason == "ok" for x in report.replay)
+
+
+def test_backtest_risk_replay_rejection(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+    _seed_signals(storage)
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+        risk=BacktestRiskConfig(
+            max_daily_loss=1000.0,
+            max_strategy_notional=1000.0,
+            max_event_notional=5.0,
+            circuit_breaker_rejections=5,
+        ),
+    ).run(["s1"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
+
+    assert report.total_signals == 4
+    assert report.executed_signals == 3
+    assert report.rejected_signals == 1
+
+    rejected_rows = [x for x in report.replay if not x.risk_allowed]
+    assert len(rejected_rows) == 1
+    assert "event notional limit exceeded" in rejected_rows[0].risk_reason
+    assert abs(rejected_rows[0].risk_max_event_notional - 5.0) < 1e-9
+    assert rejected_rows[0].risk_rejections_before == 0
+    assert rejected_rows[0].risk_allowed is False
 
 
 def test_cli_backtest_command(tmp_path: Path) -> None:
@@ -239,6 +273,8 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
 
     payload = json.loads(json_out.read_text())
     assert payload["total_signals"] == 4
+    assert payload["executed_signals"] == 4
+    assert payload["rejected_signals"] == 0
     assert len(payload["results"]) == 1
     assert len(payload["event_results"]) == 2
     assert len(payload["replay"]) == 4
@@ -248,3 +284,5 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert len(rows) == 4
     assert rows[0]["strategy"] == "s1"
     assert rows[0]["event_id"] == "e1"
+    assert rows[0]["risk_allowed"] == "True"
+    assert rows[0]["risk_reason"] == "ok"

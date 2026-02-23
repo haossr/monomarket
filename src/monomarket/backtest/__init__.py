@@ -4,12 +4,14 @@ from monomarket.backtest.engine import (
     BacktestExecutionConfig,
     BacktestReplayRow,
     BacktestReport,
+    BacktestRiskConfig,
     BacktestStrategyResult,
 )
 
 __all__ = [
     "BacktestEngine",
     "BacktestExecutionConfig",
+    "BacktestRiskConfig",
     "BacktestReport",
     "BacktestStrategyResult",
     "BacktestEventResult",

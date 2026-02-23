@@ -9,7 +9,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from monomarket.backtest import BacktestEngine, BacktestExecutionConfig, BacktestReport
+from monomarket.backtest import (
+    BacktestEngine,
+    BacktestExecutionConfig,
+    BacktestReport,
+    BacktestRiskConfig,
+)
 from monomarket.config import Settings, load_settings
 from monomarket.data import IngestionService, MarketDataClients
 from monomarket.db import Storage
@@ -37,6 +42,8 @@ def _write_backtest_json(report: BacktestReport, output_path: str) -> None:
         "from_ts": report.from_ts,
         "to_ts": report.to_ts,
         "total_signals": report.total_signals,
+        "executed_signals": report.executed_signals,
+        "rejected_signals": report.rejected_signals,
         "results": [asdict(x) for x in report.results],
         "event_results": [asdict(x) for x in report.event_results],
         "replay": [asdict(x) for x in report.replay],
@@ -65,6 +72,17 @@ def _write_backtest_replay_csv(report: BacktestReport, output_path: str) -> None
                 "realized_change",
                 "strategy_equity",
                 "event_equity",
+                "risk_allowed",
+                "risk_reason",
+                "risk_notional",
+                "risk_realized_pnl_before",
+                "risk_strategy_notional_before",
+                "risk_event_notional_before",
+                "risk_rejections_before",
+                "risk_max_daily_loss",
+                "risk_max_strategy_notional",
+                "risk_max_event_notional",
+                "risk_circuit_breaker_rejections",
             ],
         )
         writer.writeheader()
@@ -201,18 +219,25 @@ def backtest(
     out_replay_csv: str | None = typer.Option(None, help="Write replay ledger as CSV"),
     config: str | None = typer.Option(None),
 ) -> None:
-    _, storage = _ctx(config)
+    settings, storage = _ctx(config)
     storage.init_db()
 
     selected = [s.strip().lower() for s in strategies.split(",") if s.strip()]
     engine = BacktestEngine(
         storage,
         execution=BacktestExecutionConfig(slippage_bps=slippage_bps, fee_bps=fee_bps),
+        risk=BacktestRiskConfig(
+            max_daily_loss=settings.risk.max_daily_loss,
+            max_strategy_notional=settings.risk.max_strategy_notional,
+            max_event_notional=settings.risk.max_event_notional,
+            circuit_breaker_rejections=settings.risk.circuit_breaker_rejections,
+        ),
     )
     report = engine.run(selected, from_ts=from_ts, to_ts=to_ts)
 
     console.print(
-        f"backtest signals={report.total_signals} replay_rows={len(report.replay)} "
+        f"backtest signals={report.total_signals} executed={report.executed_signals} "
+        f"rejected={report.rejected_signals} replay_rows={len(report.replay)} "
         f"from={report.from_ts} to={report.to_ts}"
     )
 
@@ -267,6 +292,8 @@ def backtest(
         replay_tb.add_column("realized")
         replay_tb.add_column("strat_eq")
         replay_tb.add_column("event_eq")
+        replay_tb.add_column("risk_ok")
+        replay_tb.add_column("risk_reason")
 
         for replay_row in report.replay[:replay_limit]:
             replay_tb.add_row(
@@ -282,6 +309,8 @@ def backtest(
                 f"{replay_row.realized_change:.4f}",
                 f"{replay_row.strategy_equity:.4f}",
                 f"{replay_row.event_equity:.4f}",
+                "yes" if replay_row.risk_allowed else "no",
+                replay_row.risk_reason,
             )
         console.print(replay_tb)
 
