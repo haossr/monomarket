@@ -11,6 +11,7 @@ from monomarket.backtest import (
     REQUIRED_BACKTEST_JSON_FIELDS_V2,
     SUPPORTED_BACKTEST_SCHEMA_MAJOR,
     assert_schema_compatible,
+    backtest_migration_v1_to_v2_field_map,
     is_schema_compatible,
     migrate_backtest_artifact_v1_to_v2,
     parse_schema_version,
@@ -157,6 +158,18 @@ def test_migrate_backtest_artifact_v1_to_v2() -> None:
     assert migrated["attribution"]["strategy"] == []
 
     assert validate_backtest_json_artifact(migrated, supported_major=None) == (2, 0)
+
+
+def test_backtest_migration_v1_to_v2_field_map_contract() -> None:
+    rows = backtest_migration_v1_to_v2_field_map()
+    assert rows
+
+    keyset = {"v1_path", "v2_path", "transform", "reversible", "note"}
+    for row in rows:
+        assert set(row.keys()) == keyset
+
+    assert any(row["v1_path"] == "schema_version" for row in rows)
+    assert any(row["reversible"] is False for row in rows)
 
 
 def test_validate_backtest_json_artifact_fixture_samples() -> None:

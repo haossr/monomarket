@@ -14,6 +14,7 @@ from monomarket.backtest import (
     BacktestExecutionConfig,
     BacktestReport,
     BacktestRiskConfig,
+    backtest_migration_v1_to_v2_field_map,
     migrate_backtest_artifact_v1_to_v2,
     validate_backtest_json_artifact,
 )
@@ -585,6 +586,37 @@ def backtest_migrate_v1_to_v2(
     console.print(
         "[green]migrated[/green] " f"{in_path} -> {out_path} schema={migrated['schema_version']}"
     )
+
+
+@app.command("backtest-migration-map")
+def backtest_migration_map(format: str = typer.Option("table", help="table|json")) -> None:
+    rows = backtest_migration_v1_to_v2_field_map()
+    fmt = format.strip().lower()
+
+    if fmt == "json":
+        console.print_json(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+
+    if fmt != "table":
+        raise typer.BadParameter("format must be table or json")
+
+    tb = Table(title="Backtest v1 -> v2 field mapping")
+    tb.add_column("v1_path")
+    tb.add_column("v2_path")
+    tb.add_column("transform")
+    tb.add_column("reversible")
+    tb.add_column("note")
+
+    for row in rows:
+        tb.add_row(
+            row["v1_path"],
+            row["v2_path"],
+            row["transform"],
+            "yes" if row["reversible"] else "no",
+            row["note"],
+        )
+
+    console.print(tb)
 
 
 @app.command("execute-signal")

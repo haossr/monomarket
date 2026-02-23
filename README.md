@@ -70,6 +70,9 @@ v1->v2 迁移（校验 + 转换）：
 monomarket backtest-migrate-v1-to-v2 \
   --in artifacts/backtest/latest.json \
   --out artifacts/backtest/latest.v2.json
+
+# 查看字段映射与可逆性
+monomarket backtest-migration-map
 ```
 
 ## 交易控制开关（Rocky 可独立控制）

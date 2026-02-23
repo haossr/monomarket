@@ -127,6 +127,10 @@ v1 -> v2 迁移命令：
 monomarket backtest-migrate-v1-to-v2 \
   --in artifacts/backtest/latest.json \
   --out artifacts/backtest/latest.v2.json
+
+# 查看字段级映射与可逆性
+monomarket backtest-migration-map
+monomarket backtest-migration-map --format json
 ```
 
 ## 8) 停机保护

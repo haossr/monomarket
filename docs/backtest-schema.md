@@ -22,6 +22,19 @@
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`
 - 迁移助手：`migrate_backtest_artifact_v1_to_v2(payload)`（CLI: `backtest-migrate-v1-to-v2`）
+- 字段映射清单：`backtest_migration_v1_to_v2_field_map()`（CLI: `backtest-migration-map`）
+
+## 字段映射与可逆性说明
+
+- `schema_version` 在迁移中会强制写为 `2.0`（不可逆），原值保存在 `meta.source_schema_version`
+- 其余核心字段采用 copy/deepcopy 映射，可用于审计对照
+
+查看映射：
+
+```bash
+monomarket backtest-migration-map
+monomarket backtest-migration-map --format json
+```
 
 ## v2 Breaking Changes Checklist（草案）
 

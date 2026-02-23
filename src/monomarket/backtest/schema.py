@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from typing import Any
+from typing import Any, TypedDict
 
 SUPPORTED_BACKTEST_SCHEMA_MAJOR = 1
 
@@ -32,6 +32,14 @@ REQUIRED_BACKTEST_JSON_FIELDS_V2 = {
 }
 
 BacktestJsonArtifactValidator = Callable[[Mapping[str, Any]], None]
+
+
+class BacktestMigrationFieldMapping(TypedDict):
+    v1_path: str
+    v2_path: str
+    transform: str
+    reversible: bool
+    note: str
 
 
 def parse_schema_version(raw: str) -> tuple[int, int]:
@@ -121,6 +129,102 @@ def migrate_backtest_artifact_v1_to_v2(payload: Mapping[str, Any]) -> dict[str, 
         },
         "replay": deepcopy(payload["replay"]),
     }
+
+
+def backtest_migration_v1_to_v2_field_map() -> list[BacktestMigrationFieldMapping]:
+    return [
+        {
+            "v1_path": "schema_version",
+            "v2_path": "schema_version",
+            "transform": "constant('2.0')",
+            "reversible": False,
+            "note": "升级版本号；原始值保存在 meta.source_schema_version",
+        },
+        {
+            "v1_path": "schema_version",
+            "v2_path": "meta.source_schema_version",
+            "transform": "copy",
+            "reversible": True,
+            "note": "记录迁移前 schema",
+        },
+        {
+            "v1_path": "generated_at",
+            "v2_path": "summary.generated_at",
+            "transform": "copy",
+            "reversible": True,
+            "note": "时间字段平移到 summary",
+        },
+        {
+            "v1_path": "from_ts",
+            "v2_path": "summary.from_ts",
+            "transform": "copy",
+            "reversible": True,
+            "note": "时间窗口起点",
+        },
+        {
+            "v1_path": "to_ts",
+            "v2_path": "summary.to_ts",
+            "transform": "copy",
+            "reversible": True,
+            "note": "时间窗口终点",
+        },
+        {
+            "v1_path": "total_signals",
+            "v2_path": "summary.total_signals",
+            "transform": "copy",
+            "reversible": True,
+            "note": "汇总统计",
+        },
+        {
+            "v1_path": "executed_signals",
+            "v2_path": "summary.executed_signals",
+            "transform": "copy",
+            "reversible": True,
+            "note": "汇总统计",
+        },
+        {
+            "v1_path": "rejected_signals",
+            "v2_path": "summary.rejected_signals",
+            "transform": "copy",
+            "reversible": True,
+            "note": "汇总统计",
+        },
+        {
+            "v1_path": "execution_config",
+            "v2_path": "configs.execution",
+            "transform": "deepcopy",
+            "reversible": True,
+            "note": "执行参数快照",
+        },
+        {
+            "v1_path": "risk_config",
+            "v2_path": "configs.risk",
+            "transform": "deepcopy",
+            "reversible": True,
+            "note": "风控参数快照",
+        },
+        {
+            "v1_path": "results",
+            "v2_path": "attribution.strategy",
+            "transform": "deepcopy",
+            "reversible": True,
+            "note": "策略归因",
+        },
+        {
+            "v1_path": "event_results",
+            "v2_path": "attribution.event",
+            "transform": "deepcopy",
+            "reversible": True,
+            "note": "事件归因",
+        },
+        {
+            "v1_path": "replay",
+            "v2_path": "replay",
+            "transform": "deepcopy",
+            "reversible": True,
+            "note": "回放明细",
+        },
+    ]
 
 
 DEFAULT_BACKTEST_JSON_VALIDATORS: dict[int, BacktestJsonArtifactValidator] = {

@@ -472,3 +472,17 @@ def test_cli_backtest_migrate_v1_to_v2(tmp_path: Path) -> None:
     assert payload_v2["schema_version"] == "2.0"
     assert payload_v2["meta"]["migration"] == "v1_to_v2"
     assert validate_backtest_json_artifact(payload_v2, supported_major=None) == (2, 0)
+
+
+def test_cli_backtest_migration_map_table_and_json() -> None:
+    runner = CliRunner()
+
+    table_res = runner.invoke(app, ["backtest-migration-map"])
+    assert table_res.exit_code == 0, table_res.output
+    assert "Backtest v1 -> v2 field mapping" in table_res.output
+    assert "schema_version" in table_res.output
+
+    json_res = runner.invoke(app, ["backtest-migration-map", "--format", "json"])
+    assert json_res.exit_code == 0, json_res.output
+    assert '"v1_path"' in json_res.output
+    assert '"v2_path"' in json_res.output
