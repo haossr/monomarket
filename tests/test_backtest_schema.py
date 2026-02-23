@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 
 from monomarket.backtest import (
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
+    REQUIRED_BACKTEST_JSON_FIELDS_V2,
     SUPPORTED_BACKTEST_SCHEMA_MAJOR,
     assert_schema_compatible,
     is_schema_compatible,
     parse_schema_version,
     validate_backtest_json_artifact,
     validate_backtest_json_artifact_v1,
+    validate_backtest_json_artifact_v2,
 )
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "backtest"
 
 
 def test_parse_schema_version() -> None:
@@ -126,3 +132,30 @@ def test_validate_backtest_json_artifact_v1_helper_reuse() -> None:
         "replay": [],
     }
     validate_backtest_json_artifact_v1(payload)
+
+
+def test_validate_backtest_json_artifact_v2_helper_reuse() -> None:
+    payload = {
+        "schema_version": "2.0",
+        "meta": {},
+        "results": [],
+    }
+    validate_backtest_json_artifact_v2(payload)
+
+
+def test_validate_backtest_json_artifact_v2_missing_required() -> None:
+    payload = {k: {} for k in REQUIRED_BACKTEST_JSON_FIELDS_V2}
+    payload["schema_version"] = "2.0"
+    payload["results"] = []
+    payload.pop("meta")
+
+    with pytest.raises(ValueError):
+        validate_backtest_json_artifact_v2(payload)
+
+
+def test_validate_backtest_json_artifact_fixture_samples() -> None:
+    payload_v1 = json.loads((FIXTURE_DIR / "artifact_v1.json").read_text())
+    payload_v2 = json.loads((FIXTURE_DIR / "artifact_v2.json").read_text())
+
+    assert validate_backtest_json_artifact(payload_v1) == (1, 0)
+    assert validate_backtest_json_artifact(payload_v2, supported_major=None) == (2, 0)

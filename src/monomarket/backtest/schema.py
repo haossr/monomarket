@@ -20,6 +20,13 @@ REQUIRED_BACKTEST_JSON_FIELDS_V1 = {
     "replay",
 }
 
+# Placeholder contract for upcoming v2 migration lane.
+REQUIRED_BACKTEST_JSON_FIELDS_V2 = {
+    "schema_version",
+    "meta",
+    "results",
+}
+
 BacktestJsonArtifactValidator = Callable[[Mapping[str, Any]], None]
 
 
@@ -66,8 +73,20 @@ def validate_backtest_json_artifact_v1(payload: Mapping[str, Any]) -> None:
         raise ValueError("v1 replay must be an array")
 
 
+def validate_backtest_json_artifact_v2(payload: Mapping[str, Any]) -> None:
+    missing = sorted(REQUIRED_BACKTEST_JSON_FIELDS_V2 - set(payload.keys()))
+    if missing:
+        raise ValueError(f"missing required v2 fields: {', '.join(missing)}")
+
+    if not isinstance(payload.get("meta"), Mapping):
+        raise ValueError("v2 meta must be an object")
+    if not isinstance(payload.get("results"), list):
+        raise ValueError("v2 results must be an array")
+
+
 DEFAULT_BACKTEST_JSON_VALIDATORS: dict[int, BacktestJsonArtifactValidator] = {
     1: validate_backtest_json_artifact_v1,
+    2: validate_backtest_json_artifact_v2,
 }
 
 

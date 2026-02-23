@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-02-20T00:00:00+00:00",
+  "from_ts": "2026-02-20T00:00:00+00:00",
+  "to_ts": "2026-02-20T01:00:00+00:00",
+  "total_signals": 1,
+  "executed_signals": 1,
+  "rejected_signals": 0,
+  "execution_config": {},
+  "risk_config": {},
+  "results": [],
+  "event_results": [],
+  "replay": []
+}

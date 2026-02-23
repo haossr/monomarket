@@ -4,6 +4,7 @@
 
 - 当前版本：`1.0`
 - 兼容策略：`major` 相同即兼容（`1.x` 互相兼容）
+- 代码中已预留 v2 校验占位：`validate_backtest_json_artifact_v2`（用于双栈迁移演练）
 
 ## v1.x 兼容约定
 
@@ -19,6 +20,7 @@
 - 读取 JSON 可调用 `validate_backtest_json_artifact(payload)` 做 v1 结构校验
 - 如需双栈校验，可用 `validate_backtest_json_artifact(payload, supported_major=None, validators={2: ...})` 按 major 分派
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
+- 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`
 
 ## v2 Breaking Changes Checklist（草案）
 

@@ -11,6 +11,7 @@ from monomarket.backtest.engine import (
 from monomarket.backtest.schema import (
     DEFAULT_BACKTEST_JSON_VALIDATORS,
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
+    REQUIRED_BACKTEST_JSON_FIELDS_V2,
     SUPPORTED_BACKTEST_SCHEMA_MAJOR,
     BacktestJsonArtifactValidator,
     assert_schema_compatible,
@@ -18,18 +19,21 @@ from monomarket.backtest.schema import (
     parse_schema_version,
     validate_backtest_json_artifact,
     validate_backtest_json_artifact_v1,
+    validate_backtest_json_artifact_v2,
 )
 
 __all__ = [
     "BACKTEST_ARTIFACT_SCHEMA_VERSION",
     "SUPPORTED_BACKTEST_SCHEMA_MAJOR",
     "REQUIRED_BACKTEST_JSON_FIELDS_V1",
+    "REQUIRED_BACKTEST_JSON_FIELDS_V2",
     "BacktestJsonArtifactValidator",
     "DEFAULT_BACKTEST_JSON_VALIDATORS",
     "parse_schema_version",
     "is_schema_compatible",
     "assert_schema_compatible",
     "validate_backtest_json_artifact_v1",
+    "validate_backtest_json_artifact_v2",
     "validate_backtest_json_artifact",
     "BacktestEngine",
     "BacktestExecutionConfig",
