@@ -79,13 +79,18 @@ monomarket metrics-report
 ```bash
 monomarket backtest --strategies s1,s2,s4,s8 \
   --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z \
-  --replay-limit 30
+  --replay-limit 30 \
+  --out-json artifacts/backtest/latest.json \
+  --out-replay-csv artifacts/backtest/replay.csv
 ```
 
 输出包含：
 - 按策略归因：`pnl / winrate / max drawdown / 交易次数`
 - 按事件归因：`strategy + event + pnl / winrate / max drawdown / 交易次数`
 - 回放账本：逐条 signal replay（时间、market、token、fill、realized、累计权益）
+- 机器可读导出：
+  - `--out-json`：完整报告（summary + strategy/event attribution + replay rows）
+  - `--out-replay-csv`：replay ledger CSV（便于审计/外部分析）
 
 ## 8) 停机保护
 

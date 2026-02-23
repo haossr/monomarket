@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import csv
+import json
+from dataclasses import asdict
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from monomarket.backtest import BacktestEngine, BacktestExecutionConfig
+from monomarket.backtest import BacktestEngine, BacktestExecutionConfig, BacktestReport
 from monomarket.config import Settings, load_settings
 from monomarket.data import IngestionService, MarketDataClients
 from monomarket.db import Storage
@@ -24,6 +29,47 @@ def _ctx(config_path: str | None = None) -> tuple[Settings, Storage]:
     settings = load_settings(config_path)
     storage = Storage(settings.app.db_path)
     return settings, storage
+
+
+def _write_backtest_json(report: BacktestReport, output_path: str) -> None:
+    payload = {
+        "generated_at": report.generated_at.isoformat(),
+        "from_ts": report.from_ts,
+        "to_ts": report.to_ts,
+        "total_signals": report.total_signals,
+        "results": [asdict(x) for x in report.results],
+        "event_results": [asdict(x) for x in report.event_results],
+        "replay": [asdict(x) for x in report.replay],
+    }
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _write_backtest_replay_csv(report: BacktestReport, output_path: str) -> None:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "ts",
+                "strategy",
+                "event_id",
+                "market_id",
+                "token_id",
+                "side",
+                "qty",
+                "target_price",
+                "fill_price",
+                "realized_change",
+                "strategy_equity",
+                "event_equity",
+            ],
+        )
+        writer.writeheader()
+        for replay_row in report.replay:
+            writer.writerow(asdict(replay_row))
 
 
 @app.command("init-db")
@@ -151,6 +197,8 @@ def backtest(
     slippage_bps: float = typer.Option(5.0, min=0.0),
     fee_bps: float = typer.Option(0.0, min=0.0),
     replay_limit: int = typer.Option(20, min=0, help="Rows to print from replay ledger (0=skip)"),
+    out_json: str | None = typer.Option(None, help="Write full backtest report as JSON"),
+    out_replay_csv: str | None = typer.Option(None, help="Write replay ledger as CSV"),
     config: str | None = typer.Option(None),
 ) -> None:
     _, storage = _ctx(config)
@@ -236,6 +284,14 @@ def backtest(
                 f"{replay_row.event_equity:.4f}",
             )
         console.print(replay_tb)
+
+    if out_json:
+        _write_backtest_json(report, out_json)
+        console.print(f"[green]json exported[/green] {out_json}")
+
+    if out_replay_csv:
+        _write_backtest_replay_csv(report, out_replay_csv)
+        console.print(f"[green]replay csv exported[/green] {out_replay_csv}")
 
 
 @app.command("execute-signal")

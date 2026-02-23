@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -202,6 +204,9 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
         )
     )
 
+    json_out = tmp_path / "artifacts" / "backtest.json"
+    csv_out = tmp_path / "artifacts" / "replay.csv"
+
     runner = CliRunner()
     res = runner.invoke(
         app,
@@ -215,6 +220,10 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
             "2026-02-20T02:00:00Z",
             "--slippage-bps",
             "0",
+            "--out-json",
+            str(json_out),
+            "--out-replay-csv",
+            str(csv_out),
             "--config",
             str(config_path),
         ],
@@ -224,4 +233,18 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert "Backtest attribution" in res.output
     assert "Backtest event attribution" in res.output
     assert "Backtest replay ledger" in res.output
+    assert "json exported" in res.output
+    assert "replay csv exported" in res.output
     assert "s1" in res.output
+
+    payload = json.loads(json_out.read_text())
+    assert payload["total_signals"] == 4
+    assert len(payload["results"]) == 1
+    assert len(payload["event_results"]) == 2
+    assert len(payload["replay"]) == 4
+
+    with csv_out.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 4
+    assert rows[0]["strategy"] == "s1"
+    assert rows[0]["event_id"] == "e1"
