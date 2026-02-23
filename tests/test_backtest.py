@@ -6,7 +6,12 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from monomarket.backtest import BacktestEngine, BacktestExecutionConfig, BacktestRiskConfig
+from monomarket.backtest import (
+    BACKTEST_ARTIFACT_SCHEMA_VERSION,
+    BacktestEngine,
+    BacktestExecutionConfig,
+    BacktestRiskConfig,
+)
 from monomarket.cli import app
 from monomarket.db.storage import Storage
 from monomarket.models import MarketView, Signal
@@ -163,6 +168,7 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
         execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
     ).run(["s1"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
 
+    assert report.schema_version == BACKTEST_ARTIFACT_SCHEMA_VERSION
     assert report.total_signals == 4
     assert report.executed_signals == 4
     assert report.rejected_signals == 0
@@ -350,6 +356,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert "s1" in res.output
 
     payload = json.loads(json_out.read_text())
+    assert payload["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION
     assert payload["total_signals"] == 4
     assert payload["executed_signals"] == 4
     assert payload["rejected_signals"] == 0
@@ -360,6 +367,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     with csv_out.open() as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 4
+    assert rows[0]["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION
     assert rows[0]["strategy"] == "s1"
     assert rows[0]["event_id"] == "e1"
     assert rows[0]["risk_allowed"] == "True"
@@ -371,10 +379,12 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     with strategy_csv_out.open() as f:
         strategy_rows = list(csv.DictReader(f))
     assert len(strategy_rows) == 1
+    assert strategy_rows[0]["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION
     assert strategy_rows[0]["strategy"] == "s1"
     assert abs(float(strategy_rows[0]["pnl"]) - 1.5) < 1e-9
 
     with event_csv_out.open() as f:
         event_rows = list(csv.DictReader(f))
     assert len(event_rows) == 2
+    assert all(x["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION for x in event_rows)
     assert {x["event_id"] for x in event_rows} == {"e1", "e2"}

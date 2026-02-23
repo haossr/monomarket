@@ -38,6 +38,7 @@ def _ctx(config_path: str | None = None) -> tuple[Settings, Storage]:
 
 def _write_backtest_json(report: BacktestReport, output_path: str) -> None:
     payload = {
+        "schema_version": report.schema_version,
         "generated_at": report.generated_at.isoformat(),
         "from_ts": report.from_ts,
         "to_ts": report.to_ts,
@@ -60,6 +61,7 @@ def _write_backtest_replay_csv(report: BacktestReport, output_path: str) -> None
         writer = csv.DictWriter(
             f,
             fieldnames=[
+                "schema_version",
                 "ts",
                 "strategy",
                 "event_id",
@@ -90,7 +92,9 @@ def _write_backtest_replay_csv(report: BacktestReport, output_path: str) -> None
         )
         writer.writeheader()
         for replay_row in report.replay:
-            writer.writerow(asdict(replay_row))
+            row = asdict(replay_row)
+            row["schema_version"] = report.schema_version
+            writer.writerow(row)
 
 
 def _write_backtest_strategy_csv(report: BacktestReport, output_path: str) -> None:
@@ -100,6 +104,7 @@ def _write_backtest_strategy_csv(report: BacktestReport, output_path: str) -> No
         writer = csv.DictWriter(
             f,
             fieldnames=[
+                "schema_version",
                 "strategy",
                 "pnl",
                 "winrate",
@@ -111,7 +116,9 @@ def _write_backtest_strategy_csv(report: BacktestReport, output_path: str) -> No
         )
         writer.writeheader()
         for row in report.results:
-            writer.writerow(asdict(row))
+            csv_row = asdict(row)
+            csv_row["schema_version"] = report.schema_version
+            writer.writerow(csv_row)
 
 
 def _write_backtest_event_csv(report: BacktestReport, output_path: str) -> None:
@@ -121,6 +128,7 @@ def _write_backtest_event_csv(report: BacktestReport, output_path: str) -> None:
         writer = csv.DictWriter(
             f,
             fieldnames=[
+                "schema_version",
                 "strategy",
                 "event_id",
                 "pnl",
@@ -133,7 +141,9 @@ def _write_backtest_event_csv(report: BacktestReport, output_path: str) -> None:
         )
         writer.writeheader()
         for row in report.event_results:
-            writer.writerow(asdict(row))
+            csv_row = asdict(row)
+            csv_row["schema_version"] = report.schema_version
+            writer.writerow(csv_row)
 
 
 @app.command("init-db")
@@ -325,9 +335,9 @@ def backtest(
     report = engine.run(selected, from_ts=from_ts, to_ts=to_ts)
 
     console.print(
-        f"backtest signals={report.total_signals} executed={report.executed_signals} "
-        f"rejected={report.rejected_signals} replay_rows={len(report.replay)} "
-        f"from={report.from_ts} to={report.to_ts}"
+        f"backtest schema={report.schema_version} signals={report.total_signals} "
+        f"executed={report.executed_signals} rejected={report.rejected_signals} "
+        f"replay_rows={len(report.replay)} from={report.from_ts} to={report.to_ts}"
     )
 
     tb = Table(title="Backtest attribution")

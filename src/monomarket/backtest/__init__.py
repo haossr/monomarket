@@ -1,4 +1,5 @@
 from monomarket.backtest.engine import (
+    BACKTEST_ARTIFACT_SCHEMA_VERSION,
     BacktestEngine,
     BacktestEventResult,
     BacktestExecutionConfig,
@@ -9,6 +10,7 @@ from monomarket.backtest.engine import (
 )
 
 __all__ = [
+    "BACKTEST_ARTIFACT_SCHEMA_VERSION",
     "BacktestEngine",
     "BacktestExecutionConfig",
     "BacktestRiskConfig",

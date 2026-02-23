@@ -97,6 +97,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   - `--out-replay-csv`：replay ledger CSV（便于审计/外部分析）
   - `--out-strategy-csv`：策略维度归因 CSV
   - `--out-event-csv`：事件维度归因 CSV
+  - 导出工件统一带 `schema_version` 字段（兼容解析）
 
 ## 8) 停机保护
 

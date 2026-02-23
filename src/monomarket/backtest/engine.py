@@ -8,6 +8,7 @@ from typing import Any
 from monomarket.db.storage import Storage
 
 OUTCOME_TOKEN_YES = "YES"  # nosec B105
+BACKTEST_ARTIFACT_SCHEMA_VERSION = "1.0"
 
 
 @dataclass(slots=True)
@@ -84,6 +85,7 @@ class BacktestReplayRow:
 
 @dataclass(slots=True)
 class BacktestReport:
+    schema_version: str
     generated_at: datetime
     from_ts: str
     to_ts: str
@@ -435,6 +437,7 @@ class BacktestEngine:
         replay.sort(key=lambda x: (x.ts, x.strategy, x.market_id, x.token_id))
 
         return BacktestReport(
+            schema_version=BACKTEST_ARTIFACT_SCHEMA_VERSION,
             generated_at=datetime.now(UTC),
             from_ts=from_iso,
             to_ts=to_iso,
