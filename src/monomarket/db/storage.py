@@ -292,28 +292,54 @@ class Storage:
         status: str | None = None,
         strategy: str | None = None,
     ) -> list[dict[str, Any]]:
-        where: list[str] = []
-        params: list[Any] = []
-        if status:
-            where.append("status = ?")
-            params.append(status)
-        if strategy:
-            where.append("strategy = ?")
-            params.append(strategy)
-        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-
         with self.conn() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT id, strategy, market_id, event_id, side, score, confidence,
-                       target_price, size_hint, rationale, payload_json, status, created_at, updated_at
-                FROM signals
-                {where_sql}
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (*params, limit),
-            ).fetchall()
+            if status and strategy:
+                rows = conn.execute(
+                    """
+                    SELECT id, strategy, market_id, event_id, side, score, confidence,
+                           target_price, size_hint, rationale, payload_json, status, created_at, updated_at
+                    FROM signals
+                    WHERE status = ? AND strategy = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (status, strategy, limit),
+                ).fetchall()
+            elif status:
+                rows = conn.execute(
+                    """
+                    SELECT id, strategy, market_id, event_id, side, score, confidence,
+                           target_price, size_hint, rationale, payload_json, status, created_at, updated_at
+                    FROM signals
+                    WHERE status = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (status, limit),
+                ).fetchall()
+            elif strategy:
+                rows = conn.execute(
+                    """
+                    SELECT id, strategy, market_id, event_id, side, score, confidence,
+                           target_price, size_hint, rationale, payload_json, status, created_at, updated_at
+                    FROM signals
+                    WHERE strategy = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (strategy, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, strategy, market_id, event_id, side, score, confidence,
+                           target_price, size_hint, rationale, payload_json, status, created_at, updated_at
+                    FROM signals
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
 
         out: list[dict[str, Any]] = []
         for row in rows:

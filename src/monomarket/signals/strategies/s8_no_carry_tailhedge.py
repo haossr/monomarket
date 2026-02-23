@@ -5,6 +5,10 @@ from typing import Any
 from monomarket.models import MarketView, Signal
 from monomarket.signals.strategies.base import Strategy
 
+# Outcome token labels used in strategy payloads (not credentials).
+OUTCOME_TOKEN_NO = "NO"  # nosec B105
+OUTCOME_TOKEN_YES = "YES"  # nosec B105
+
 
 class S8NoCarryTailHedge(Strategy):
     name = "s8"
@@ -66,14 +70,14 @@ class S8NoCarryTailHedge(Strategy):
                     ),
                     payload={
                         "primary_leg": {
-                            "token": "NO",
+                            "token": OUTCOME_TOKEN_NO,
                             "market_id": m.market_id,
                             "qty": base_qty,
                             "price": no_px,
                         },
                         "tail_hedge": (
                             {
-                                "token": "YES",
+                                "token": OUTCOME_TOKEN_YES,
                                 "market_id": hedge.market_id,
                                 "qty": hedge_qty,
                                 "price": float(hedge.yes_price or 0.0),

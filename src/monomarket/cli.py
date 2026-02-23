@@ -15,6 +15,9 @@ from monomarket.signals import SignalEngine
 app = typer.Typer(add_completion=False, help="Monomarket CLI")
 console = Console()
 
+# Outcome token label used in trade requests (not a credential).
+DEFAULT_OUTCOME_TOKEN = "YES"  # nosec B105
+
 
 def _ctx(config_path: str | None = None) -> tuple[Settings, Storage]:
     settings = load_settings(config_path)
@@ -143,7 +146,7 @@ def execute_signal(
         raise typer.BadParameter(f"Signal {signal_id} not found")
 
     payload = row.get("payload") or {}
-    token_id = "YES"
+    token_id = DEFAULT_OUTCOME_TOKEN
     price = float(row["target_price"])
 
     primary_leg = payload.get("primary_leg") if isinstance(payload, dict) else None
@@ -178,7 +181,7 @@ def place_order(
     strategy: str,
     market_id: str,
     event_id: str,
-    token_id: str = typer.Option("YES", help="YES|NO"),
+    token_id: str = typer.Option(DEFAULT_OUTCOME_TOKEN, help="YES|NO"),
     side: str = typer.Option("buy", help="buy|sell"),
     action: str = typer.Option("open", help="open|close"),
     price: float = typer.Option(...),
