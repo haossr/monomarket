@@ -1,0 +1,38 @@
+app:
+  db_path: data/monomarket-paper-soak.db
+  log_level: INFO
+
+trading:
+  mode: paper
+  enable_live_trading: false
+  require_manual_confirm: true
+  kill_switch: false
+
+risk:
+  max_daily_loss: 250.0
+  max_strategy_notional: 1000.0
+  max_event_notional: 1500.0
+  circuit_breaker_rejections: 5
+
+data:
+  gamma_base_url: https://gamma-api.polymarket.com
+  data_base_url: https://data-api.polymarket.com
+  clob_base_url: https://clob.polymarket.com
+  timeout_sec: 15
+  max_retries: 2
+  backoff_base_sec: 0.5
+  rate_limit_per_sec: 4.0
+  breaker_failure_threshold: 3
+  breaker_cooldown_sec: 90
+
+strategies:
+  s1:
+    min_spread: 0.03
+  s2:
+    prob_sum_tolerance: 0.04
+  s4:
+    yes_price_min: 0.01
+    yes_price_max: 0.15
+  s8:
+    yes_price_max_for_no: 0.25
+    hedge_budget_ratio: 0.15
