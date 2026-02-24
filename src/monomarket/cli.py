@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
@@ -40,6 +41,21 @@ def _ctx(config_path: str | None = None) -> tuple[Settings, Storage]:
     settings = load_settings(config_path)
     storage = Storage(settings.app.db_path)
     return settings, storage
+
+
+def _parse_cli_iso_ts(value: str, *, option_name: str) -> datetime:
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise typer.BadParameter(f"{option_name} must be ISO timestamp, got: {value}") from exc
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+
+    return dt.astimezone(UTC)
 
 
 def _write_backtest_json(
@@ -694,6 +710,215 @@ def backtest(
     if out_event_csv:
         _write_backtest_event_csv(report, out_event_csv)
         console.print(f"[green]event csv exported[/green] {out_event_csv}")
+
+
+@app.command("backtest-rolling")
+def backtest_rolling(
+    strategies: str = typer.Option("s1,s2,s4,s8", help="Comma-separated strategy ids"),
+    from_ts: str = typer.Option(..., "--from", help="Inclusive ISO timestamp"),
+    to_ts: str = typer.Option(..., "--to", help="Inclusive ISO timestamp"),
+    window_hours: float = typer.Option(24.0, min=0.1, help="Rolling window size in hours"),
+    step_hours: float = typer.Option(12.0, min=0.1, help="Step size in hours"),
+    slippage_bps: float = typer.Option(5.0, min=0.0),
+    fee_bps: float = typer.Option(0.0, min=0.0),
+    out_json: str | None = typer.Option(None, help="Write rolling summary as JSON"),
+    config: str | None = typer.Option(None),
+) -> None:
+    settings, storage = _ctx(config)
+    storage.init_db()
+
+    from_dt = _parse_cli_iso_ts(from_ts, option_name="--from")
+    to_dt = _parse_cli_iso_ts(to_ts, option_name="--to")
+    if to_dt <= from_dt:
+        raise typer.BadParameter("--to must be greater than --from")
+
+    window_delta = timedelta(hours=window_hours)
+    step_delta = timedelta(hours=step_hours)
+    if window_delta <= timedelta(0):
+        raise typer.BadParameter("--window-hours must be positive")
+    if step_delta <= timedelta(0):
+        raise typer.BadParameter("--step-hours must be positive")
+
+    selected = [s.strip().lower() for s in strategies.split(",") if s.strip()]
+    engine = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(
+            slippage_bps=slippage_bps,
+            fee_bps=fee_bps,
+        ),
+        risk=BacktestRiskConfig(
+            max_daily_loss=settings.risk.max_daily_loss,
+            max_strategy_notional=settings.risk.max_strategy_notional,
+            max_event_notional=settings.risk.max_event_notional,
+            circuit_breaker_rejections=settings.risk.circuit_breaker_rejections,
+        ),
+    )
+
+    run_rows: list[tuple[str, str, int, int, int, float, float]] = []
+    strategy_agg: dict[str, dict[str, float]] = {}
+    total_signals = 0
+    executed_signals = 0
+    rejected_signals = 0
+
+    cursor = from_dt
+    while cursor < to_dt:
+        win_end = min(cursor + window_delta, to_dt)
+        report = engine.run(selected, from_ts=cursor.isoformat(), to_ts=win_end.isoformat())
+
+        total_signals += report.total_signals
+        executed_signals += report.executed_signals
+        rejected_signals += report.rejected_signals
+        pnl_total = sum(x.pnl for x in report.results)
+        exec_rate = (
+            report.executed_signals / report.total_signals if report.total_signals > 0 else 0.0
+        )
+
+        run_rows.append(
+            (
+                cursor.isoformat(),
+                win_end.isoformat(),
+                report.total_signals,
+                report.executed_signals,
+                report.rejected_signals,
+                exec_rate,
+                pnl_total,
+            )
+        )
+
+        for result_row in report.results:
+            acc = strategy_agg.setdefault(
+                result_row.strategy,
+                {
+                    "windows": 0.0,
+                    "pnl_sum": 0.0,
+                    "winrate_sum": 0.0,
+                    "trade_count_sum": 0.0,
+                },
+            )
+            acc["windows"] += 1.0
+            acc["pnl_sum"] += result_row.pnl
+            acc["winrate_sum"] += result_row.winrate
+            acc["trade_count_sum"] += float(result_row.trade_count)
+
+        cursor += step_delta
+
+    runs = len(run_rows)
+    overall_exec_rate = (executed_signals / total_signals) if total_signals > 0 else 0.0
+    console.print(
+        "backtest rolling "
+        f"runs={runs} total_signals={total_signals} "
+        f"executed={executed_signals} rejected={rejected_signals} "
+        f"execution_rate={overall_exec_rate:.2%}"
+    )
+
+    tb = Table(title=f"Backtest rolling windows ({runs})")
+    tb.add_column("idx")
+    tb.add_column("from")
+    tb.add_column("to")
+    tb.add_column("signals")
+    tb.add_column("executed")
+    tb.add_column("rejected")
+    tb.add_column("exec_rate")
+    tb.add_column("pnl_total")
+    for idx, run_row in enumerate(run_rows, start=1):
+        (
+            run_from_ts,
+            run_to_ts,
+            run_total_signals,
+            run_executed_signals,
+            run_rejected_signals,
+            run_execution_rate,
+            run_pnl_total,
+        ) = run_row
+        tb.add_row(
+            str(idx),
+            run_from_ts,
+            run_to_ts,
+            str(run_total_signals),
+            str(run_executed_signals),
+            str(run_rejected_signals),
+            f"{run_execution_rate:.2%}",
+            f"{run_pnl_total:.4f}",
+        )
+    console.print(tb)
+
+    strategy_rows: list[tuple[str, int, float, float, int]] = []
+    for strategy, acc in sorted(strategy_agg.items()):
+        windows = int(acc["windows"])
+        avg_pnl = acc["pnl_sum"] / windows if windows > 0 else 0.0
+        avg_winrate = acc["winrate_sum"] / windows if windows > 0 else 0.0
+        strategy_rows.append(
+            (
+                strategy,
+                windows,
+                avg_pnl,
+                avg_winrate,
+                int(acc["trade_count_sum"]),
+            )
+        )
+
+    tb2 = Table(title="Backtest rolling strategy aggregate")
+    tb2.add_column("strategy")
+    tb2.add_column("windows")
+    tb2.add_column("avg_pnl")
+    tb2.add_column("avg_winrate")
+    tb2.add_column("total_trades")
+    for strategy, windows, avg_pnl, avg_winrate, total_trades in strategy_rows:
+        tb2.add_row(
+            strategy,
+            str(windows),
+            f"{avg_pnl:.4f}",
+            f"{avg_winrate:.2%}",
+            str(total_trades),
+        )
+    console.print(tb2)
+
+    if out_json:
+        windows_payload = [
+            {
+                "from_ts": x[0],
+                "to_ts": x[1],
+                "total_signals": x[2],
+                "executed_signals": x[3],
+                "rejected_signals": x[4],
+                "execution_rate": x[5],
+                "pnl_total": x[6],
+            }
+            for x in run_rows
+        ]
+        strategy_payload = [
+            {
+                "strategy": x[0],
+                "windows": x[1],
+                "avg_pnl": x[2],
+                "avg_winrate": x[3],
+                "total_trades": x[4],
+            }
+            for x in strategy_rows
+        ]
+
+        payload = {
+            "kind": "backtest_rolling_summary",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "from_ts": from_dt.isoformat(),
+            "to_ts": to_dt.isoformat(),
+            "window_hours": window_hours,
+            "step_hours": step_hours,
+            "strategies": selected,
+            "summary": {
+                "run_count": runs,
+                "total_signals": total_signals,
+                "executed_signals": executed_signals,
+                "rejected_signals": rejected_signals,
+                "execution_rate": overall_exec_rate,
+            },
+            "windows": windows_payload,
+            "strategy_aggregate": strategy_payload,
+        }
+        out_path = Path(out_json)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        console.print(f"[green]rolling json exported[/green] {out_path}")
 
 
 @app.command("backtest-migrate-v1-to-v2")

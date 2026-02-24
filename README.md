@@ -69,6 +69,15 @@ JSON 额外包含 `execution_config` / `risk_config` 快照，用于可重复回
 使用 `backtest --out-json ... --with-checksum` 时，还会附带 `checksum_algo/checksum_sha256` 便于跨系统完整性校验。
 归因结果可分别导出 strategy/event CSV，便于接审计流水线与 BI。
 
+多样本滚动回测（用于策略稳定性观察）：
+
+```bash
+monomarket backtest-rolling --strategies s1,s2,s4,s8 \
+  --from 2026-02-20T00:00:00Z --to 2026-02-23T00:00:00Z \
+  --window-hours 24 --step-hours 12 \
+  --out-json artifacts/backtest/rolling-summary.json
+```
+
 v1->v2 迁移（校验 + 转换）：
 
 ```bash

@@ -158,6 +158,17 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   - 双栈校验可传 `supported_major=None` 并注入 `validators={2: ...}`
   - 内置占位校验器：`monomarket.backtest.validate_backtest_json_artifact_v2`
 
+滚动窗口多样本回测（稳定性观察）：
+
+```bash
+monomarket backtest-rolling --strategies s1,s2,s4,s8 \
+  --from 2026-02-20T00:00:00Z --to 2026-02-23T00:00:00Z \
+  --window-hours 24 --step-hours 12 \
+  --out-json artifacts/backtest/rolling-summary.json
+```
+
+输出包含每个窗口的 `signals/executed/rejected/execution_rate/pnl_total`，以及策略级 `avg_pnl/avg_winrate/total_trades` 聚合。
+
 v1 -> v2 迁移命令：
 
 ```bash

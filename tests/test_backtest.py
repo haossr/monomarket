@@ -518,6 +518,68 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert {x["event_id"] for x in event_rows} == {"e1", "e2"}
 
 
+def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+    _seed_signals(storage)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "app:",
+                f"  db_path: {db}",
+                "trading:",
+                "  mode: paper",
+            ]
+        )
+    )
+
+    out_json = tmp_path / "artifacts" / "rolling.json"
+    runner = CliRunner()
+    res = runner.invoke(
+        app,
+        [
+            "backtest-rolling",
+            "--strategies",
+            "s1",
+            "--from",
+            "2026-02-20T00:00:00Z",
+            "--to",
+            "2026-02-20T02:00:00Z",
+            "--window-hours",
+            "1",
+            "--step-hours",
+            "1",
+            "--slippage-bps",
+            "0",
+            "--out-json",
+            str(out_json),
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert "backtest rolling runs=2" in res.output
+    assert "Backtest rolling windows" in res.output
+    assert "Backtest rolling strategy aggregate" in res.output
+    assert "rolling json exported" in res.output
+
+    payload = json.loads(out_json.read_text())
+    assert payload["kind"] == "backtest_rolling_summary"
+    assert payload["summary"]["run_count"] == 2
+    assert payload["summary"]["total_signals"] == 4
+    assert payload["summary"]["executed_signals"] == 4
+    assert payload["summary"]["rejected_signals"] == 0
+    assert len(payload["windows"]) == 2
+    assert payload["windows"][0]["total_signals"] == 4
+    assert payload["windows"][1]["total_signals"] == 0
+    assert any(x["strategy"] == "s1" for x in payload["strategy_aggregate"])
+
+
 def test_cli_backtest_json_with_checksum(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
