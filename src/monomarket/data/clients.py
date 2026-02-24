@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -151,6 +152,36 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def _parse_json_like(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if not text:
+        return value
+    if not (text.startswith("[") or text.startswith("{")):
+        return value
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+def _to_outcome_dict(value: Any) -> dict[str, Any]:
+    parsed = _parse_json_like(value)
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
+
+
+def _to_list(value: Any) -> list[Any]:
+    parsed = _parse_json_like(value)
+    if isinstance(parsed, list):
+        return parsed
+    return []
+
+
 def _extract_prices(item: dict[str, Any]) -> tuple[float | None, float | None]:
     yes = item.get("yes_price")
     no = item.get("no_price")
@@ -161,13 +192,54 @@ def _extract_prices(item: dict[str, Any]) -> tuple[float | None, float | None]:
             _as_float(no, 0.0) if no is not None else None,
         )
 
-    outcomes = item.get("outcomePrices") or item.get("outcomes")
-    if isinstance(outcomes, list) and len(outcomes) >= 2:
+    outcome_prices = item.get("outcomePrices")
+    outcome_names = item.get("outcomes")
+
+    prices_list = _to_list(outcome_prices)
+    names_list = _to_list(outcome_names)
+
+    if prices_list and len(prices_list) >= 2:
+        if names_list and len(names_list) >= 2:
+            by_name: dict[str, Any] = {}
+            for idx, raw_name in enumerate(names_list):
+                if idx >= len(prices_list):
+                    break
+                key = str(raw_name).strip().lower()
+                if key:
+                    by_name[key] = prices_list[idx]
+
+            y = by_name.get("yes")
+            n = by_name.get("no")
+            if y is not None or n is not None:
+                return (
+                    _as_float(y, 0.0) if y is not None else None,
+                    _as_float(n, 0.0) if n is not None else None,
+                )
+
         try:
-            return float(outcomes[0]), float(outcomes[1])
+            return float(prices_list[0]), float(prices_list[1])
         except (TypeError, ValueError):
             return None, None
 
+    outcome_prices_dict = _to_outcome_dict(outcome_prices)
+    if outcome_prices_dict:
+        y = (
+            outcome_prices_dict.get("YES")
+            or outcome_prices_dict.get("Yes")
+            or outcome_prices_dict.get("yes")
+        )
+        n = (
+            outcome_prices_dict.get("NO")
+            or outcome_prices_dict.get("No")
+            or outcome_prices_dict.get("no")
+        )
+        if y is not None or n is not None:
+            return (
+                _as_float(y, 0.0) if y is not None else None,
+                _as_float(n, 0.0) if n is not None else None,
+            )
+
+    outcomes = _parse_json_like(item.get("outcomes"))
     if isinstance(outcomes, dict):
         y = outcomes.get("YES") or outcomes.get("Yes") or outcomes.get("yes")
         n = outcomes.get("NO") or outcomes.get("No") or outcomes.get("no")
@@ -208,6 +280,41 @@ def _parse_timestamp(value: Any) -> datetime | None:
     return dt.astimezone(UTC)
 
 
+def _extract_event_id(item: dict[str, Any]) -> str:
+    for key in ("event_id", "eventId"):
+        value = item.get(key)
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+
+    event = item.get("event")
+    if isinstance(event, dict):
+        for key in ("id", "event_id", "eventId", "slug", "ticker"):
+            value = event.get(key)
+            if value is not None:
+                text = str(value).strip()
+                if text:
+                    return text
+    elif event is not None:
+        text = str(event).strip()
+        if text:
+            return text
+
+    events = _to_list(item.get("events"))
+    if events:
+        first = events[0]
+        if isinstance(first, dict):
+            for key in ("id", "event_id", "eventId", "slug", "ticker"):
+                value = first.get(key)
+                if value is not None:
+                    text = str(value).strip()
+                    if text:
+                        return text
+
+    return "unknown"
+
+
 def normalize_market(item: dict[str, Any], source: str) -> MarketView | None:
     market_id = str(
         item.get("market_id")
@@ -220,7 +327,7 @@ def normalize_market(item: dict[str, Any], source: str) -> MarketView | None:
         return None
 
     question = str(item.get("question") or item.get("title") or item.get("name") or market_id)
-    event_id = str(item.get("event_id") or item.get("eventId") or item.get("event") or "unknown")
+    event_id = _extract_event_id(item)
     canonical_id = str(
         item.get("canonical_id")
         or item.get("groupItemTitle")
@@ -363,7 +470,12 @@ class MarketDataClients:
         incremental: bool = False,
     ) -> FetchBatch:
         params = self._with_incremental_params(
-            {"limit": limit, "active": "true"},
+            {
+                "limit": limit,
+                "active": "true",
+                "closed": "false",
+                "archived": "false",
+            },
             since=since,
             incremental=incremental,
         )
@@ -386,11 +498,43 @@ class MarketDataClients:
             since=since,
             incremental=incremental,
         )
-        payload, stats, error = self.data.get_json("markets", params=params)
-        rows, max_timestamp = self._normalize_rows(
-            payload, "data", since=since if incremental else None
-        )
-        return FetchBatch(rows=rows, stats=stats, max_timestamp=max_timestamp, error=error)
+
+        merged_stats = RequestStats()
+
+        for path in ("markets", "v1/markets", "v2/markets"):
+            payload, stats, error = self.data.get_json(path, params=params)
+            merged_stats.requests += stats.requests
+            merged_stats.failures += stats.failures
+            merged_stats.retries += stats.retries
+            merged_stats.throttled_sec += stats.throttled_sec
+            merged_stats.last_error_bucket = stats.last_error_bucket
+            for bucket, count in stats.error_buckets.items():
+                merged_stats.error_buckets[bucket] = (
+                    merged_stats.error_buckets.get(bucket, 0) + count
+                )
+
+            if not error:
+                rows, max_timestamp = self._normalize_rows(
+                    payload,
+                    "data",
+                    since=since if incremental else None,
+                )
+                return FetchBatch(
+                    rows=rows,
+                    stats=merged_stats,
+                    max_timestamp=max_timestamp,
+                    error="",
+                )
+
+            not_found = stats.last_error_bucket == "http_4xx" and "404" in error
+            if not not_found:
+                return FetchBatch(rows=[], stats=merged_stats, max_timestamp=None, error=error)
+
+        # data-api 在部分部署中不提供 markets 路径：降级为跳过，不触发 breaker。
+        merged_stats.failures = 0
+        merged_stats.last_error_bucket = ""
+        merged_stats.error_buckets = {"source_skipped_404": 1}
+        return FetchBatch(rows=[], stats=merged_stats, max_timestamp=None, error="")
 
     def fetch_clob(
         self,

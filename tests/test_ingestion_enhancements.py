@@ -7,7 +7,14 @@ import requests
 from typer.testing import CliRunner
 
 from monomarket.cli import app
-from monomarket.data.clients import FetchBatch, RequestStats, SourceClient
+from monomarket.config import DataSettings
+from monomarket.data.clients import (
+    FetchBatch,
+    MarketDataClients,
+    RequestStats,
+    SourceClient,
+    normalize_market,
+)
 from monomarket.data.ingestion import IngestionService
 from monomarket.db.storage import Storage
 from monomarket.models import MarketView
@@ -133,6 +140,87 @@ def test_source_client_rate_limit_throttle(monkeypatch) -> None:
     assert len(sleeps) == 1
     assert abs(sleeps[0] - 0.3) < 1e-6
     assert abs(stats.throttled_sec - 0.3) < 1e-6
+
+
+def test_normalize_market_parses_string_outcome_prices_and_events_event_id() -> None:
+    row = normalize_market(
+        {
+            "id": "m-json",
+            "question": "Will X happen?",
+            "active": True,
+            "closed": False,
+            "liquidity": 123,
+            "outcomePrices": '["0.029", "0.971"]',
+            "outcomes": '["Yes", "No"]',
+            "events": [{"id": "evt-123", "slug": "evt-slug"}],
+        },
+        source="gamma",
+    )
+
+    assert row is not None
+    assert row.event_id == "evt-123"
+    assert row.yes_price == 0.029
+    assert row.no_price == 0.971
+
+
+def test_fetch_gamma_includes_closed_and_archived_filters(monkeypatch) -> None:
+    clients = MarketDataClients(DataSettings())
+    captured: dict[str, object] = {}
+
+    def _fake_get_json(
+        _self: SourceClient,
+        path: str,
+        params: dict[str, object] | None = None,
+    ) -> tuple[object, RequestStats, str]:
+        captured["path"] = path
+        captured["params"] = dict(params or {})
+        return [], RequestStats(requests=1), ""
+
+    monkeypatch.setattr(SourceClient, "get_json", _fake_get_json)
+
+    batch = clients.fetch_gamma(limit=321, incremental=False)
+
+    assert batch.error == ""
+    assert batch.rows == []
+    assert captured["path"] == "markets"
+    assert captured["params"] == {
+        "limit": 321,
+        "active": "true",
+        "closed": "false",
+        "archived": "false",
+    }
+
+
+def test_fetch_data_skips_404_market_endpoints(monkeypatch) -> None:
+    settings = DataSettings(data_base_url="https://data.example")
+    clients = MarketDataClients(settings)
+    called_paths: list[str] = []
+
+    def _fake_get_json(
+        self: SourceClient,
+        path: str,
+        params: dict[str, object] | None = None,
+    ) -> tuple[object, RequestStats, str]:
+        del params
+        if self.base_url == "https://data.example":
+            called_paths.append(path)
+            stats = RequestStats(requests=1, failures=1, retries=0)
+            stats.error_buckets["http_4xx"] = 1
+            stats.last_error_bucket = "http_4xx"
+            return [], stats, "HTTP 404: status=404"
+
+        return [], RequestStats(requests=1, failures=0, retries=0), ""
+
+    monkeypatch.setattr(SourceClient, "get_json", _fake_get_json)
+
+    batch = clients.fetch_data(limit=10, incremental=False)
+
+    assert batch.error == ""
+    assert batch.rows == []
+    assert called_paths == ["markets", "v1/markets", "v2/markets"]
+    assert batch.stats.requests == 3
+    assert batch.stats.failures == 0
+    assert batch.stats.error_buckets == {"source_skipped_404": 1}
 
 
 class _FakeClients:
