@@ -140,6 +140,7 @@ bash scripts/backtest_nightly_report.sh \
   --ingest-limit 300 \
   --rolling-reject-top-k 2 \
   --config configs/soak.paper.yaml
+# 默认启用 summary.json checksum；如需关闭可加 --no-checksum
 ```
 
 Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
@@ -151,6 +152,7 @@ Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 
 `--rolling-reject-top-k` 语义：`0=disabled`（关闭拒单原因摘要输出），`N>0` 输出前 N 个原因（无数据时为 `none`）。
 `rolling_reject_top` 使用 `;` 作为原因分隔符（如 `reasonA:3;reasonB:1`）；消费端优先读取 `summary.json` 的 `reject_top_pairs`。
+`summary.json` checksum 默认启用，可用 `--no-checksum` 关闭。
 
 ## 交易控制开关（Rocky 可独立控制）
 

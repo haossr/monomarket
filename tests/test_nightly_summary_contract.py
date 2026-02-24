@@ -203,6 +203,74 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert verify_nightly_summary_sidecar_checksum(reasons_sidecar)
 
 
+def test_nightly_summary_line_without_checksum_omits_checksum_fields(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_json.write_text(
+        json.dumps(
+            {
+                "from_ts": "2026-02-24T00:00:00Z",
+                "to_ts": "2026-02-24T02:00:00Z",
+                "total_signals": 1,
+                "executed_signals": 1,
+                "rejected_signals": 0,
+                "results": [{"strategy": "s1", "pnl": 1.0}],
+            }
+        )
+    )
+    rolling_json.write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "run_count": 1,
+                    "execution_rate": 1.0,
+                    "positive_window_rate": 1.0,
+                    "empty_window_count": 0,
+                    "range_hours": 2.0,
+                    "coverage_ratio": 1.0,
+                    "overlap_ratio": 0.0,
+                    "coverage_label": "full",
+                    "risk_rejection_reasons": {},
+                }
+            }
+        )
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(payload)
+    assert "checksum_algo" not in payload
+    assert "checksum_sha256" not in payload
+
+
 def test_nightly_script_help_mentions_disabled_semantics() -> None:
     content = BASH_SCRIPT_PATH.read_text()
     assert "0=disabled" in content
+    assert "--no-checksum" in content

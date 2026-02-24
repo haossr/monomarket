@@ -13,6 +13,7 @@ NIGHTLY_DATE=""
 ROLLING_WINDOW_HOURS="24"
 ROLLING_STEP_HOURS="12"
 ROLLING_REJECT_TOP_K="2"
+NIGHTLY_SUMMARY_CHECKSUM="1"
 
 usage() {
   cat <<'USAGE'
@@ -28,6 +29,7 @@ Options:
   --rolling-window-hours <float>  Rolling window size in hours (default: 24)
   --rolling-step-hours <float>    Rolling step size in hours (default: 12)
   --rolling-reject-top-k <int>    Number of top rolling reject reasons in summary (default: 2; 0=disabled)
+  --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
 USAGE
 }
@@ -69,6 +71,10 @@ while [[ $# -gt 0 ]]; do
     --rolling-reject-top-k)
       ROLLING_REJECT_TOP_K="$2"
       shift 2
+      ;;
+    --no-checksum)
+      NIGHTLY_SUMMARY_CHECKSUM="0"
+      shift 1
       ;;
     -h|--help)
       usage
@@ -163,6 +169,11 @@ else
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 fi
 
+SUMMARY_CHECKSUM_ARGS=()
+if [[ "$NIGHTLY_SUMMARY_CHECKSUM" == "1" ]]; then
+  SUMMARY_CHECKSUM_ARGS=(--with-checksum)
+fi
+
 "$PYTHON_BIN" scripts/nightly_summary_line.py \
   --backtest-json "$RUN_DIR/latest.json" \
   --pdf-path "$PDF_PATH" \
@@ -171,7 +182,7 @@ fi
   --summary-json-path "$SUMMARY_JSON" \
   --nightly-date "$NIGHTLY_DATE" \
   --rolling-reject-top-k "$ROLLING_REJECT_TOP_K" \
-  --with-checksum
+  "${SUMMARY_CHECKSUM_ARGS[@]}"
 
 echo "[nightly] done"
 echo "- run_dir: $RUN_DIR"
