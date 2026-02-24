@@ -106,6 +106,7 @@ NIGHTLY_DIR="${NIGHTLY_ROOT}/${NIGHTLY_DATE}"
 RUN_DIR="${NIGHTLY_DIR}/run-${RUN_TS}"
 PDF_PATH="${NIGHTLY_DIR}/report.pdf"
 SUMMARY_TXT="${NIGHTLY_DIR}/summary.txt"
+SUMMARY_JSON="${NIGHTLY_DIR}/summary.json"
 ROLLING_JSON="${NIGHTLY_DIR}/rolling-summary.json"
 
 mkdir -p "$NIGHTLY_DIR"
@@ -167,6 +168,7 @@ fi
   --pdf-path "$PDF_PATH" \
   --rolling-json "$ROLLING_JSON" \
   --summary-path "$SUMMARY_TXT" \
+  --summary-json-path "$SUMMARY_JSON" \
   --nightly-date "$NIGHTLY_DATE" \
   --rolling-reject-top-k "$ROLLING_REJECT_TOP_K"
 
@@ -175,3 +177,4 @@ echo "- run_dir: $RUN_DIR"
 echo "- rolling_json: $ROLLING_JSON"
 echo "- pdf: $PDF_PATH"
 echo "- summary: $SUMMARY_TXT"
+echo "- summary_json: $SUMMARY_JSON"

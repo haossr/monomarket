@@ -29,6 +29,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     backtest_json = tmp_path / "latest.json"
     rolling_json = tmp_path / "rolling.json"
     summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
     pdf_path = tmp_path / "report.pdf"
 
     backtest_payload = {
@@ -72,6 +73,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
             str(rolling_json),
             "--summary-path",
             str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
             "--nightly-date",
             "2026-02-24",
             "--rolling-reject-top-k",
@@ -89,6 +92,13 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "range_hours=" in line_disabled
     assert "coverage_ratio=" in line_disabled
     assert "overlap_ratio=" in line_disabled
+
+    disabled_sidecar = json.loads(summary_json.read_text())
+    assert str(disabled_sidecar["schema_version"]) == "nightly-summary-sidecar-1.0"
+    assert int(disabled_sidecar["rolling"]["reject_top_k"]) == 0
+    assert str(disabled_sidecar["rolling"]["reject_top"]) == "disabled"
+    assert "coverage_ratio" in disabled_sidecar["rolling"]
+    assert "overlap_ratio" in disabled_sidecar["rolling"]
 
     # k>0 with no reasons => none
     rolling_payload_none = {
@@ -110,6 +120,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
             str(rolling_json),
             "--summary-path",
             str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
             "--nightly-date",
             "2026-02-24",
             "--rolling-reject-top-k",
@@ -122,6 +134,10 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     line_none = summary_txt.read_text().strip()
     assert "rolling_reject_top_k=2" in line_none
     assert "rolling_reject_top=none" in line_none
+
+    none_sidecar = json.loads(summary_json.read_text())
+    assert int(none_sidecar["rolling"]["reject_top_k"]) == 2
+    assert str(none_sidecar["rolling"]["reject_top"]) == "none"
 
 
 def test_nightly_script_help_mentions_disabled_semantics() -> None:

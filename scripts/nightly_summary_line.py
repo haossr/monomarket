@@ -27,7 +27,7 @@ def _best_strategy_text(payload: dict[str, Any]) -> str:
     return f"best_strategy={best.get('strategy', '')} pnl={_f(best.get('pnl')):.4f}"
 
 
-def build_summary_line(
+def build_summary_bundle(
     *,
     payload: dict[str, Any],
     rolling_payload: dict[str, Any] | None,
@@ -35,7 +35,7 @@ def build_summary_line(
     rolling_path: Path,
     nightly_date: str,
     rolling_reject_top_k: int,
-) -> str:
+) -> tuple[str, dict[str, Any]]:
     best_text = _best_strategy_text(payload)
 
     rolling_runs = 0
@@ -49,6 +49,7 @@ def build_summary_line(
 
     k_norm = max(0, int(rolling_reject_top_k))
     rolling_reject_top = "disabled" if k_norm <= 0 else "none"
+    rolling_reject_top_pairs: list[tuple[str, int]] = []
 
     rolling_summary = None
     if isinstance(rolling_payload, dict):
@@ -77,11 +78,12 @@ def build_summary_line(
                 reason_items.append((reason, count))
             if reason_items and k_norm > 0:
                 reason_items.sort(key=lambda x: (-x[1], x[0]))
+                rolling_reject_top_pairs = reason_items[:k_norm]
                 rolling_reject_top = ",".join(
-                    f"{reason}:{count}" for reason, count in reason_items[:k_norm]
+                    f"{reason}:{count}" for reason, count in rolling_reject_top_pairs
                 )
 
-    return (
+    line = (
         f"Nightly {nightly_date} | window={payload.get('from_ts', '')} -> {payload.get('to_ts', '')} "
         f"| signals total={payload.get('total_signals', 0)} executed={payload.get('executed_signals', 0)} "
         f"rejected={payload.get('rejected_signals', 0)} | {best_text} "
@@ -98,6 +100,68 @@ def build_summary_line(
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
 
+    sidecar = {
+        "schema_version": "nightly-summary-sidecar-1.0",
+        "nightly_date": nightly_date,
+        "window": {
+            "from_ts": str(payload.get("from_ts", "")),
+            "to_ts": str(payload.get("to_ts", "")),
+        },
+        "signals": {
+            "total": int(_f(payload.get("total_signals"))),
+            "executed": int(_f(payload.get("executed_signals"))),
+            "rejected": int(_f(payload.get("rejected_signals"))),
+        },
+        "best": best_text,
+        "rolling": {
+            "runs": rolling_runs,
+            "execution_rate": rolling_exec_rate,
+            "pos_win_rate": rolling_positive_window_rate,
+            "empty_windows": rolling_empty_window_count,
+            "positive_window_rate": rolling_positive_window_rate,
+            "empty_window_count": rolling_empty_window_count,
+            "range_h": rolling_range_hours,
+            "coverage": rolling_coverage_ratio,
+            "overlap": rolling_overlap_ratio,
+            "range_hours": rolling_range_hours,
+            "coverage_ratio": rolling_coverage_ratio,
+            "overlap_ratio": rolling_overlap_ratio,
+            "coverage_label": rolling_coverage_label,
+            "reject_top_k": k_norm,
+            "reject_top": rolling_reject_top,
+            "reject_top_pairs": [
+                {"reason": reason, "count": count}
+                for reason, count in rolling_reject_top_pairs
+            ],
+        },
+        "paths": {
+            "pdf": str(pdf_path.resolve()),
+            "rolling_json": str(rolling_path.resolve()),
+        },
+    }
+
+    return line, sidecar
+
+
+def build_summary_line(
+    *,
+    payload: dict[str, Any],
+    rolling_payload: dict[str, Any] | None,
+    pdf_path: Path,
+    rolling_path: Path,
+    nightly_date: str,
+    rolling_reject_top_k: int,
+) -> str:
+    line, _ = build_summary_bundle(
+        payload=payload,
+        rolling_payload=rolling_payload,
+        pdf_path=pdf_path,
+        rolling_path=rolling_path,
+        nightly_date=nightly_date,
+        rolling_reject_top_k=rolling_reject_top_k,
+    )
+    return line
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -105,6 +169,7 @@ def main() -> None:
     parser.add_argument("--pdf-path", required=True)
     parser.add_argument("--rolling-json", required=True)
     parser.add_argument("--summary-path", required=True)
+    parser.add_argument("--summary-json-path", default=None)
     parser.add_argument("--nightly-date", required=True)
     parser.add_argument("--rolling-reject-top-k", type=int, default=2)
     args = parser.parse_args()
@@ -115,7 +180,7 @@ def main() -> None:
     if rolling_path.exists():
         rolling_payload = json.loads(rolling_path.read_text())
 
-    line = build_summary_line(
+    line, sidecar = build_summary_bundle(
         payload=payload,
         rolling_payload=rolling_payload,
         pdf_path=Path(args.pdf_path),
@@ -124,6 +189,8 @@ def main() -> None:
         rolling_reject_top_k=args.rolling_reject_top_k,
     )
     Path(args.summary_path).write_text(line + "\n")
+    if args.summary_json_path:
+        Path(args.summary_json_path).write_text(json.dumps(sidecar, ensure_ascii=False, indent=2) + "\n")
     print(line)
 
 
