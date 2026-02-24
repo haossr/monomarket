@@ -616,3 +616,20 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "http_5xx" in res.output
     assert "timeout" in res.output
     assert "HTTP 503" in res.output
+
+    res_empty = runner.invoke(
+        app,
+        [
+            "ingest-health",
+            "--source",
+            "gamma",
+            "--run-window",
+            "5",
+            "--error-share-min-total-runs",
+            "3",
+            "--config",
+            str(config_path),
+        ],
+    )
+    assert res_empty.exit_code == 0, res_empty.output
+    assert "error share empty after filters" in res_empty.output

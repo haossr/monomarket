@@ -473,6 +473,11 @@ def ingest_health(
             str(int(row["total_runs"] or 0)),
         )
     console.print(tb5)
+    if not error_share:
+        console.print(
+            "[yellow]error share empty after filters[/yellow] "
+            "(consider relaxing --error-share-min-* or --error-share-top-k)"
+        )
 
     tb6 = Table(title=f"Recent ingestion errors (per source <= {error_sample_limit})")
     tb6.add_column("source")
