@@ -905,6 +905,13 @@ def backtest_rolling(
     overlap_seconds = max(0.0, sampled_seconds - covered_seconds)
     coverage_ratio = (covered_seconds / total_range_seconds) if total_range_seconds > 0 else 0.0
     overlap_ratio = (overlap_seconds / covered_seconds) if covered_seconds > 0 else 0.0
+    if coverage_ratio >= 0.95:
+        coverage_label = "full"
+    elif coverage_ratio >= 0.5:
+        coverage_label = "partial"
+    else:
+        coverage_label = "sparse"
+
     sampled_hours = sampled_seconds / 3600.0
     covered_hours = covered_seconds / 3600.0
     overlap_hours = overlap_seconds / 3600.0
@@ -919,6 +926,7 @@ def backtest_rolling(
         f"range_hours={total_range_hours:.2f} "
         f"coverage_ratio={coverage_ratio:.2%} "
         f"overlap_ratio={overlap_ratio:.2%} "
+        f"coverage_label={coverage_label} "
         f"overlap_mode={overlap_mode}"
     )
 
@@ -1066,6 +1074,7 @@ def backtest_rolling(
                 "overlap_hours": overlap_hours,
                 "coverage_ratio": coverage_ratio,
                 "overlap_ratio": overlap_ratio,
+                "coverage_label": coverage_label,
                 "coverage_basis": "coverage_ratio=covered_hours/range_hours; overlap_ratio=overlap_hours/covered_hours",
                 "risk_rejection_reasons": {
                     reason: count

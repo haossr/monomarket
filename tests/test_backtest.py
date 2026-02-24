@@ -580,6 +580,7 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert "Backtest rolling windows" in res.output
     assert "Backtest rolling strategy aggregate" in res.output
     assert "overlap_mode=tiled" in res.output
+    assert "coverage_label=full" in res.output
     assert "range_hours=" in res.output
     assert "rejection reasons" in res.output.lower()
     assert "rolling json exported" in res.output
@@ -607,6 +608,7 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert abs(float(payload["summary"]["overlap_hours"]) - 0.0) < 1e-9
     assert abs(float(payload["summary"]["coverage_ratio"]) - 1.0) < 1e-9
     assert abs(float(payload["summary"]["overlap_ratio"]) - 0.0) < 1e-9
+    assert payload["summary"]["coverage_label"] == "full"
     assert "covered_hours/range_hours" in str(payload["summary"]["coverage_basis"])
     assert payload["summary"]["risk_rejection_reasons"] == {}
     assert len(payload["windows"]) == 2
@@ -686,6 +688,7 @@ def test_cli_backtest_rolling_risk_reason_histogram(tmp_path: Path) -> None:
     assert abs(float(payload["summary"]["overlap_hours"]) - 0.0) < 1e-9
     assert abs(float(payload["summary"]["coverage_ratio"]) - 1.0) < 1e-9
     assert abs(float(payload["summary"]["overlap_ratio"]) - 0.0) < 1e-9
+    assert payload["summary"]["coverage_label"] == "full"
     assert "covered_hours/range_hours" in str(payload["summary"]["coverage_basis"])
     assert (
         abs(
@@ -755,8 +758,10 @@ def test_cli_backtest_rolling_overlap_mode_flags(tmp_path: Path) -> None:
     )
     assert overlap_res.exit_code == 0, overlap_res.output
     assert "overlap_mode=overlap" in overlap_res.output
+    assert "coverage_label=full" in overlap_res.output
     overlap_payload = json.loads(overlap_out.read_text())
     assert overlap_payload["overlap_mode"] == "overlap"
+    assert overlap_payload["summary"]["coverage_label"] == "full"
     assert abs(float(overlap_payload["summary"]["range_hours"]) - 2.0) < 1e-9
     assert abs(float(overlap_payload["summary"]["coverage_ratio"]) - 1.0) < 1e-9
     assert abs(float(overlap_payload["summary"]["overlap_ratio"]) - 0.75) < 1e-9
@@ -787,12 +792,44 @@ def test_cli_backtest_rolling_overlap_mode_flags(tmp_path: Path) -> None:
     )
     assert gapped_res.exit_code == 0, gapped_res.output
     assert "overlap_mode=gapped" in gapped_res.output
+    assert "coverage_label=partial" in gapped_res.output
     gapped_payload = json.loads(gapped_out.read_text())
     assert gapped_payload["overlap_mode"] == "gapped"
+    assert gapped_payload["summary"]["coverage_label"] == "partial"
     assert abs(float(gapped_payload["summary"]["range_hours"]) - 2.0) < 1e-9
     assert abs(float(gapped_payload["summary"]["coverage_ratio"]) - 0.5) < 1e-9
     assert abs(float(gapped_payload["summary"]["overlap_ratio"]) - 0.0) < 1e-9
     assert abs(float(gapped_payload["summary"]["overlap_hours"]) - 0.0) < 1e-9
+
+    sparse_out = tmp_path / "artifacts" / "rolling-sparse.json"
+    sparse_res = runner.invoke(
+        app,
+        [
+            "backtest-rolling",
+            "--strategies",
+            "s1",
+            "--from",
+            "2026-02-20T00:00:00Z",
+            "--to",
+            "2026-02-20T02:00:00Z",
+            "--window-hours",
+            "0.4",
+            "--step-hours",
+            "3",
+            "--slippage-bps",
+            "0",
+            "--out-json",
+            str(sparse_out),
+            "--config",
+            str(config_path),
+        ],
+    )
+    assert sparse_res.exit_code == 0, sparse_res.output
+    assert "coverage_label=sparse" in sparse_res.output
+    sparse_payload = json.loads(sparse_out.read_text())
+    assert sparse_payload["overlap_mode"] == "gapped"
+    assert sparse_payload["summary"]["coverage_label"] == "sparse"
+    assert abs(float(sparse_payload["summary"]["coverage_ratio"]) - 0.2) < 1e-9
 
 
 def test_cli_backtest_json_with_checksum(tmp_path: Path) -> None:
