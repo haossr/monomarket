@@ -200,6 +200,12 @@ def ingest_health(
     source: str | None = typer.Option(None, help="gamma|data|clob (default: all)"),
     limit: int = typer.Option(20, min=1, max=200),
     run_window: int = typer.Option(20, min=1, max=500, help="Recent runs per source"),
+    error_trend_window: int = typer.Option(
+        20,
+        min=1,
+        max=500,
+        help="Recent error-bucket events per source/bucket to compare against previous window",
+    ),
     error_sample_limit: int = typer.Option(
         5,
         min=1,
@@ -212,6 +218,11 @@ def ingest_health(
     storage.init_db()
 
     buckets = storage.list_ingestion_error_buckets(source=source, limit=limit)
+    trends = storage.list_ingestion_error_bucket_trends(
+        source=source,
+        window=error_trend_window,
+        limit=limit,
+    )
     breakers = storage.list_ingestion_breakers(source=source, limit=limit)
     run_summary = storage.list_ingestion_run_summary_by_source(
         source=source,
@@ -238,6 +249,38 @@ def ingest_health(
             str(row["updated_at"]),
         )
     console.print(tb1)
+
+    tb1b = Table(
+        title=(
+            "Ingestion error bucket trends "
+            f"(recent={error_trend_window} vs prev={error_trend_window})"
+        )
+    )
+    tb1b.add_column("source")
+    tb1b.add_column("bucket")
+    tb1b.add_column("recent")
+    tb1b.add_column("prev")
+    tb1b.add_column("delta")
+    tb1b.add_column("change")
+    tb1b.add_column("recent_last_at")
+    for row in trends:
+        recent_count = int(row["recent_count"] or 0)
+        prev_count = int(row["prev_count"] or 0)
+        delta = recent_count - prev_count
+        if prev_count <= 0:
+            change = "new" if recent_count > 0 else "0.00%"
+        else:
+            change = f"{(delta / prev_count):.2%}"
+        tb1b.add_row(
+            str(row["source"]),
+            str(row["error_bucket"]),
+            str(recent_count),
+            str(prev_count),
+            f"{delta:+d}",
+            change,
+            str(row["recent_last_at"] or ""),
+        )
+    console.print(tb1b)
 
     tb2 = Table(title=f"Ingestion breakers ({len(breakers)})")
     tb2.add_column("source")

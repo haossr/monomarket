@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS ingestion_error_buckets (
     PRIMARY KEY(source, error_bucket)
 );
 
+CREATE TABLE IF NOT EXISTS ingestion_error_bucket_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    error_bucket TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ingestion_error_bucket_events_src_bucket_id
+    ON ingestion_error_bucket_events(source, error_bucket, id DESC);
+
 CREATE TABLE IF NOT EXISTS ingestion_breakers (
     source TEXT PRIMARY KEY,
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
@@ -319,6 +330,7 @@ class Storage:
         if count <= 0:
             return
         now = self._now()
+        source_norm = source.lower()
         with self.conn() as conn:
             conn.execute(
                 """
@@ -329,7 +341,16 @@ class Storage:
                     last_error = excluded.last_error,
                     updated_at = excluded.updated_at
                 """,
-                (source.lower(), error_bucket, count, last_error, now),
+                (source_norm, error_bucket, count, last_error, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO ingestion_error_bucket_events(
+                    source, error_bucket, count, last_error, created_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (source_norm, error_bucket, count, last_error, now),
             )
 
     def get_ingestion_breaker(self, source: str) -> dict[str, Any] | None:
@@ -401,6 +422,58 @@ class Storage:
                     """,
                     (limit,),
                 ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_ingestion_error_bucket_trends(
+        self,
+        source: str | None = None,
+        window: int = 20,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        source_norm = source.lower() if source else None
+        bucket_window = max(1, window)
+        with self.conn() as conn:
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT
+                        source,
+                        error_bucket,
+                        count,
+                        created_at,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY source, error_bucket
+                            ORDER BY id DESC
+                        ) AS rn
+                    FROM ingestion_error_bucket_events
+                    WHERE (? IS NULL OR source = ?)
+                )
+                SELECT
+                    source,
+                    error_bucket,
+                    SUM(CASE WHEN rn <= ? THEN count ELSE 0 END) AS recent_count,
+                    SUM(CASE WHEN rn > ? AND rn <= ? THEN count ELSE 0 END) AS prev_count,
+                    MAX(CASE WHEN rn <= ? THEN created_at ELSE NULL END) AS recent_last_at,
+                    MAX(CASE WHEN rn > ? AND rn <= ? THEN created_at ELSE NULL END) AS prev_last_at
+                FROM ranked
+                WHERE rn <= ?
+                GROUP BY source, error_bucket
+                ORDER BY source ASC, error_bucket ASC
+                LIMIT ?
+                """,
+                (
+                    source_norm,
+                    source_norm,
+                    bucket_window,
+                    bucket_window,
+                    bucket_window * 2,
+                    bucket_window,
+                    bucket_window,
+                    bucket_window * 2,
+                    bucket_window * 2,
+                    max(1, limit),
+                ),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def list_ingestion_breakers(

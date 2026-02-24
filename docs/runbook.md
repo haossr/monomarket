@@ -24,16 +24,17 @@ monomarket ingest --source all --limit 300 --full
 `ingest` 输出会额外包含 `error_buckets`（如 `http_429/http_5xx/circuit_open`），用于观测分级重试与熔断恢复状态。
 当 breaker 冷却到期后，系统会执行单次 `half-open` 探测请求：成功则关闭 breaker，失败则立即重新打开。
 
-查看聚合健康状态（错误分桶 + breaker 状态）：
+查看聚合健康状态（错误分桶 + bucket 趋势 + breaker 状态）：
 
 ```bash
-monomarket ingest-health --source gamma --run-window 20 --error-sample-limit 5
+monomarket ingest-health --source gamma --run-window 20 --error-trend-window 20 --error-sample-limit 5
 # 或查看全部 source
-monomarket ingest-health --run-window 20 --error-sample-limit 5
+monomarket ingest-health --run-window 20 --error-trend-window 20 --error-sample-limit 5
 ```
 
 输出包含：
 - error buckets 聚合
+- error bucket 趋势（最近窗口 vs 前一窗口，按 source/bucket）
 - breaker 状态
 - breaker 状态过渡计数（open/half_open/closed）与最近转移时间
 - 近 N 次 run 的 source 级摘要：`non_ok_rate / avg_failures / avg_retries / failure_per_req`

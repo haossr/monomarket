@@ -421,6 +421,12 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
         count=3,
         last_error="HTTP 503",
     )
+    storage.update_ingestion_error_bucket(
+        source="gamma",
+        error_bucket="http_5xx",
+        count=1,
+        last_error="HTTP 502",
+    )
     storage.set_ingestion_breaker(
         source="gamma",
         consecutive_failures=2,
@@ -472,6 +478,13 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert float(row["total_failures"]) == 3.0
     assert float(row["total_requests"]) == 20.0
 
+    trends = storage.list_ingestion_error_bucket_trends(source="gamma", window=1)
+    assert len(trends) == 1
+    trend_row = trends[0]
+    assert str(trend_row["error_bucket"]) == "http_5xx"
+    assert int(trend_row["recent_count"] or 0) == 1
+    assert int(trend_row["prev_count"] or 0) == 3
+
     runner = CliRunner()
     res = runner.invoke(
         app,
@@ -481,6 +494,8 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
             "gamma",
             "--run-window",
             "5",
+            "--error-trend-window",
+            "1",
             "--error-sample-limit",
             "3",
             "--config",
@@ -490,6 +505,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
 
     assert res.exit_code == 0, res.output
     assert "Ingestion error buckets" in res.output
+    assert "Ingestion error bucket trends" in res.output
     assert "Ingestion breakers" in res.output
     assert "Breaker transitions" in res.output
     assert "Ingestion run summary by source" in res.output
