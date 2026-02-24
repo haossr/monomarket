@@ -162,95 +162,13 @@ else
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 fi
 
-"$PYTHON_BIN" - "$RUN_DIR/latest.json" "$PDF_PATH" "$ROLLING_JSON" "$SUMMARY_TXT" "$NIGHTLY_DATE" "$ROLLING_REJECT_TOP_K" <<'PY'
-from __future__ import annotations
-
-import json
-from pathlib import Path
-import sys
-
-
-def _f(raw: object) -> float:
-    try:
-        return float(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return 0.0
-
-
-payload = json.loads(Path(sys.argv[1]).read_text())
-pdf_path = Path(sys.argv[2]).resolve()
-rolling_path = Path(sys.argv[3]).resolve()
-summary_path = Path(sys.argv[4])
-nightly_date = sys.argv[5]
-rolling_reject_top_k = max(0, int(_f(sys.argv[6])))
-
-rows = payload.get("results") or []
-best = None
-if isinstance(rows, list) and rows:
-    best = max((r for r in rows if isinstance(r, dict)), key=lambda r: _f(r.get("pnl")), default=None)
-
-best_text = "best_strategy=n/a"
-if isinstance(best, dict):
-    best_text = f"best_strategy={best.get('strategy', '')} pnl={_f(best.get('pnl')):.4f}"
-
-rolling_runs = 0
-rolling_exec_rate = 0.0
-rolling_range_hours = 0.0
-rolling_coverage_ratio = 0.0
-rolling_overlap_ratio = 0.0
-rolling_coverage_label = "unknown"
-rolling_positive_window_rate = 0.0
-rolling_empty_window_count = 0
-rolling_reject_top = "disabled" if rolling_reject_top_k <= 0 else "none"
-if rolling_path.exists():
-    rolling_payload = json.loads(rolling_path.read_text())
-    rolling_summary = rolling_payload.get("summary")
-    if isinstance(rolling_summary, dict):
-        rolling_runs = int(_f(rolling_summary.get("run_count")))
-        rolling_exec_rate = _f(rolling_summary.get("execution_rate"))
-        rolling_range_hours = _f(rolling_summary.get("range_hours"))
-        rolling_coverage_ratio = _f(rolling_summary.get("coverage_ratio"))
-        rolling_overlap_ratio = _f(rolling_summary.get("overlap_ratio"))
-        rolling_positive_window_rate = _f(rolling_summary.get("positive_window_rate"))
-        rolling_empty_window_count = int(_f(rolling_summary.get("empty_window_count")))
-        coverage_label_raw = rolling_summary.get("coverage_label")
-        if isinstance(coverage_label_raw, str) and coverage_label_raw.strip():
-            rolling_coverage_label = coverage_label_raw.strip()
-
-        raw_reasons = rolling_summary.get("risk_rejection_reasons")
-        if isinstance(raw_reasons, dict):
-            reason_items: list[tuple[str, int]] = []
-            for key, value in raw_reasons.items():
-                reason = str(key).strip() or "unknown"
-                count = int(_f(value))
-                if count <= 0:
-                    continue
-                reason_items.append((reason, count))
-            if reason_items and rolling_reject_top_k > 0:
-                reason_items.sort(key=lambda x: (-x[1], x[0]))
-                rolling_reject_top = ",".join(
-                    f"{reason}:{count}" for reason, count in reason_items[:rolling_reject_top_k]
-                )
-
-line = (
-    f"Nightly {nightly_date} | window={payload.get('from_ts', '')} -> {payload.get('to_ts', '')} "
-    f"| signals total={payload.get('total_signals', 0)} executed={payload.get('executed_signals', 0)} "
-    f"rejected={payload.get('rejected_signals', 0)} | {best_text} "
-    f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
-    f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
-    f"positive_window_rate={rolling_positive_window_rate:.2%} "
-    f"empty_window_count={rolling_empty_window_count} "
-    f"range_h={rolling_range_hours:.2f} coverage={rolling_coverage_ratio:.2%} "
-    f"overlap={rolling_overlap_ratio:.2%} "
-    f"range_hours={rolling_range_hours:.2f} coverage_ratio={rolling_coverage_ratio:.2%} "
-    f"overlap_ratio={rolling_overlap_ratio:.2%} coverage_label={rolling_coverage_label} "
-    f"rolling_reject_top_k={rolling_reject_top_k} "
-    f"rolling_reject_top={rolling_reject_top} "
-    f"| pdf={pdf_path} | rolling_json={rolling_path}"
-)
-summary_path.write_text(line + "\n")
-print(line)
-PY
+"$PYTHON_BIN" scripts/nightly_summary_line.py \
+  --backtest-json "$RUN_DIR/latest.json" \
+  --pdf-path "$PDF_PATH" \
+  --rolling-json "$ROLLING_JSON" \
+  --summary-path "$SUMMARY_TXT" \
+  --nightly-date "$NIGHTLY_DATE" \
+  --rolling-reject-top-k "$ROLLING_REJECT_TOP_K"
 
 echo "[nightly] done"
 echo "- run_dir: $RUN_DIR"

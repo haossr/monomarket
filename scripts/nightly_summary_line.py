@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+
+def _f(raw: object) -> float:
+    try:
+        return float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _best_strategy_text(payload: dict[str, Any]) -> str:
+    rows = payload.get("results") or []
+    best: dict[str, Any] | None = None
+    if isinstance(rows, list) and rows:
+        candidates = [r for r in rows if isinstance(r, dict)]
+        if candidates:
+            best = max(candidates, key=lambda r: _f(r.get("pnl")))
+
+    if not isinstance(best, dict):
+        return "best_strategy=n/a"
+    return f"best_strategy={best.get('strategy', '')} pnl={_f(best.get('pnl')):.4f}"
+
+
+def build_summary_line(
+    *,
+    payload: dict[str, Any],
+    rolling_payload: dict[str, Any] | None,
+    pdf_path: Path,
+    rolling_path: Path,
+    nightly_date: str,
+    rolling_reject_top_k: int,
+) -> str:
+    best_text = _best_strategy_text(payload)
+
+    rolling_runs = 0
+    rolling_exec_rate = 0.0
+    rolling_range_hours = 0.0
+    rolling_coverage_ratio = 0.0
+    rolling_overlap_ratio = 0.0
+    rolling_coverage_label = "unknown"
+    rolling_positive_window_rate = 0.0
+    rolling_empty_window_count = 0
+
+    k_norm = max(0, int(rolling_reject_top_k))
+    rolling_reject_top = "disabled" if k_norm <= 0 else "none"
+
+    rolling_summary = None
+    if isinstance(rolling_payload, dict):
+        rolling_summary = rolling_payload.get("summary")
+
+    if isinstance(rolling_summary, dict):
+        rolling_runs = int(_f(rolling_summary.get("run_count")))
+        rolling_exec_rate = _f(rolling_summary.get("execution_rate"))
+        rolling_range_hours = _f(rolling_summary.get("range_hours"))
+        rolling_coverage_ratio = _f(rolling_summary.get("coverage_ratio"))
+        rolling_overlap_ratio = _f(rolling_summary.get("overlap_ratio"))
+        rolling_positive_window_rate = _f(rolling_summary.get("positive_window_rate"))
+        rolling_empty_window_count = int(_f(rolling_summary.get("empty_window_count")))
+        coverage_label_raw = rolling_summary.get("coverage_label")
+        if isinstance(coverage_label_raw, str) and coverage_label_raw.strip():
+            rolling_coverage_label = coverage_label_raw.strip()
+
+        raw_reasons = rolling_summary.get("risk_rejection_reasons")
+        if isinstance(raw_reasons, dict):
+            reason_items: list[tuple[str, int]] = []
+            for key, value in raw_reasons.items():
+                reason = str(key).strip() or "unknown"
+                count = int(_f(value))
+                if count <= 0:
+                    continue
+                reason_items.append((reason, count))
+            if reason_items and k_norm > 0:
+                reason_items.sort(key=lambda x: (-x[1], x[0]))
+                rolling_reject_top = ",".join(
+                    f"{reason}:{count}" for reason, count in reason_items[:k_norm]
+                )
+
+    return (
+        f"Nightly {nightly_date} | window={payload.get('from_ts', '')} -> {payload.get('to_ts', '')} "
+        f"| signals total={payload.get('total_signals', 0)} executed={payload.get('executed_signals', 0)} "
+        f"rejected={payload.get('rejected_signals', 0)} | {best_text} "
+        f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
+        f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
+        f"positive_window_rate={rolling_positive_window_rate:.2%} "
+        f"empty_window_count={rolling_empty_window_count} "
+        f"range_h={rolling_range_hours:.2f} coverage={rolling_coverage_ratio:.2%} "
+        f"overlap={rolling_overlap_ratio:.2%} "
+        f"range_hours={rolling_range_hours:.2f} coverage_ratio={rolling_coverage_ratio:.2%} "
+        f"overlap_ratio={rolling_overlap_ratio:.2%} coverage_label={rolling_coverage_label} "
+        f"rolling_reject_top_k={k_norm} "
+        f"rolling_reject_top={rolling_reject_top} "
+        f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--backtest-json", required=True)
+    parser.add_argument("--pdf-path", required=True)
+    parser.add_argument("--rolling-json", required=True)
+    parser.add_argument("--summary-path", required=True)
+    parser.add_argument("--nightly-date", required=True)
+    parser.add_argument("--rolling-reject-top-k", type=int, default=2)
+    args = parser.parse_args()
+
+    payload = json.loads(Path(args.backtest_json).read_text())
+    rolling_path = Path(args.rolling_json)
+    rolling_payload: dict[str, Any] | None = None
+    if rolling_path.exists():
+        rolling_payload = json.loads(rolling_path.read_text())
+
+    line = build_summary_line(
+        payload=payload,
+        rolling_payload=rolling_payload,
+        pdf_path=Path(args.pdf_path),
+        rolling_path=rolling_path,
+        nightly_date=args.nightly_date,
+        rolling_reject_top_k=args.rolling_reject_top_k,
+    )
+    Path(args.summary_path).write_text(line + "\n")
+    print(line)
+
+
+if __name__ == "__main__":
+    main()
