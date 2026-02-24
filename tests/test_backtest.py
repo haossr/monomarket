@@ -570,11 +570,21 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert "rolling json exported" in res.output
 
     payload = json.loads(out_json.read_text())
+    assert payload["schema_version"] == "rolling-1.0"
     assert payload["kind"] == "backtest_rolling_summary"
+    assert payload["execution_config"]["slippage_bps"] == 0.0
+    assert payload["execution_config"]["fee_bps"] == 0.0
+    assert payload["risk_config"]["max_event_notional"] == 1500.0
+
     assert payload["summary"]["run_count"] == 2
     assert payload["summary"]["total_signals"] == 4
     assert payload["summary"]["executed_signals"] == 4
     assert payload["summary"]["rejected_signals"] == 0
+    assert payload["summary"]["empty_window_count"] == 1
+    assert payload["summary"]["positive_window_count"] == 1
+    assert abs(float(payload["summary"]["positive_window_rate"]) - 0.5) < 1e-9
+    assert abs(float(payload["summary"]["pnl_sum"]) - 1.5) < 1e-9
+    assert abs(float(payload["summary"]["pnl_avg"]) - 0.75) < 1e-9
     assert payload["summary"]["risk_rejection_reasons"] == {}
     assert len(payload["windows"]) == 2
     assert payload["windows"][0]["total_signals"] == 4
@@ -638,8 +648,24 @@ def test_cli_backtest_rolling_risk_reason_histogram(tmp_path: Path) -> None:
     assert "event notional limit exceeded" in res.output
 
     payload = json.loads(out_json.read_text())
+    assert payload["schema_version"] == "rolling-1.0"
+    assert payload["execution_config"]["slippage_bps"] == 0.0
+    assert payload["risk_config"]["max_event_notional"] == 5.0
+
     assert payload["summary"]["run_count"] == 1
     assert payload["summary"]["rejected_signals"] == 1
+    assert payload["summary"]["empty_window_count"] == 0
+    assert abs(float(payload["summary"]["pnl_avg"]) - float(payload["summary"]["pnl_sum"])) < 1e-9
+    assert (
+        abs(
+            float(payload["summary"]["positive_window_rate"])
+            - (
+                float(payload["summary"]["positive_window_count"])
+                / float(payload["summary"]["run_count"])
+            )
+        )
+        < 1e-9
+    )
 
     reason_map = payload["summary"]["risk_rejection_reasons"]
     assert isinstance(reason_map, dict)

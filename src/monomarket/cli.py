@@ -35,6 +35,7 @@ console = Console()
 
 # Outcome token label used in trade requests (not a credential).
 DEFAULT_OUTCOME_TOKEN = "YES"  # nosec B105
+BACKTEST_ROLLING_ARTIFACT_SCHEMA_VERSION = "rolling-1.0"
 
 
 def _ctx(config_path: str | None = None) -> tuple[Settings, Storage]:
@@ -740,18 +741,20 @@ def backtest_rolling(
         raise typer.BadParameter("--step-hours must be positive")
 
     selected = [s.strip().lower() for s in strategies.split(",") if s.strip()]
+    execution_cfg = BacktestExecutionConfig(
+        slippage_bps=slippage_bps,
+        fee_bps=fee_bps,
+    )
+    risk_cfg = BacktestRiskConfig(
+        max_daily_loss=settings.risk.max_daily_loss,
+        max_strategy_notional=settings.risk.max_strategy_notional,
+        max_event_notional=settings.risk.max_event_notional,
+        circuit_breaker_rejections=settings.risk.circuit_breaker_rejections,
+    )
     engine = BacktestEngine(
         storage,
-        execution=BacktestExecutionConfig(
-            slippage_bps=slippage_bps,
-            fee_bps=fee_bps,
-        ),
-        risk=BacktestRiskConfig(
-            max_daily_loss=settings.risk.max_daily_loss,
-            max_strategy_notional=settings.risk.max_strategy_notional,
-            max_event_notional=settings.risk.max_event_notional,
-            circuit_breaker_rejections=settings.risk.circuit_breaker_rejections,
-        ),
+        execution=execution_cfg,
+        risk=risk_cfg,
     )
 
     run_rows: list[tuple[str, str, int, int, int, float, float, dict[str, int]]] = []
@@ -814,11 +817,19 @@ def backtest_rolling(
 
     runs = len(run_rows)
     overall_exec_rate = (executed_signals / total_signals) if total_signals > 0 else 0.0
+    empty_window_count = sum(1 for row in run_rows if row[2] <= 0)
+    positive_window_count = sum(1 for row in run_rows if row[6] > 0.0)
+    positive_window_rate = (positive_window_count / runs) if runs > 0 else 0.0
+    pnl_sum = sum(row[6] for row in run_rows)
+    pnl_avg = (pnl_sum / runs) if runs > 0 else 0.0
+
     console.print(
         "backtest rolling "
         f"runs={runs} total_signals={total_signals} "
         f"executed={executed_signals} rejected={rejected_signals} "
-        f"execution_rate={overall_exec_rate:.2%}"
+        f"execution_rate={overall_exec_rate:.2%} "
+        f"positive_window_rate={positive_window_rate:.2%} "
+        f"empty_windows={empty_window_count}"
     )
 
     tb = Table(title=f"Backtest rolling windows ({runs})")
@@ -937,6 +948,7 @@ def backtest_rolling(
         ]
 
         payload = {
+            "schema_version": BACKTEST_ROLLING_ARTIFACT_SCHEMA_VERSION,
             "kind": "backtest_rolling_summary",
             "generated_at": datetime.now(UTC).isoformat(),
             "from_ts": from_dt.isoformat(),
@@ -944,12 +956,19 @@ def backtest_rolling(
             "window_hours": window_hours,
             "step_hours": step_hours,
             "strategies": selected,
+            "execution_config": asdict(execution_cfg),
+            "risk_config": asdict(risk_cfg),
             "summary": {
                 "run_count": runs,
                 "total_signals": total_signals,
                 "executed_signals": executed_signals,
                 "rejected_signals": rejected_signals,
                 "execution_rate": overall_exec_rate,
+                "empty_window_count": empty_window_count,
+                "positive_window_count": positive_window_count,
+                "positive_window_rate": positive_window_rate,
+                "pnl_sum": pnl_sum,
+                "pnl_avg": pnl_avg,
                 "risk_rejection_reasons": {
                     reason: count
                     for reason, count in sorted(

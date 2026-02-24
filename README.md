@@ -78,7 +78,11 @@ monomarket backtest-rolling --strategies s1,s2,s4,s8 \
   --out-json artifacts/backtest/rolling-summary.json
 ```
 
-rolling summary 会额外输出风控拒单原因分布（`risk_rejection_reasons`，窗口级 + 汇总级）。
+rolling summary 会额外输出：
+- `schema_version`（当前 `rolling-1.0`）
+- `execution_config` / `risk_config` 快照
+- `summary` 扩展指标：`empty_window_count` / `positive_window_rate` / `pnl_sum` / `pnl_avg`
+- 风控拒单原因分布（`risk_rejection_reasons`，窗口级 + 汇总级）
 
 v1->v2 迁移（校验 + 转换）：
 
