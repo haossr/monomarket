@@ -10,6 +10,7 @@ from monomarket.backtest import (
     BACKTEST_ARTIFACT_CHECKSUM_ALGO,
     BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO,
     BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
+    NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO,
     NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION,
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
     REQUIRED_BACKTEST_JSON_FIELDS_V2,
@@ -20,6 +21,7 @@ from monomarket.backtest import (
     build_backtest_migration_map_artifact,
     compute_backtest_json_artifact_checksum,
     compute_backtest_migration_map_checksum,
+    compute_nightly_summary_sidecar_checksum,
     is_schema_compatible,
     migrate_backtest_artifact_v1_to_v2,
     parse_schema_version,
@@ -29,6 +31,7 @@ from monomarket.backtest import (
     validate_nightly_summary_sidecar,
     verify_backtest_json_artifact_checksum,
     verify_backtest_migration_map_checksum,
+    verify_nightly_summary_sidecar_checksum,
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "backtest"
@@ -277,6 +280,45 @@ def test_validate_nightly_summary_sidecar_legacy_best_string_ok() -> None:
     payload["best"] = "best_strategy=s1 pnl=1.2000"
     payload.pop("best_text", None)
     validate_nightly_summary_sidecar(payload)
+
+
+def test_verify_nightly_summary_sidecar_checksum() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["checksum_algo"] = NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO
+    payload["checksum_sha256"] = compute_nightly_summary_sidecar_checksum(payload)
+
+    assert verify_nightly_summary_sidecar_checksum(payload)
+    validate_nightly_summary_sidecar(payload)
+
+
+def test_verify_nightly_summary_sidecar_checksum_tampered() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["checksum_algo"] = NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO
+    payload["checksum_sha256"] = compute_nightly_summary_sidecar_checksum(payload)
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["runs"] = int(rolling["runs"]) + 1
+
+    assert not verify_nightly_summary_sidecar_checksum(payload)
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_partial_checksum_fields() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["checksum_sha256"] = "abc"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_wrong_checksum_algo() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["checksum_algo"] = "sha1"
+    payload["checksum_sha256"] = "abc"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
 
 
 def test_validate_nightly_summary_sidecar_missing_required() -> None:

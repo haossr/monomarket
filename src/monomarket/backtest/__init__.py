@@ -13,6 +13,7 @@ from monomarket.backtest.schema import (
     BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO,
     BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
     DEFAULT_BACKTEST_JSON_VALIDATORS,
+    NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO,
     NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION,
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
     REQUIRED_BACKTEST_JSON_FIELDS_V2,
@@ -25,6 +26,7 @@ from monomarket.backtest.schema import (
     build_backtest_migration_map_artifact,
     compute_backtest_json_artifact_checksum,
     compute_backtest_migration_map_checksum,
+    compute_nightly_summary_sidecar_checksum,
     is_schema_compatible,
     migrate_backtest_artifact_v1_to_v2,
     parse_schema_version,
@@ -34,6 +36,7 @@ from monomarket.backtest.schema import (
     validate_nightly_summary_sidecar,
     verify_backtest_json_artifact_checksum,
     verify_backtest_migration_map_checksum,
+    verify_nightly_summary_sidecar_checksum,
 )
 
 __all__ = [
@@ -42,6 +45,7 @@ __all__ = [
     "REQUIRED_BACKTEST_JSON_FIELDS_V1",
     "REQUIRED_BACKTEST_JSON_FIELDS_V2",
     "NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION",
+    "NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO",
     "REQUIRED_NIGHTLY_SUMMARY_SIDECAR_FIELDS",
     "BACKTEST_ARTIFACT_CHECKSUM_ALGO",
     "BACKTEST_MIGRATION_MAP_SCHEMA_VERSION",
@@ -61,6 +65,8 @@ __all__ = [
     "build_backtest_migration_map_artifact",
     "compute_backtest_json_artifact_checksum",
     "verify_backtest_json_artifact_checksum",
+    "compute_nightly_summary_sidecar_checksum",
+    "verify_nightly_summary_sidecar_checksum",
     "compute_backtest_migration_map_checksum",
     "verify_backtest_migration_map_checksum",
     "BacktestEngine",

@@ -170,7 +170,8 @@ fi
   --summary-path "$SUMMARY_TXT" \
   --summary-json-path "$SUMMARY_JSON" \
   --nightly-date "$NIGHTLY_DATE" \
-  --rolling-reject-top-k "$ROLLING_REJECT_TOP_K"
+  --rolling-reject-top-k "$ROLLING_REJECT_TOP_K" \
+  --with-checksum
 
 echo "[nightly] done"
 echo "- run_dir: $RUN_DIR"

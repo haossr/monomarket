@@ -6,6 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from monomarket.backtest import (
+    NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO,
+    compute_nightly_summary_sidecar_checksum,
+)
 
 ROLLING_REJECT_TOP_DELIMITER = ";"
 
@@ -155,8 +159,7 @@ def build_summary_bundle(
             "reject_top_delimiter": ROLLING_REJECT_TOP_DELIMITER,
             "reject_top": rolling_reject_top,
             "reject_top_pairs": [
-                {"reason": reason, "count": count}
-                for reason, count in rolling_reject_top_pairs
+                {"reason": reason, "count": count} for reason, count in rolling_reject_top_pairs
             ],
         },
         "paths": {
@@ -197,6 +200,7 @@ def main() -> None:
     parser.add_argument("--summary-json-path", default=None)
     parser.add_argument("--nightly-date", required=True)
     parser.add_argument("--rolling-reject-top-k", type=int, default=2)
+    parser.add_argument("--with-checksum", action="store_true")
     args = parser.parse_args()
 
     payload = json.loads(Path(args.backtest_json).read_text())
@@ -215,7 +219,12 @@ def main() -> None:
     )
     Path(args.summary_path).write_text(line + "\n")
     if args.summary_json_path:
-        Path(args.summary_json_path).write_text(json.dumps(sidecar, ensure_ascii=False, indent=2) + "\n")
+        if args.with_checksum:
+            sidecar["checksum_algo"] = NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO
+            sidecar["checksum_sha256"] = compute_nightly_summary_sidecar_checksum(sidecar)
+        Path(args.summary_json_path).write_text(
+            json.dumps(sidecar, ensure_ascii=False, indent=2) + "\n"
+        )
     print(line)
 
 

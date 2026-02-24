@@ -11,6 +11,7 @@ BACKTEST_ARTIFACT_CHECKSUM_ALGO = "sha256"
 BACKTEST_MIGRATION_MAP_SCHEMA_VERSION = "1.0"
 BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO = "sha256"
 NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION = "nightly-summary-sidecar-1.0"
+NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO = "sha256"
 
 REQUIRED_NIGHTLY_SUMMARY_SIDECAR_FIELDS = {
     "schema_version",
@@ -307,6 +308,25 @@ def verify_backtest_migration_map_checksum(payload: Mapping[str, Any]) -> bool:
     return checksum == compute_backtest_migration_map_checksum(payload)
 
 
+def compute_nightly_summary_sidecar_checksum(payload: Mapping[str, Any]) -> str:
+    normalized = dict(payload)
+    normalized.pop("checksum_sha256", None)
+    digest = hashlib.sha256(_canonical_json_bytes(normalized)).hexdigest()
+    return digest
+
+
+def verify_nightly_summary_sidecar_checksum(payload: Mapping[str, Any]) -> bool:
+    checksum = payload.get("checksum_sha256")
+    if not isinstance(checksum, str) or not checksum:
+        return False
+
+    algo = payload.get("checksum_algo")
+    if algo is not None and algo != NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO:
+        return False
+
+    return checksum == compute_nightly_summary_sidecar_checksum(payload)
+
+
 def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
     missing = sorted(REQUIRED_NIGHTLY_SUMMARY_SIDECAR_FIELDS - set(payload.keys()))
     if missing:
@@ -318,6 +338,21 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
             "unsupported nightly sidecar schema_version="
             f"{schema_version!r}; expected {NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION!r}"
         )
+
+    has_checksum = "checksum_sha256" in payload or "checksum_algo" in payload
+    if has_checksum:
+        if "checksum_sha256" not in payload or "checksum_algo" not in payload:
+            raise ValueError(
+                "nightly sidecar checksum requires both checksum_algo and checksum_sha256"
+            )
+        algo = payload.get("checksum_algo")
+        if algo != NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO:
+            raise ValueError(
+                "unsupported nightly sidecar checksum_algo="
+                f"{algo!r}; expected {NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO!r}"
+            )
+        if not verify_nightly_summary_sidecar_checksum(payload):
+            raise ValueError("nightly sidecar checksum verification failed")
 
     nightly_date = payload.get("nightly_date")
     if not isinstance(nightly_date, str) or not nightly_date.strip():
