@@ -255,6 +255,12 @@ def ingest_health(
         max=50,
         help="Keep only top-k error buckets per source in error share table (0=all)",
     ),
+    error_share_min_share: float = typer.Option(
+        0.0,
+        min=0.0,
+        max=1.0,
+        help="Drop error-share buckets below this ratio (0-1, default 0=all)",
+    ),
     error_sample_limit: int = typer.Option(
         5,
         min=1,
@@ -283,6 +289,7 @@ def ingest_health(
         run_window=run_window,
         limit=limit,
         top_k_per_source=error_share_top_k,
+        min_share=error_share_min_share,
     )
     transitions = storage.list_ingestion_breaker_transitions(source=source, limit=limit)
     recent_errors = storage.list_ingestion_recent_errors(
@@ -409,7 +416,11 @@ def ingest_health(
     tb5 = Table(
         title=(
             "Ingestion error bucket share by source "
-            f"(runs window={run_window}, top_k_per_source={error_share_top_k or 'all'})"
+            "("
+            f"runs window={run_window}, "
+            f"top_k_per_source={error_share_top_k or 'all'}, "
+            f"min_share={error_share_min_share:.2%}"
+            ")"
         )
     )
     tb5.add_column("source")
