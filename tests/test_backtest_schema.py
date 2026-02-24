@@ -339,6 +339,17 @@ def test_validate_nightly_summary_sidecar_reject_bad_best_version_type() -> None
         validate_nightly_summary_sidecar(payload)
 
 
+def test_validate_nightly_summary_sidecar_compat_without_best_metadata() -> None:
+    payload = _nightly_sidecar_payload()
+    payload.pop("schema_note", None)
+    payload.pop("best_version", None)
+    payload["checksum_algo"] = NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO
+    payload["checksum_sha256"] = compute_nightly_summary_sidecar_checksum(payload)
+
+    assert verify_nightly_summary_sidecar_checksum(payload)
+    validate_nightly_summary_sidecar(payload)
+
+
 def test_validate_nightly_summary_sidecar_missing_required() -> None:
     payload = _nightly_sidecar_payload()
     payload.pop("rolling")

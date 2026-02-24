@@ -154,6 +154,22 @@ Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 `rolling_reject_top` 使用 `;` 作为原因分隔符（如 `reasonA:3;reasonB:1`）；消费端优先读取 `summary.json` 的 `reject_top_pairs`。
 `summary.json` checksum 默认启用，可用 `--no-checksum` 关闭。
 
+消费端验签示例（Python helper）：
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+from monomarket.backtest import verify_nightly_summary_sidecar_checksum
+
+p = Path("artifacts/backtest/nightly/<YYYY-MM-DD>/summary.json")
+payload = json.loads(p.read_text())
+if not verify_nightly_summary_sidecar_checksum(payload):
+    raise SystemExit("summary.json checksum verification failed")
+print("summary.json checksum ok")
+PY
+```
+
 ## 交易控制开关（Rocky 可独立控制）
 
 支持 3 个统一开关：
