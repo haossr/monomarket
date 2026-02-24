@@ -584,6 +584,7 @@ class Storage:
         min_bucket_count: int = 0,
         min_runs_with_error: int = 0,
         min_total_runs: int = 0,
+        min_source_bucket_total: int = 0,
     ) -> list[dict[str, Any]]:
         source_norm = source.lower() if source else None
         with self.conn() as conn:
@@ -648,6 +649,7 @@ class Storage:
         min_count_norm = max(0, int(min_bucket_count))
         min_runs_norm = max(0, int(min_runs_with_error))
         min_total_runs_norm = max(0, int(min_total_runs))
+        min_source_total_norm = max(0, int(min_source_bucket_total))
         for (row_source, bucket), count in counts_by_bucket.items():
             source_total = source_bucket_totals.get(row_source, 0)
             share = (count / source_total) if source_total else 0.0
@@ -660,6 +662,8 @@ class Storage:
             if source_runs_with_error < min_runs_norm:
                 continue
             if source_total_runs < min_total_runs_norm:
+                continue
+            if source_total < min_source_total_norm:
                 continue
             out.append(
                 {
