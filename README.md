@@ -129,7 +129,11 @@ bash scripts/backtest_nightly_report.sh \
   --config configs/soak.paper.yaml
 ```
 
-Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/report.pdf`
+Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
+- `report.pdf`
+- `summary.txt`
+- `rolling-summary.json`
+- `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 
 ## 交易控制开关（Rocky 可独立控制）
 

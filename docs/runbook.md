@@ -235,12 +235,15 @@ bash scripts/backtest_nightly_report.sh \
   --lookback-hours 24 \
   --market-limit 2000 \
   --ingest-limit 300 \
+  --rolling-window-hours 24 \
+  --rolling-step-hours 12 \
   --config configs/soak.paper.yaml
 ```
 
 夜间目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 - `report.pdf`
 - `summary.txt`
+- `rolling-summary.json`（滚动窗口多样本回测汇总）
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 
 ## 13) 指标解释（回测与报告通用）
