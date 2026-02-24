@@ -553,6 +553,13 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     )
     assert shares_min_runs2 == []
 
+    shares_min_total3 = storage.list_ingestion_error_bucket_share_by_source(
+        source="gamma",
+        run_window=5,
+        min_total_runs=3,
+    )
+    assert shares_min_total3 == []
+
     runner = CliRunner()
     res = runner.invoke(
         app,
@@ -572,6 +579,8 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
             "2",
             "--error-share-min-runs-with-error",
             "1",
+            "--error-share-min-total-runs",
+            "2",
             "--error-sample-limit",
             "3",
             "--config",
@@ -591,6 +600,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "min_share=50.00%" in res.output
     assert "min_count=2" in res.output
     assert "min_runs_with_error=1" in res.output
+    assert "min_total_runs=2" in res.output
     assert "Recent ingestion errors" in res.output
     assert "gamma" in res.output
     assert "http_5xx" in res.output
