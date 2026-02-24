@@ -27,14 +27,14 @@ monomarket ingest --source all --limit 300 --full
 查看聚合健康状态（错误分桶 + bucket 趋势 + breaker 状态）：
 
 ```bash
-monomarket ingest-health --source gamma --run-window 20 --error-trend-window 20 --error-sample-limit 5
+monomarket ingest-health --source gamma --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-sample-limit 5
 # 或查看全部 source
-monomarket ingest-health --run-window 20 --error-trend-window 20 --error-sample-limit 5
+monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-sample-limit 5
 ```
 
 输出包含：
 - error buckets 聚合
-- error bucket 趋势（最近窗口 vs 前一窗口，按 source/bucket）
+- error bucket 趋势（最近窗口 vs 前一窗口，默认按 |delta| top movers 排序）
 - breaker 状态
 - breaker 状态过渡计数（open/half_open/closed）与最近转移时间
 - 近 N 次 run 的 source 级摘要：`non_ok_rate / avg_failures / avg_retries / failure_per_req`

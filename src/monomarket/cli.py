@@ -218,6 +218,11 @@ def ingest_health(
         max=500,
         help="Recent error-bucket events per source/bucket to compare against previous window",
     ),
+    error_trend_top_movers: bool = typer.Option(
+        True,
+        "--error-trend-top-movers/--no-error-trend-top-movers",
+        help="Sort trend rows by absolute delta (|recent-prev|)",
+    ),
     error_sample_limit: int = typer.Option(
         5,
         min=1,
@@ -234,6 +239,7 @@ def ingest_health(
         source=source,
         window=error_trend_window,
         limit=limit,
+        sort_by_abs_delta=error_trend_top_movers,
     )
     breakers = storage.list_ingestion_breakers(source=source, limit=limit)
     run_summary = storage.list_ingestion_run_summary_by_source(
@@ -267,10 +273,11 @@ def ingest_health(
         )
     console.print(tb1)
 
+    trend_mode = "top movers by |delta|" if error_trend_top_movers else "source/bucket order"
     tb1b = Table(
         title=(
             "Ingestion error bucket trends "
-            f"(recent={error_trend_window} vs prev={error_trend_window})"
+            f"(recent={error_trend_window} vs prev={error_trend_window}, {trend_mode})"
         )
     )
     tb1b.add_column("source")

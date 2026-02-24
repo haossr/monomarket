@@ -443,6 +443,7 @@ class Storage:
         source: str | None = None,
         window: int = 20,
         limit: int = 200,
+        sort_by_abs_delta: bool = False,
     ) -> list[dict[str, Any]]:
         source_norm = source.lower() if source else None
         bucket_window = max(1, window)
@@ -473,7 +474,6 @@ class Storage:
                 WHERE rn <= ?
                 GROUP BY source, error_bucket
                 ORDER BY source ASC, error_bucket ASC
-                LIMIT ?
                 """,
                 (
                     source_norm,
@@ -485,10 +485,20 @@ class Storage:
                     bucket_window,
                     bucket_window * 2,
                     bucket_window * 2,
-                    max(1, limit),
                 ),
             ).fetchall()
-        return [dict(row) for row in rows]
+
+        out = [dict(row) for row in rows]
+        if sort_by_abs_delta:
+            out.sort(
+                key=lambda row: (
+                    -abs(int(row["recent_count"] or 0) - int(row["prev_count"] or 0)),
+                    str(row["source"]),
+                    str(row["error_bucket"]),
+                )
+            )
+
+        return out[: max(1, limit)]
 
     def list_ingestion_breakers(
         self,
