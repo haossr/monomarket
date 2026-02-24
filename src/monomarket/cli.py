@@ -267,6 +267,12 @@ def ingest_health(
         max=100000,
         help="Drop error-share buckets with count below this threshold (default 0=all)",
     ),
+    error_share_min_runs_with_error: int = typer.Option(
+        0,
+        min=0,
+        max=100000,
+        help="Drop sources with fewer runs-with-error than this threshold in error share table",
+    ),
     error_sample_limit: int = typer.Option(
         5,
         min=1,
@@ -297,6 +303,7 @@ def ingest_health(
         top_k_per_source=error_share_top_k,
         min_share=error_share_min_share,
         min_bucket_count=error_share_min_count,
+        min_runs_with_error=error_share_min_runs_with_error,
     )
     transitions = storage.list_ingestion_breaker_transitions(source=source, limit=limit)
     recent_errors = storage.list_ingestion_recent_errors(
@@ -427,7 +434,8 @@ def ingest_health(
             f"runs window={run_window}, "
             f"top_k_per_source={error_share_top_k or 'all'}, "
             f"min_share={error_share_min_share:.2%}, "
-            f"min_count={error_share_min_count}"
+            f"min_count={error_share_min_count}, "
+            f"min_runs_with_error={error_share_min_runs_with_error}"
             ")"
         )
     )

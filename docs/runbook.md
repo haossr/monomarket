@@ -27,9 +27,9 @@ monomarket ingest --source all --limit 300 --full
 查看聚合健康状态（错误分桶 + bucket 趋势 + breaker 状态）：
 
 ```bash
-monomarket ingest-health --source gamma --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-share-top-k 3 --error-share-min-share 0.05 --error-share-min-count 2 --error-sample-limit 5
+monomarket ingest-health --source gamma --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-share-top-k 3 --error-share-min-share 0.05 --error-share-min-count 2 --error-share-min-runs-with-error 1 --error-sample-limit 5
 # 或查看全部 source
-monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-share-top-k 3 --error-share-min-share 0.05 --error-share-min-count 2 --error-sample-limit 5
+monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-share-top-k 3 --error-share-min-share 0.05 --error-share-min-count 2 --error-share-min-runs-with-error 1 --error-sample-limit 5
 ```
 
 输出包含：
@@ -38,7 +38,7 @@ monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-t
 - breaker 状态
 - breaker 状态过渡计数（open/half_open/closed）与最近转移时间
 - 近 N 次 run 的 source 级摘要：`non_ok_rate / avg_failures / avg_retries / failure_per_req`
-- 近 N 次 run 的 source 级错误类别占比（http_429/http_5xx/timeout 等，支持 top-k + min-share + min-count 过滤）
+- 近 N 次 run 的 source 级错误类别占比（http_429/http_5xx/timeout 等，支持 top-k + min-share + min-count + min-runs 过滤）
 - 按 source 的最近错误样本（top-N last_error）
 
 ## 3) 生成与查看信号
