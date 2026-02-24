@@ -845,6 +845,7 @@ def backtest_rolling(
     pnl_avg = (pnl_sum / runs) if runs > 0 else 0.0
 
     total_range_seconds = max(0.0, (to_dt - from_dt).total_seconds())
+    total_range_hours = total_range_seconds / 3600.0
     sampled_seconds = sum(
         max(0.0, (interval_end - interval_start).total_seconds())
         for interval_start, interval_end in run_intervals
@@ -881,6 +882,7 @@ def backtest_rolling(
         f"execution_rate={overall_exec_rate:.2%} "
         f"positive_window_rate={positive_window_rate:.2%} "
         f"empty_windows={empty_window_count} "
+        f"range_hours={total_range_hours:.2f} "
         f"coverage_ratio={coverage_ratio:.2%} "
         f"overlap_ratio={overlap_ratio:.2%} "
         f"overlap_mode={overlap_mode}"
@@ -1024,11 +1026,13 @@ def backtest_rolling(
                 "positive_window_rate": positive_window_rate,
                 "pnl_sum": pnl_sum,
                 "pnl_avg": pnl_avg,
+                "range_hours": total_range_hours,
                 "sampled_hours": sampled_hours,
                 "covered_hours": covered_hours,
                 "overlap_hours": overlap_hours,
                 "coverage_ratio": coverage_ratio,
                 "overlap_ratio": overlap_ratio,
+                "coverage_basis": "coverage_ratio=covered_hours/range_hours; overlap_ratio=overlap_hours/covered_hours",
                 "risk_rejection_reasons": {
                     reason: count
                     for reason, count in sorted(

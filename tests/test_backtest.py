@@ -567,6 +567,7 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert "Backtest rolling windows" in res.output
     assert "Backtest rolling strategy aggregate" in res.output
     assert "overlap_mode=tiled" in res.output
+    assert "range_hours=" in res.output
     assert "rejection reasons" in res.output.lower()
     assert "rolling json exported" in res.output
 
@@ -587,11 +588,13 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert abs(float(payload["summary"]["positive_window_rate"]) - 0.5) < 1e-9
     assert abs(float(payload["summary"]["pnl_sum"]) - 1.5) < 1e-9
     assert abs(float(payload["summary"]["pnl_avg"]) - 0.75) < 1e-9
+    assert abs(float(payload["summary"]["range_hours"]) - 2.0) < 1e-9
     assert abs(float(payload["summary"]["sampled_hours"]) - 2.0) < 1e-9
     assert abs(float(payload["summary"]["covered_hours"]) - 2.0) < 1e-9
     assert abs(float(payload["summary"]["overlap_hours"]) - 0.0) < 1e-9
     assert abs(float(payload["summary"]["coverage_ratio"]) - 1.0) < 1e-9
     assert abs(float(payload["summary"]["overlap_ratio"]) - 0.0) < 1e-9
+    assert "covered_hours/range_hours" in str(payload["summary"]["coverage_basis"])
     assert payload["summary"]["risk_rejection_reasons"] == {}
     assert len(payload["windows"]) == 2
     assert payload["windows"][0]["total_signals"] == 4
@@ -664,11 +667,13 @@ def test_cli_backtest_rolling_risk_reason_histogram(tmp_path: Path) -> None:
     assert payload["summary"]["rejected_signals"] == 1
     assert payload["summary"]["empty_window_count"] == 0
     assert abs(float(payload["summary"]["pnl_avg"]) - float(payload["summary"]["pnl_sum"])) < 1e-9
+    assert abs(float(payload["summary"]["range_hours"]) - 2.0) < 1e-9
     assert abs(float(payload["summary"]["sampled_hours"]) - 2.0) < 1e-9
     assert abs(float(payload["summary"]["covered_hours"]) - 2.0) < 1e-9
     assert abs(float(payload["summary"]["overlap_hours"]) - 0.0) < 1e-9
     assert abs(float(payload["summary"]["coverage_ratio"]) - 1.0) < 1e-9
     assert abs(float(payload["summary"]["overlap_ratio"]) - 0.0) < 1e-9
+    assert "covered_hours/range_hours" in str(payload["summary"]["coverage_basis"])
     assert (
         abs(
             float(payload["summary"]["positive_window_rate"])
@@ -739,6 +744,7 @@ def test_cli_backtest_rolling_overlap_mode_flags(tmp_path: Path) -> None:
     assert "overlap_mode=overlap" in overlap_res.output
     overlap_payload = json.loads(overlap_out.read_text())
     assert overlap_payload["overlap_mode"] == "overlap"
+    assert abs(float(overlap_payload["summary"]["range_hours"]) - 2.0) < 1e-9
     assert abs(float(overlap_payload["summary"]["coverage_ratio"]) - 1.0) < 1e-9
     assert abs(float(overlap_payload["summary"]["overlap_ratio"]) - 0.75) < 1e-9
     assert abs(float(overlap_payload["summary"]["overlap_hours"]) - 1.5) < 1e-9
@@ -770,6 +776,7 @@ def test_cli_backtest_rolling_overlap_mode_flags(tmp_path: Path) -> None:
     assert "overlap_mode=gapped" in gapped_res.output
     gapped_payload = json.loads(gapped_out.read_text())
     assert gapped_payload["overlap_mode"] == "gapped"
+    assert abs(float(gapped_payload["summary"]["range_hours"]) - 2.0) < 1e-9
     assert abs(float(gapped_payload["summary"]["coverage_ratio"]) - 0.5) < 1e-9
     assert abs(float(gapped_payload["summary"]["overlap_ratio"]) - 0.0) < 1e-9
     assert abs(float(gapped_payload["summary"]["overlap_hours"]) - 0.0) < 1e-9
