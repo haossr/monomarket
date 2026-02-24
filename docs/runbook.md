@@ -180,3 +180,60 @@ monomarket set-switch KILL_SWITCH true
 ```
 
 KILL_SWITCH 生效后所有新单拒绝。
+
+## 10) 单轮回测流水线（可复用脚本）
+
+```bash
+bash scripts/backtest_cycle.sh \
+  --lookback-hours 24 \
+  --market-limit 2000 \
+  --ingest-limit 300 \
+  --config configs/soak.paper.yaml
+```
+
+产物目录：`artifacts/backtest/runs/<timestamp>/`
+- `latest.json`
+- `replay.csv`
+- `strategy.csv`
+- `event.csv`
+- `summary.md`
+
+并会更新 latest 指针：
+- `artifacts/backtest/latest-run.json`
+- `artifacts/backtest/latest`（symlink）
+
+## 11) 生成 PDF 报告
+
+```bash
+uv run --with reportlab python scripts/backtest_pdf_report.py \
+  --backtest-json artifacts/backtest/runs/<timestamp>/latest.json \
+  --strategy-csv artifacts/backtest/runs/<timestamp>/strategy.csv \
+  --event-csv artifacts/backtest/runs/<timestamp>/event.csv \
+  --output artifacts/backtest/runs/<timestamp>/report.pdf
+```
+
+> 若环境已安装 reportlab，也可直接 `python scripts/backtest_pdf_report.py ...`。
+
+## 12) Nightly 一键产出（回测 + PDF）
+
+```bash
+bash scripts/backtest_nightly_report.sh \
+  --lookback-hours 24 \
+  --market-limit 2000 \
+  --ingest-limit 300 \
+  --config configs/soak.paper.yaml
+```
+
+夜间目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
+- `report.pdf`
+- `summary.txt`
+- `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
+
+## 13) 指标解释（回测与报告通用）
+
+- `executed_signals / rejected_signals`：信号执行/拒绝数量（风控与流动性影响的核心观测项）
+- `winrate`：已闭合交易中的胜率（`wins / (wins + losses)`）
+- `max_drawdown`：权益曲线历史峰值到后续低点的最大回撤
+- `pnl`：策略（或事件）维度最终盈亏
+- `trade_count`：成交交易次数
+- `replay.csv`：逐笔 replay 账本（含 fill ratio、slippage、risk reason）

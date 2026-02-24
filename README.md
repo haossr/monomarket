@@ -82,6 +82,43 @@ monomarket backtest-migration-map --format json --with-checksum \
   --out-json artifacts/backtest/migration-map.json
 ```
 
+## 本周持续回测 + 每晚 PDF 报告
+
+单轮流水线（init-db -> ingest gamma incremental -> generate-signals -> backtest）：
+
+```bash
+bash scripts/backtest_cycle.sh \
+  --lookback-hours 24 \
+  --market-limit 2000 \
+  --ingest-limit 300 \
+  --config configs/soak.paper.yaml
+```
+
+输出：`artifacts/backtest/runs/<timestamp>/latest.json|replay.csv|strategy.csv|event.csv|summary.md`
+并自动更新 latest 指针：`artifacts/backtest/latest-run.json`（及 `artifacts/backtest/latest` symlink）。
+
+生成 PDF：
+
+```bash
+uv run --with reportlab python scripts/backtest_pdf_report.py \
+  --backtest-json artifacts/backtest/runs/<timestamp>/latest.json \
+  --strategy-csv artifacts/backtest/runs/<timestamp>/strategy.csv \
+  --event-csv artifacts/backtest/runs/<timestamp>/event.csv \
+  --output artifacts/backtest/runs/<timestamp>/report.pdf
+```
+
+Nightly 一键：
+
+```bash
+bash scripts/backtest_nightly_report.sh \
+  --lookback-hours 24 \
+  --market-limit 2000 \
+  --ingest-limit 300 \
+  --config configs/soak.paper.yaml
+```
+
+Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/report.pdf`
+
 ## 交易控制开关（Rocky 可独立控制）
 
 支持 3 个统一开关：
