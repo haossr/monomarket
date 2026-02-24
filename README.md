@@ -32,7 +32,7 @@ monomarket ingest --source all --limit 300 --incremental
 
 # 2.1) 查看抓取健康（错误分桶 + bucket 趋势 top movers + 错误类别占比 + breaker + 状态过渡 + 近 N 次失败率/重试 + 最近错误样本）
 monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-share-top-k 3 --error-share-min-share 0.05 --error-share-min-count 2 --error-share-min-runs-with-error 1 --error-share-min-total-runs 5 --error-share-min-source-bucket-total 10 --error-sample-limit 5
-# 若过滤条件过严导致 share 为空，CLI 会提示 "error share empty after filters"
+# 若过滤条件过严导致 share 为空，CLI 会提示 "error share empty after filters" 并回显 active_filters
 
 # 3) 生成策略信号（S1/S2/S4/S8）
 monomarket generate-signals --strategies s1,s2,s4,s8

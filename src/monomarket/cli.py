@@ -474,9 +474,18 @@ def ingest_health(
         )
     console.print(tb5)
     if not error_share:
+        active_filters = (
+            "active_filters="
+            f"top_k={error_share_top_k or 'all'},"
+            f"min_share={error_share_min_share:.2%},"
+            f"min_count={error_share_min_count},"
+            f"min_runs_with_error={error_share_min_runs_with_error},"
+            f"min_total_runs={error_share_min_total_runs},"
+            f"min_source_bucket_total={error_share_min_source_bucket_total}"
+        )
         console.print(
             "[yellow]error share empty after filters[/yellow] "
-            "(consider relaxing --error-share-min-* or --error-share-top-k)"
+            f"({active_filters}; consider relaxing --error-share-min-* or --error-share-top-k)"
         )
 
     tb6 = Table(title=f"Recent ingestion errors (per source <= {error_sample_limit})")
