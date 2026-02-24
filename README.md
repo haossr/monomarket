@@ -137,12 +137,13 @@ bash scripts/backtest_nightly_report.sh \
   --lookback-hours 24 \
   --market-limit 2000 \
   --ingest-limit 300 \
+  --rolling-reject-top-k 2 \
   --config configs/soak.paper.yaml
 ```
 
 Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 - `report.pdf`
-- `summary.txt`（含 rolling `range_h/coverage/overlap/coverage_label` 与主要拒单原因摘要）
+- `summary.txt`（含 rolling `pos_win_rate/empty_windows/range_h/coverage/overlap/coverage_label` 与主要拒单原因摘要）
 - `rolling-summary.json`
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 

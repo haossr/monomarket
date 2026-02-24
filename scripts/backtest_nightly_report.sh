@@ -12,6 +12,7 @@ NIGHTLY_ROOT="artifacts/backtest/nightly"
 NIGHTLY_DATE=""
 ROLLING_WINDOW_HOURS="24"
 ROLLING_STEP_HOURS="12"
+ROLLING_REJECT_TOP_K="2"
 
 usage() {
   cat <<'USAGE'
@@ -26,6 +27,7 @@ Options:
   --date <YYYY-MM-DD>        Override nightly date (default: today local date)
   --rolling-window-hours <float>  Rolling window size in hours (default: 24)
   --rolling-step-hours <float>    Rolling step size in hours (default: 12)
+  --rolling-reject-top-k <int>    Number of top rolling reject reasons in summary (default: 2)
   -h, --help                 Show help
 USAGE
 }
@@ -62,6 +64,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --rolling-step-hours)
       ROLLING_STEP_HOURS="$2"
+      shift 2
+      ;;
+    --rolling-reject-top-k)
+      ROLLING_REJECT_TOP_K="$2"
       shift 2
       ;;
     -h|--help)
@@ -156,7 +162,7 @@ else
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 fi
 
-"$PYTHON_BIN" - "$RUN_DIR/latest.json" "$PDF_PATH" "$ROLLING_JSON" "$SUMMARY_TXT" "$NIGHTLY_DATE" <<'PY'
+"$PYTHON_BIN" - "$RUN_DIR/latest.json" "$PDF_PATH" "$ROLLING_JSON" "$SUMMARY_TXT" "$NIGHTLY_DATE" "$ROLLING_REJECT_TOP_K" <<'PY'
 from __future__ import annotations
 
 import json
@@ -176,6 +182,7 @@ pdf_path = Path(sys.argv[2]).resolve()
 rolling_path = Path(sys.argv[3]).resolve()
 summary_path = Path(sys.argv[4])
 nightly_date = sys.argv[5]
+rolling_reject_top_k = max(0, int(_f(sys.argv[6])))
 
 rows = payload.get("results") or []
 best = None
@@ -192,6 +199,8 @@ rolling_range_hours = 0.0
 rolling_coverage_ratio = 0.0
 rolling_overlap_ratio = 0.0
 rolling_coverage_label = "unknown"
+rolling_positive_window_rate = 0.0
+rolling_empty_window_count = 0
 rolling_reject_top = "none"
 if rolling_path.exists():
     rolling_payload = json.loads(rolling_path.read_text())
@@ -202,6 +211,8 @@ if rolling_path.exists():
         rolling_range_hours = _f(rolling_summary.get("range_hours"))
         rolling_coverage_ratio = _f(rolling_summary.get("coverage_ratio"))
         rolling_overlap_ratio = _f(rolling_summary.get("overlap_ratio"))
+        rolling_positive_window_rate = _f(rolling_summary.get("positive_window_rate"))
+        rolling_empty_window_count = int(_f(rolling_summary.get("empty_window_count")))
         coverage_label_raw = rolling_summary.get("coverage_label")
         if isinstance(coverage_label_raw, str) and coverage_label_raw.strip():
             rolling_coverage_label = coverage_label_raw.strip()
@@ -215,10 +226,10 @@ if rolling_path.exists():
                 if count <= 0:
                     continue
                 reason_items.append((reason, count))
-            if reason_items:
+            if reason_items and rolling_reject_top_k > 0:
                 reason_items.sort(key=lambda x: (-x[1], x[0]))
                 rolling_reject_top = ",".join(
-                    f"{reason}:{count}" for reason, count in reason_items[:2]
+                    f"{reason}:{count}" for reason, count in reason_items[:rolling_reject_top_k]
                 )
 
 line = (
@@ -226,6 +237,7 @@ line = (
     f"| signals total={payload.get('total_signals', 0)} executed={payload.get('executed_signals', 0)} "
     f"rejected={payload.get('rejected_signals', 0)} | {best_text} "
     f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
+    f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
     f"range_h={rolling_range_hours:.2f} coverage={rolling_coverage_ratio:.2%} "
     f"overlap={rolling_overlap_ratio:.2%} coverage_label={rolling_coverage_label} "
     f"rolling_reject_top={rolling_reject_top} "
