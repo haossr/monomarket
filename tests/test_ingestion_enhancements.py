@@ -617,6 +617,8 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "timeout" in res.output
     assert "HTTP 503" in res.output
     assert "error share empty after filters" not in res.output
+    assert "active_filters=" not in res.output
+    assert "relax order:" not in res.output
 
     res_empty = runner.invoke(
         app,
@@ -638,6 +640,11 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "min_total_runs=3" in res_empty.output
     assert "relax order: min_share/min_count" in res_empty.output
     relax_idx = res_empty.output.index("relax order:")
-    idx_share = res_empty.output.index("min_share/min_count", relax_idx)
-    idx_runs = res_empty.output.index("min_total_runs", relax_idx)
-    assert idx_share < idx_runs
+    order_tokens = [
+        "min_share/min_count",
+        "min_total_runs",
+        "min_source_bucket_total",
+        "top_k",
+    ]
+    positions = [res_empty.output.index(token, relax_idx) for token in order_tokens]
+    assert positions == sorted(positions), positions
