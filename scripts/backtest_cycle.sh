@@ -107,6 +107,58 @@ print(now.isoformat().replace("+00:00", "Z"))
 PY
 }
 
+_now_iso() {
+  "$PYTHON_BIN" - <<'PY'
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+print(datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
+PY
+}
+
+_max_iso() {
+  "$PYTHON_BIN" - "$1" "$2" <<'PY'
+from __future__ import annotations
+
+from datetime import UTC, datetime
+import sys
+
+
+def parse(raw: str) -> datetime:
+    text = raw.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+a = parse(sys.argv[1])
+b = parse(sys.argv[2])
+print((a if a >= b else b).isoformat().replace("+00:00", "Z"))
+PY
+}
+
+_add_seconds_iso() {
+  "$PYTHON_BIN" - "$1" "$2" <<'PY'
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+import sys
+
+text = sys.argv[1].strip()
+if text.endswith("Z"):
+    text = text[:-1] + "+00:00"
+dt = datetime.fromisoformat(text)
+if dt.tzinfo is None:
+    dt = dt.replace(tzinfo=UTC)
+seconds = int(float(sys.argv[2]))
+print((dt.astimezone(UTC) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z"))
+PY
+}
+
 export ENABLE_LIVE_TRADING=false
 export MONOMARKET_MODE=paper
 
@@ -118,6 +170,9 @@ monomarket init-db --config "$CONFIG_PATH"
 echo "[backtest-cycle] ingest gamma incremental"
 monomarket ingest --source gamma --limit "$INGEST_LIMIT" --incremental --config "$CONFIG_PATH"
 
+# Isolate backtest to signals generated in THIS cycle to avoid historical signal contamination.
+CYCLE_START_TS="$(_now_iso)"
+
 echo "[backtest-cycle] generate signals: $STRATEGIES"
 monomarket generate-signals \
   --strategies "$STRATEGIES" \
@@ -125,10 +180,14 @@ monomarket generate-signals \
   --config "$CONFIG_PATH"
 
 FROM_TO="$(_compute_window)"
-FROM_TS="$(echo "$FROM_TO" | sed -n '1p')"
-TO_TS="$(echo "$FROM_TO" | sed -n '2p')"
+LOOKBACK_FROM_TS="$(echo "$FROM_TO" | sed -n '1p')"
+FROM_TS="$(_max_iso "$LOOKBACK_FROM_TS" "$CYCLE_START_TS")"
+TO_TS="$(_now_iso)"
+if [[ "$TO_TS" == "$FROM_TS" ]]; then
+  TO_TS="$(_add_seconds_iso "$FROM_TS" 60)"
+fi
 
-echo "[backtest-cycle] window=${FROM_TS} -> ${TO_TS}"
+echo "[backtest-cycle] window=${FROM_TS} -> ${TO_TS} (cycle_start=${CYCLE_START_TS})"
 
 echo "[backtest-cycle] backtest"
 monomarket backtest \
