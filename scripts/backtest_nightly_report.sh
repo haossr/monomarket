@@ -27,7 +27,7 @@ Options:
   --date <YYYY-MM-DD>        Override nightly date (default: today local date)
   --rolling-window-hours <float>  Rolling window size in hours (default: 24)
   --rolling-step-hours <float>    Rolling step size in hours (default: 12)
-  --rolling-reject-top-k <int>    Number of top rolling reject reasons in summary (default: 2; 0=none)
+  --rolling-reject-top-k <int>    Number of top rolling reject reasons in summary (default: 2; 0=disabled)
   -h, --help                 Show help
 USAGE
 }
@@ -201,7 +201,7 @@ rolling_overlap_ratio = 0.0
 rolling_coverage_label = "unknown"
 rolling_positive_window_rate = 0.0
 rolling_empty_window_count = 0
-rolling_reject_top = "none"
+rolling_reject_top = "disabled" if rolling_reject_top_k <= 0 else "none"
 if rolling_path.exists():
     rolling_payload = json.loads(rolling_path.read_text())
     rolling_summary = rolling_payload.get("summary")

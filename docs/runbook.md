@@ -256,7 +256,7 @@ bash scripts/backtest_nightly_report.sh \
 - `rolling-summary.json`（滚动窗口多样本回测汇总）
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 
-`--rolling-reject-top-k` 语义：`0=none`（不输出拒单原因摘要），`N>0` 输出前 N 个原因。
+`--rolling-reject-top-k` 语义：`0=disabled`（关闭拒单原因摘要输出），`N>0` 输出前 N 个原因（无数据时为 `none`）。
 
 ## 13) 指标解释（回测与报告通用）
 
