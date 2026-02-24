@@ -168,6 +168,7 @@ monomarket backtest-rolling --strategies s1,s2,s4,s8 \
 ```
 
 输出包含每个窗口的 `signals/executed/rejected/execution_rate/pnl_total`，以及策略级 `avg_pnl/avg_winrate/total_trades` 聚合。
+同时输出风控拒单原因分布（`risk_rejection_reasons`，窗口级 + 汇总级）。
 
 v1 -> v2 迁移命令：
 

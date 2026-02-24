@@ -566,6 +566,7 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert "backtest rolling runs=2" in res.output
     assert "Backtest rolling windows" in res.output
     assert "Backtest rolling strategy aggregate" in res.output
+    assert "rejection reasons" in res.output.lower()
     assert "rolling json exported" in res.output
 
     payload = json.loads(out_json.read_text())
@@ -574,10 +575,81 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert payload["summary"]["total_signals"] == 4
     assert payload["summary"]["executed_signals"] == 4
     assert payload["summary"]["rejected_signals"] == 0
+    assert payload["summary"]["risk_rejection_reasons"] == {}
     assert len(payload["windows"]) == 2
     assert payload["windows"][0]["total_signals"] == 4
     assert payload["windows"][1]["total_signals"] == 0
+    assert payload["windows"][0]["risk_rejection_reasons"] == {}
+    assert payload["windows"][1]["risk_rejection_reasons"] == {}
     assert any(x["strategy"] == "s1" for x in payload["strategy_aggregate"])
+
+
+def test_cli_backtest_rolling_risk_reason_histogram(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+    _seed_signals(storage)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "app:",
+                f"  db_path: {db}",
+                "trading:",
+                "  mode: paper",
+                "risk:",
+                "  max_daily_loss: 1000",
+                "  max_strategy_notional: 1000",
+                "  max_event_notional: 5",
+                "  circuit_breaker_rejections: 5",
+            ]
+        )
+    )
+
+    out_json = tmp_path / "artifacts" / "rolling-risk.json"
+    runner = CliRunner()
+    res = runner.invoke(
+        app,
+        [
+            "backtest-rolling",
+            "--strategies",
+            "s1",
+            "--from",
+            "2026-02-20T00:00:00Z",
+            "--to",
+            "2026-02-20T02:00:00Z",
+            "--window-hours",
+            "2",
+            "--step-hours",
+            "2",
+            "--slippage-bps",
+            "0",
+            "--out-json",
+            str(out_json),
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert "rejection reasons" in res.output.lower()
+    assert "event notional limit exceeded" in res.output
+
+    payload = json.loads(out_json.read_text())
+    assert payload["summary"]["run_count"] == 1
+    assert payload["summary"]["rejected_signals"] == 1
+
+    reason_map = payload["summary"]["risk_rejection_reasons"]
+    assert isinstance(reason_map, dict)
+    assert sum(int(v) for v in reason_map.values()) == 1
+    assert any("event notional limit exceeded" in str(k) for k in reason_map.keys())
+
+    win_reasons = payload["windows"][0]["risk_rejection_reasons"]
+    assert isinstance(win_reasons, dict)
+    assert sum(int(v) for v in win_reasons.values()) == 1
+    assert any("event notional limit exceeded" in str(k) for k in win_reasons.keys())
 
 
 def test_cli_backtest_json_with_checksum(tmp_path: Path) -> None:

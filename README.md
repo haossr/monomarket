@@ -78,6 +78,8 @@ monomarket backtest-rolling --strategies s1,s2,s4,s8 \
   --out-json artifacts/backtest/rolling-summary.json
 ```
 
+rolling summary 会额外输出风控拒单原因分布（`risk_rejection_reasons`，窗口级 + 汇总级）。
+
 v1->v2 迁移（校验 + 转换）：
 
 ```bash

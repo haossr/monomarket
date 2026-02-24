@@ -754,8 +754,9 @@ def backtest_rolling(
         ),
     )
 
-    run_rows: list[tuple[str, str, int, int, int, float, float]] = []
+    run_rows: list[tuple[str, str, int, int, int, float, float, dict[str, int]]] = []
     strategy_agg: dict[str, dict[str, float]] = {}
+    risk_rejection_reasons_total: dict[str, int] = {}
     total_signals = 0
     executed_signals = 0
     rejected_signals = 0
@@ -773,6 +774,14 @@ def backtest_rolling(
             report.executed_signals / report.total_signals if report.total_signals > 0 else 0.0
         )
 
+        window_risk_reasons: dict[str, int] = {}
+        for replay_row in report.replay:
+            if replay_row.risk_allowed:
+                continue
+            reason = replay_row.risk_reason.strip() or "unknown"
+            window_risk_reasons[reason] = window_risk_reasons.get(reason, 0) + 1
+            risk_rejection_reasons_total[reason] = risk_rejection_reasons_total.get(reason, 0) + 1
+
         run_rows.append(
             (
                 cursor.isoformat(),
@@ -782,6 +791,7 @@ def backtest_rolling(
                 report.rejected_signals,
                 exec_rate,
                 pnl_total,
+                window_risk_reasons,
             )
         )
 
@@ -820,6 +830,7 @@ def backtest_rolling(
     tb.add_column("rejected")
     tb.add_column("exec_rate")
     tb.add_column("pnl_total")
+    tb.add_column("top_reject_reason")
     for idx, run_row in enumerate(run_rows, start=1):
         (
             run_from_ts,
@@ -829,7 +840,14 @@ def backtest_rolling(
             run_rejected_signals,
             run_execution_rate,
             run_pnl_total,
+            run_risk_reasons,
         ) = run_row
+        top_reject_reason = ""
+        if run_risk_reasons:
+            top_reject_reason = max(
+                sorted(run_risk_reasons.keys()),
+                key=lambda reason: run_risk_reasons.get(reason, 0),
+            )
         tb.add_row(
             str(idx),
             run_from_ts,
@@ -839,6 +857,7 @@ def backtest_rolling(
             str(run_rejected_signals),
             f"{run_execution_rate:.2%}",
             f"{run_pnl_total:.4f}",
+            top_reject_reason,
         )
     console.print(tb)
 
@@ -873,6 +892,22 @@ def backtest_rolling(
         )
     console.print(tb2)
 
+    tb3 = Table(title="Backtest rolling risk rejection reasons")
+    tb3.add_column("reason")
+    tb3.add_column("count")
+    tb3.add_column("share")
+    total_reasons = sum(risk_rejection_reasons_total.values())
+    if total_reasons <= 0:
+        tb3.add_row("(none)", "0", "0.00%")
+    else:
+        reason_rows = sorted(
+            risk_rejection_reasons_total.items(),
+            key=lambda x: (-x[1], x[0]),
+        )
+        for reason, count in reason_rows:
+            tb3.add_row(reason, str(count), f"{(count / total_reasons):.2%}")
+    console.print(tb3)
+
     if out_json:
         windows_payload = [
             {
@@ -883,6 +918,10 @@ def backtest_rolling(
                 "rejected_signals": x[4],
                 "execution_rate": x[5],
                 "pnl_total": x[6],
+                "risk_rejection_reasons": {
+                    reason: count
+                    for reason, count in sorted(x[7].items(), key=lambda item: (item[0]))
+                },
             }
             for x in run_rows
         ]
@@ -911,6 +950,13 @@ def backtest_rolling(
                 "executed_signals": executed_signals,
                 "rejected_signals": rejected_signals,
                 "execution_rate": overall_exec_rate,
+                "risk_rejection_reasons": {
+                    reason: count
+                    for reason, count in sorted(
+                        risk_rejection_reasons_total.items(),
+                        key=lambda item: (item[0]),
+                    )
+                },
             },
             "windows": windows_payload,
             "strategy_aggregate": strategy_payload,
