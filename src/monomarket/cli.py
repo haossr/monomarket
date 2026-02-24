@@ -228,6 +228,11 @@ def ingest_health(
         source=source,
         run_window=run_window,
     )
+    error_share = storage.list_ingestion_error_bucket_share_by_source(
+        source=source,
+        run_window=run_window,
+        limit=limit,
+    )
     transitions = storage.list_ingestion_breaker_transitions(source=source, limit=limit)
     recent_errors = storage.list_ingestion_recent_errors(
         source=source,
@@ -349,19 +354,39 @@ def ingest_health(
         )
     console.print(tb4)
 
-    tb5 = Table(title=f"Recent ingestion errors (per source <= {error_sample_limit})")
+    tb5 = Table(title=f"Ingestion error bucket share by source (runs window={run_window})")
     tb5.add_column("source")
-    tb5.add_column("finished_at")
-    tb5.add_column("status")
-    tb5.add_column("error")
-    for row in recent_errors:
+    tb5.add_column("bucket")
+    tb5.add_column("count")
+    tb5.add_column("share")
+    tb5.add_column("bucket_total")
+    tb5.add_column("runs_with_error")
+    tb5.add_column("total_runs")
+    for row in error_share:
         tb5.add_row(
+            str(row["source"]),
+            str(row["error_bucket"]),
+            str(int(row["bucket_count"] or 0)),
+            f"{float(row['bucket_share'] or 0.0):.2%}",
+            str(int(row["bucket_total"] or 0)),
+            str(int(row["runs_with_error"] or 0)),
+            str(int(row["total_runs"] or 0)),
+        )
+    console.print(tb5)
+
+    tb6 = Table(title=f"Recent ingestion errors (per source <= {error_sample_limit})")
+    tb6.add_column("source")
+    tb6.add_column("finished_at")
+    tb6.add_column("status")
+    tb6.add_column("error")
+    for row in recent_errors:
+        tb6.add_row(
             str(row["source"]),
             str(row["finished_at"]),
             str(row["status"]),
             str(row["error"]),
         )
-    console.print(tb5)
+    console.print(tb6)
 
 
 @app.command("list-markets")

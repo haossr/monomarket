@@ -454,6 +454,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
         request_count=10,
         failure_count=3,
         retry_count=2,
+        error_buckets={"http_5xx": 3, "timeout": 1},
     )
 
     config_path = tmp_path / "config.yaml"
@@ -485,6 +486,18 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert int(trend_row["recent_count"] or 0) == 1
     assert int(trend_row["prev_count"] or 0) == 3
 
+    shares = storage.list_ingestion_error_bucket_share_by_source(source="gamma", run_window=5)
+    assert len(shares) == 2
+    assert str(shares[0]["error_bucket"]) == "http_5xx"
+    assert int(shares[0]["bucket_count"] or 0) == 3
+    assert abs(float(shares[0]["bucket_share"] or 0.0) - 0.75) < 1e-9
+    assert int(shares[0]["runs_with_error"] or 0) == 1
+    assert int(shares[0]["total_runs"] or 0) == 2
+
+    assert str(shares[1]["error_bucket"]) == "timeout"
+    assert int(shares[1]["bucket_count"] or 0) == 1
+    assert abs(float(shares[1]["bucket_share"] or 0.0) - 0.25) < 1e-9
+
     runner = CliRunner()
     res = runner.invoke(
         app,
@@ -509,7 +522,9 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "Ingestion breakers" in res.output
     assert "Breaker transitions" in res.output
     assert "Ingestion run summary by source" in res.output
+    assert "Ingestion error bucket share by source" in res.output
     assert "Recent ingestion errors" in res.output
     assert "gamma" in res.output
     assert "http_5xx" in res.output
+    assert "timeout" in res.output
     assert "HTTP 503" in res.output

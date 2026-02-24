@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
     request_count INTEGER NOT NULL DEFAULT 0,
     failure_count INTEGER NOT NULL DEFAULT 0,
     retry_count INTEGER NOT NULL DEFAULT 0,
+    error_buckets_json TEXT NOT NULL DEFAULT '{}',
     error TEXT NOT NULL DEFAULT ''
 );
 
@@ -227,6 +228,10 @@ class Storage:
             conn.execute(
                 "ALTER TABLE ingestion_runs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0"
             )
+        if "error_buckets_json" not in cols:
+            conn.execute(
+                "ALTER TABLE ingestion_runs ADD COLUMN error_buckets_json TEXT NOT NULL DEFAULT '{}'"
+            )
 
     def _ensure_fills_columns(self, conn: sqlite3.Connection) -> None:
         cols = self._table_columns(conn, "fills")
@@ -255,15 +260,23 @@ class Storage:
         request_count: int = 0,
         failure_count: int = 0,
         retry_count: int = 0,
+        error_buckets: dict[str, int] | None = None,
     ) -> None:
+        bucket_payload: dict[str, int] = {}
+        if error_buckets:
+            for key, value in error_buckets.items():
+                if value <= 0:
+                    continue
+                bucket_payload[str(key)] = int(value)
+
         with self.conn() as conn:
             conn.execute(
                 """
                 INSERT INTO ingestion_runs(
                     source, status, started_at, finished_at, rows_ingested,
-                    request_count, failure_count, retry_count, error
+                    request_count, failure_count, retry_count, error_buckets_json, error
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -274,6 +287,7 @@ class Storage:
                     max(0, request_count),
                     max(0, failure_count),
                     max(0, retry_count),
+                    json.dumps(bucket_payload, sort_keys=True, separators=(",", ":")),
                     error,
                 ),
             )
@@ -549,6 +563,95 @@ class Storage:
                 (source_norm, source_norm, max(1, run_window)),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def list_ingestion_error_bucket_share_by_source(
+        self,
+        source: str | None = None,
+        run_window: int = 20,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        source_norm = source.lower() if source else None
+        with self.conn() as conn:
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT
+                        source,
+                        error_buckets_json,
+                        ROW_NUMBER() OVER (PARTITION BY source ORDER BY id DESC) AS rn
+                    FROM ingestion_runs
+                    WHERE (? IS NULL OR source = ?)
+                )
+                SELECT source, error_buckets_json
+                FROM ranked
+                WHERE rn <= ?
+                ORDER BY source ASC, rn ASC
+                """,
+                (source_norm, source_norm, max(1, run_window)),
+            ).fetchall()
+
+        total_runs: dict[str, int] = {}
+        runs_with_error: dict[str, int] = {}
+        counts_by_bucket: dict[tuple[str, str], int] = {}
+        source_bucket_totals: dict[str, int] = {}
+
+        for row in rows:
+            row_source = str(row["source"])
+            total_runs[row_source] = total_runs.get(row_source, 0) + 1
+
+            raw_json = str(row["error_buckets_json"] or "{}")
+            try:
+                parsed = json.loads(raw_json)
+            except json.JSONDecodeError:
+                parsed = {}
+
+            if not isinstance(parsed, dict):
+                parsed = {}
+
+            normalized: dict[str, int] = {}
+            for key, value in parsed.items():
+                try:
+                    bucket_count = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if bucket_count <= 0:
+                    continue
+                normalized[str(key)] = normalized.get(str(key), 0) + bucket_count
+
+            if normalized:
+                runs_with_error[row_source] = runs_with_error.get(row_source, 0) + 1
+
+            for bucket, bucket_count in normalized.items():
+                pair = (row_source, bucket)
+                counts_by_bucket[pair] = counts_by_bucket.get(pair, 0) + bucket_count
+                source_bucket_totals[row_source] = (
+                    source_bucket_totals.get(row_source, 0) + bucket_count
+                )
+
+        out: list[dict[str, Any]] = []
+        for (row_source, bucket), count in counts_by_bucket.items():
+            source_total = source_bucket_totals.get(row_source, 0)
+            share = (count / source_total) if source_total else 0.0
+            out.append(
+                {
+                    "source": row_source,
+                    "error_bucket": bucket,
+                    "bucket_count": count,
+                    "bucket_share": share,
+                    "bucket_total": source_total,
+                    "runs_with_error": runs_with_error.get(row_source, 0),
+                    "total_runs": total_runs.get(row_source, 0),
+                }
+            )
+
+        out.sort(
+            key=lambda x: (
+                str(x["source"]),
+                -int(x["bucket_count"]),
+                str(x["error_bucket"]),
+            )
+        )
+        return out[: max(1, limit)]
 
     def list_ingestion_recent_errors(
         self,

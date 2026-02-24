@@ -225,6 +225,7 @@ class IngestionService:
                 request_count=req_count,
                 failure_count=fail_count,
                 retry_count=retry_count,
+                error_buckets=error_buckets,
             )
             return IngestionResult(
                 source=source_l,
