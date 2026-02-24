@@ -765,6 +765,7 @@ def backtest_rolling(
     )
 
     run_rows: list[tuple[str, str, int, int, int, float, float, dict[str, int]]] = []
+    run_intervals: list[tuple[datetime, datetime]] = []
     strategy_agg: dict[str, dict[str, float]] = {}
     risk_rejection_reasons_total: dict[str, int] = {}
     total_signals = 0
@@ -804,6 +805,7 @@ def backtest_rolling(
                 window_risk_reasons,
             )
         )
+        run_intervals.append((cursor, win_end))
 
         for result_row in report.results:
             acc = strategy_agg.setdefault(
@@ -830,6 +832,36 @@ def backtest_rolling(
     pnl_sum = sum(row[6] for row in run_rows)
     pnl_avg = (pnl_sum / runs) if runs > 0 else 0.0
 
+    total_range_seconds = max(0.0, (to_dt - from_dt).total_seconds())
+    sampled_seconds = sum(
+        max(0.0, (interval_end - interval_start).total_seconds())
+        for interval_start, interval_end in run_intervals
+    )
+
+    covered_seconds = 0.0
+    if run_intervals:
+        sorted_intervals = sorted(run_intervals, key=lambda x: x[0])
+        cur_start = sorted_intervals[0][0]
+        cur_end = sorted_intervals[0][1]
+        for interval_start, interval_end in sorted_intervals[1:]:
+            if interval_end <= interval_start:
+                continue
+            if interval_start <= cur_end:
+                if interval_end > cur_end:
+                    cur_end = interval_end
+                continue
+            covered_seconds += max(0.0, (cur_end - cur_start).total_seconds())
+            cur_start = interval_start
+            cur_end = interval_end
+        covered_seconds += max(0.0, (cur_end - cur_start).total_seconds())
+
+    overlap_seconds = max(0.0, sampled_seconds - covered_seconds)
+    coverage_ratio = (covered_seconds / total_range_seconds) if total_range_seconds > 0 else 0.0
+    overlap_ratio = (overlap_seconds / covered_seconds) if covered_seconds > 0 else 0.0
+    sampled_hours = sampled_seconds / 3600.0
+    covered_hours = covered_seconds / 3600.0
+    overlap_hours = overlap_seconds / 3600.0
+
     console.print(
         "backtest rolling "
         f"runs={runs} total_signals={total_signals} "
@@ -837,6 +869,8 @@ def backtest_rolling(
         f"execution_rate={overall_exec_rate:.2%} "
         f"positive_window_rate={positive_window_rate:.2%} "
         f"empty_windows={empty_window_count} "
+        f"coverage_ratio={coverage_ratio:.2%} "
+        f"overlap_ratio={overlap_ratio:.2%} "
         f"overlap_mode={overlap_mode}"
     )
 
@@ -978,6 +1012,11 @@ def backtest_rolling(
                 "positive_window_rate": positive_window_rate,
                 "pnl_sum": pnl_sum,
                 "pnl_avg": pnl_avg,
+                "sampled_hours": sampled_hours,
+                "covered_hours": covered_hours,
+                "overlap_hours": overlap_hours,
+                "coverage_ratio": coverage_ratio,
+                "overlap_ratio": overlap_ratio,
                 "risk_rejection_reasons": {
                     reason: count
                     for reason, count in sorted(

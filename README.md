@@ -83,6 +83,7 @@ rolling summary 会额外输出：
 - `overlap_mode`（`overlap`/`tiled`/`gapped`）用于标记窗口重叠语义
 - `execution_config` / `risk_config` 快照
 - `summary` 扩展指标：`empty_window_count` / `positive_window_rate` / `pnl_sum` / `pnl_avg`
+- 覆盖与复用指标：`coverage_ratio` / `overlap_ratio`（含 `sampled_hours` / `covered_hours` / `overlap_hours`）
 - 风控拒单原因分布（`risk_rejection_reasons`，窗口级 + 汇总级）
 
 v1->v2 迁移（校验 + 转换）：
