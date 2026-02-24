@@ -17,7 +17,7 @@ def _f(raw: object) -> float:
         return 0.0
 
 
-def _best_strategy_text(payload: dict[str, Any]) -> str:
+def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
     rows = payload.get("results") or []
     best: dict[str, Any] | None = None
     if isinstance(rows, list) and rows:
@@ -26,8 +26,21 @@ def _best_strategy_text(payload: dict[str, Any]) -> str:
             best = max(candidates, key=lambda r: _f(r.get("pnl")))
 
     if not isinstance(best, dict):
-        return "best_strategy=n/a"
-    return f"best_strategy={best.get('strategy', '')} pnl={_f(best.get('pnl')):.4f}"
+        return {
+            "available": False,
+            "strategy": "",
+            "pnl": 0.0,
+            "text": "best_strategy=n/a",
+        }
+
+    strategy = str(best.get("strategy", ""))
+    pnl = _f(best.get("pnl"))
+    return {
+        "available": True,
+        "strategy": strategy,
+        "pnl": pnl,
+        "text": f"best_strategy={strategy} pnl={pnl:.4f}",
+    }
 
 
 def build_summary_bundle(
@@ -39,7 +52,8 @@ def build_summary_bundle(
     nightly_date: str,
     rolling_reject_top_k: int,
 ) -> tuple[str, dict[str, Any]]:
-    best_text = _best_strategy_text(payload)
+    best_info = _best_strategy(payload)
+    best_text = str(best_info.get("text") or "best_strategy=n/a")
 
     rolling_runs = 0
     rolling_exec_rate = 0.0
@@ -116,7 +130,13 @@ def build_summary_bundle(
             "executed": int(_f(payload.get("executed_signals"))),
             "rejected": int(_f(payload.get("rejected_signals"))),
         },
-        "best": best_text,
+        "best": {
+            "available": bool(best_info.get("available", False)),
+            "strategy": str(best_info.get("strategy", "")),
+            "pnl": float(best_info.get("pnl", 0.0)),
+            "text": best_text,
+        },
+        "best_text": best_text,
         "rolling": {
             "runs": rolling_runs,
             "execution_rate": rolling_exec_rate,

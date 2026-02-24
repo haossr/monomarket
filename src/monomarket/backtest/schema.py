@@ -340,8 +340,28 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
             raise ValueError(f"nightly sidecar signals.{key} must be numeric")
 
     best = payload.get("best")
-    if not isinstance(best, str):
-        raise ValueError("nightly sidecar best must be a string")
+    if isinstance(best, Mapping):
+        best_available = best.get("available")
+        if not isinstance(best_available, bool):
+            raise ValueError("nightly sidecar best.available must be a bool")
+        best_strategy = best.get("strategy")
+        if not isinstance(best_strategy, str):
+            raise ValueError("nightly sidecar best.strategy must be a string")
+        best_pnl = best.get("pnl")
+        if not isinstance(best_pnl, int | float):
+            raise ValueError("nightly sidecar best.pnl must be numeric")
+        best_text = best.get("text")
+        if not isinstance(best_text, str):
+            raise ValueError("nightly sidecar best.text must be a string")
+    elif isinstance(best, str):
+        # Backward compatibility for legacy sidecars where best was plain text.
+        pass
+    else:
+        raise ValueError("nightly sidecar best must be an object or string")
+
+    best_text_top = payload.get("best_text")
+    if best_text_top is not None and not isinstance(best_text_top, str):
+        raise ValueError("nightly sidecar best_text must be a string")
 
     rolling = payload.get("rolling")
     if not isinstance(rolling, Mapping):

@@ -237,7 +237,13 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             "executed": 8,
             "rejected": 2,
         },
-        "best": "best_strategy=s1 pnl=1.2000",
+        "best": {
+            "available": True,
+            "strategy": "s1",
+            "pnl": 1.2,
+            "text": "best_strategy=s1 pnl=1.2000",
+        },
+        "best_text": "best_strategy=s1 pnl=1.2000",
         "rolling": {
             "runs": 3,
             "execution_rate": 0.8,
@@ -264,6 +270,13 @@ def _nightly_sidecar_payload() -> dict[str, object]:
 
 def test_validate_nightly_summary_sidecar_ok() -> None:
     validate_nightly_summary_sidecar(_nightly_sidecar_payload())
+
+
+def test_validate_nightly_summary_sidecar_legacy_best_string_ok() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["best"] = "best_strategy=s1 pnl=1.2000"
+    payload.pop("best_text", None)
+    validate_nightly_summary_sidecar(payload)
 
 
 def test_validate_nightly_summary_sidecar_missing_required() -> None:

@@ -102,6 +102,11 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert int(disabled_sidecar["rolling"]["reject_top_k"]) == 0
     assert str(disabled_sidecar["rolling"]["reject_top_delimiter"]) == ";"
     assert str(disabled_sidecar["rolling"]["reject_top"]) == "disabled"
+    best_obj = disabled_sidecar["best"]
+    assert isinstance(best_obj, dict)
+    assert str(best_obj["strategy"]) == "s1"
+    assert abs(float(best_obj["pnl"]) - 1.2) < 1e-9
+    assert str(best_obj["text"]).startswith("best_strategy=")
     assert "coverage_ratio" in disabled_sidecar["rolling"]
     assert "overlap_ratio" in disabled_sidecar["rolling"]
 
