@@ -485,7 +485,7 @@ def ingest_health(
         )
         console.print(
             "[yellow]error share empty after filters[/yellow] "
-            f"({active_filters}; consider relaxing --error-share-min-* or --error-share-top-k)"
+            f"({active_filters}; relax order: min_share/min_count -> min_total_runs/min_source_bucket_total -> top_k)"
         )
 
     tb6 = Table(title=f"Recent ingestion errors (per source <= {error_sample_limit})")

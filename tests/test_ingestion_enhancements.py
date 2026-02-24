@@ -635,3 +635,4 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "error share empty after filters" in res_empty.output
     assert "active_filters=" in res_empty.output
     assert "min_total_runs=3" in res_empty.output
+    assert "relax order: min_share/min_count" in res_empty.output
