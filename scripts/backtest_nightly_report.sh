@@ -27,7 +27,7 @@ Options:
   --date <YYYY-MM-DD>        Override nightly date (default: today local date)
   --rolling-window-hours <float>  Rolling window size in hours (default: 24)
   --rolling-step-hours <float>    Rolling step size in hours (default: 12)
-  --rolling-reject-top-k <int>    Number of top rolling reject reasons in summary (default: 2)
+  --rolling-reject-top-k <int>    Number of top rolling reject reasons in summary (default: 2; 0=none)
   -h, --help                 Show help
 USAGE
 }
@@ -238,8 +238,13 @@ line = (
     f"rejected={payload.get('rejected_signals', 0)} | {best_text} "
     f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
     f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
+    f"positive_window_rate={rolling_positive_window_rate:.2%} "
+    f"empty_window_count={rolling_empty_window_count} "
     f"range_h={rolling_range_hours:.2f} coverage={rolling_coverage_ratio:.2%} "
-    f"overlap={rolling_overlap_ratio:.2%} coverage_label={rolling_coverage_label} "
+    f"overlap={rolling_overlap_ratio:.2%} "
+    f"range_hours={rolling_range_hours:.2f} coverage_ratio={rolling_coverage_ratio:.2%} "
+    f"overlap_ratio={rolling_overlap_ratio:.2%} coverage_label={rolling_coverage_label} "
+    f"rolling_reject_top_k={rolling_reject_top_k} "
     f"rolling_reject_top={rolling_reject_top} "
     f"| pdf={pdf_path} | rolling_json={rolling_path}"
 )

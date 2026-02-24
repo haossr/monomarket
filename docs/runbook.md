@@ -252,9 +252,11 @@ bash scripts/backtest_nightly_report.sh \
 
 夜间目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 - `report.pdf`
-- `summary.txt`（含 rolling `pos_win_rate/empty_windows/range_h/coverage/overlap/coverage_label` 与主要拒单原因摘要）
+- `summary.txt`（含 rolling `pos_win_rate/empty_windows` 与 canonical 别名 `positive_window_rate/empty_window_count`，以及 `range_h/coverage/overlap` 与 canonical 别名 `range_hours/coverage_ratio/overlap_ratio`、`coverage_label`、`rolling_reject_top_k`、主要拒单原因摘要）
 - `rolling-summary.json`（滚动窗口多样本回测汇总）
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
+
+`--rolling-reject-top-k` 语义：`0=none`（不输出拒单原因摘要），`N>0` 输出前 N 个原因。
 
 ## 13) 指标解释（回测与报告通用）
 
