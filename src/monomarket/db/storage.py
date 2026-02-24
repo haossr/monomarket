@@ -579,6 +579,7 @@ class Storage:
         source: str | None = None,
         run_window: int = 20,
         limit: int = 200,
+        top_k_per_source: int = 0,
     ) -> list[dict[str, Any]]:
         source_norm = source.lower() if source else None
         with self.conn() as conn:
@@ -661,6 +662,20 @@ class Storage:
                 str(x["error_bucket"]),
             )
         )
+
+        source_top_k = max(0, int(top_k_per_source))
+        if source_top_k > 0:
+            per_source_seen: dict[str, int] = {}
+            capped: list[dict[str, Any]] = []
+            for row in out:
+                row_source = str(row["source"])
+                seen = per_source_seen.get(row_source, 0)
+                if seen >= source_top_k:
+                    continue
+                per_source_seen[row_source] = seen + 1
+                capped.append(row)
+            out = capped
+
         return out[: max(1, limit)]
 
     def list_ingestion_recent_errors(

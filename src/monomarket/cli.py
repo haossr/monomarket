@@ -240,6 +240,12 @@ def ingest_health(
         "--error-trend-top-movers/--no-error-trend-top-movers",
         help="Sort trend rows by absolute delta (|recent-prev|)",
     ),
+    error_share_top_k: int = typer.Option(
+        0,
+        min=0,
+        max=50,
+        help="Keep only top-k error buckets per source in error share table (0=all)",
+    ),
     error_sample_limit: int = typer.Option(
         5,
         min=1,
@@ -267,6 +273,7 @@ def ingest_health(
         source=source,
         run_window=run_window,
         limit=limit,
+        top_k_per_source=error_share_top_k,
     )
     transitions = storage.list_ingestion_breaker_transitions(source=source, limit=limit)
     recent_errors = storage.list_ingestion_recent_errors(
@@ -390,7 +397,12 @@ def ingest_health(
         )
     console.print(tb4)
 
-    tb5 = Table(title=f"Ingestion error bucket share by source (runs window={run_window})")
+    tb5 = Table(
+        title=(
+            "Ingestion error bucket share by source "
+            f"(runs window={run_window}, top_k_per_source={error_share_top_k or 'all'})"
+        )
+    )
     tb5.add_column("source")
     tb5.add_column("bucket")
     tb5.add_column("count")

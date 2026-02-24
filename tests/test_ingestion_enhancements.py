@@ -522,6 +522,14 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert int(shares[1]["bucket_count"] or 0) == 1
     assert abs(float(shares[1]["bucket_share"] or 0.0) - 0.25) < 1e-9
 
+    shares_top1 = storage.list_ingestion_error_bucket_share_by_source(
+        source="gamma",
+        run_window=5,
+        top_k_per_source=1,
+    )
+    assert len(shares_top1) == 1
+    assert str(shares_top1[0]["error_bucket"]) == "http_5xx"
+
     runner = CliRunner()
     res = runner.invoke(
         app,
@@ -532,6 +540,8 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
             "--run-window",
             "5",
             "--error-trend-window",
+            "1",
+            "--error-share-top-k",
             "1",
             "--error-sample-limit",
             "3",
@@ -548,6 +558,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "Breaker transitions" in res.output
     assert "Ingestion run summary by source" in res.output
     assert "Ingestion error bucket share by source" in res.output
+    assert "top_k_per_source=1" in res.output
     assert "Recent ingestion errors" in res.output
     assert "gamma" in res.output
     assert "http_5xx" in res.output

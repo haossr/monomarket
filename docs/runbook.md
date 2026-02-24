@@ -27,9 +27,9 @@ monomarket ingest --source all --limit 300 --full
 查看聚合健康状态（错误分桶 + bucket 趋势 + breaker 状态）：
 
 ```bash
-monomarket ingest-health --source gamma --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-sample-limit 5
+monomarket ingest-health --source gamma --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-share-top-k 3 --error-sample-limit 5
 # 或查看全部 source
-monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-sample-limit 5
+monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-share-top-k 3 --error-sample-limit 5
 ```
 
 输出包含：
