@@ -57,7 +57,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   --fill-probability --min-fill-probability 0.05 \
   --dynamic-slippage --spread-slippage-weight-bps 50 --liquidity-slippage-weight-bps 25 \
   --replay-limit 30 \
-  --out-json artifacts/backtest/latest.json \
+  --out-json artifacts/backtest/latest.json --with-checksum \
   --out-replay-csv artifacts/backtest/replay.csv \
   --out-strategy-csv artifacts/backtest/strategy.csv \
   --out-event-csv artifacts/backtest/event.csv
@@ -66,6 +66,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
 回放账本（终端 + CSV）包含 `requested/filled qty`、`fill_ratio`、`fill_probability`、`slippage_bps_applied` 以及风控决策字段：`risk_allowed` / `risk_reason` 与阈值快照，便于离线审计。
 所有导出工件（JSON + 各 CSV）均包含 `schema_version` 字段，用于向后兼容与审计解析。
 JSON 额外包含 `execution_config` / `risk_config` 快照，用于可重复回放与参数审计。
+使用 `backtest --out-json ... --with-checksum` 时，还会附带 `checksum_algo/checksum_sha256` 便于跨系统完整性校验。
 归因结果可分别导出 strategy/event CSV，便于接审计流水线与 BI。
 
 v1->v2 迁移（校验 + 转换）：

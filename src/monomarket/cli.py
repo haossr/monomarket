@@ -10,12 +10,14 @@ from rich.console import Console
 from rich.table import Table
 
 from monomarket.backtest import (
+    BACKTEST_ARTIFACT_CHECKSUM_ALGO,
     BacktestEngine,
     BacktestExecutionConfig,
     BacktestReport,
     BacktestRiskConfig,
     backtest_migration_v1_to_v2_field_map,
     build_backtest_migration_map_artifact,
+    compute_backtest_json_artifact_checksum,
     migrate_backtest_artifact_v1_to_v2,
     validate_backtest_json_artifact,
 )
@@ -40,8 +42,13 @@ def _ctx(config_path: str | None = None) -> tuple[Settings, Storage]:
     return settings, storage
 
 
-def _write_backtest_json(report: BacktestReport, output_path: str) -> None:
-    payload = {
+def _write_backtest_json(
+    report: BacktestReport,
+    output_path: str,
+    *,
+    with_checksum: bool = False,
+) -> None:
+    payload: dict[str, object] = {
         "schema_version": report.schema_version,
         "generated_at": report.generated_at.isoformat(),
         "from_ts": report.from_ts,
@@ -55,6 +62,11 @@ def _write_backtest_json(report: BacktestReport, output_path: str) -> None:
         "event_results": [asdict(x) for x in report.event_results],
         "replay": [asdict(x) for x in report.replay],
     }
+
+    if with_checksum:
+        payload["checksum_algo"] = BACKTEST_ARTIFACT_CHECKSUM_ALGO
+        payload["checksum_sha256"] = compute_backtest_json_artifact_checksum(payload)
+
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -528,6 +540,11 @@ def backtest(
     ),
     replay_limit: int = typer.Option(20, min=0, help="Rows to print from replay ledger (0=skip)"),
     out_json: str | None = typer.Option(None, help="Write full backtest report as JSON"),
+    with_checksum: bool = typer.Option(
+        False,
+        "--with-checksum/--no-checksum",
+        help="Attach checksum fields into exported --out-json artifact",
+    ),
     out_replay_csv: str | None = typer.Option(None, help="Write replay ledger as CSV"),
     out_strategy_csv: str | None = typer.Option(
         None,
@@ -655,8 +672,9 @@ def backtest(
         console.print(replay_tb)
 
     if out_json:
-        _write_backtest_json(report, out_json)
-        console.print(f"[green]json exported[/green] {out_json}")
+        _write_backtest_json(report, out_json, with_checksum=with_checksum)
+        checksum_msg = " with checksum" if with_checksum else ""
+        console.print(f"[green]json exported[/green] {out_json}{checksum_msg}")
 
     if out_replay_csv:
         _write_backtest_replay_csv(report, out_replay_csv)

@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, TypedDict
 
 SUPPORTED_BACKTEST_SCHEMA_MAJOR = 1
+BACKTEST_ARTIFACT_CHECKSUM_ALGO = "sha256"
 BACKTEST_MIGRATION_MAP_SCHEMA_VERSION = "1.0"
 BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO = "sha256"
 
@@ -235,6 +236,25 @@ def _canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
         "utf-8"
     )
+
+
+def compute_backtest_json_artifact_checksum(payload: Mapping[str, Any]) -> str:
+    normalized = dict(payload)
+    normalized.pop("checksum_sha256", None)
+    digest = hashlib.sha256(_canonical_json_bytes(normalized)).hexdigest()
+    return digest
+
+
+def verify_backtest_json_artifact_checksum(payload: Mapping[str, Any]) -> bool:
+    checksum = payload.get("checksum_sha256")
+    if not isinstance(checksum, str) or not checksum:
+        return False
+
+    algo = payload.get("checksum_algo")
+    if algo is not None and algo != BACKTEST_ARTIFACT_CHECKSUM_ALGO:
+        return False
+
+    return checksum == compute_backtest_json_artifact_checksum(payload)
 
 
 def compute_backtest_migration_map_checksum(payload: Mapping[str, Any]) -> str:

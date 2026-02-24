@@ -19,6 +19,7 @@
 - 用 `parse_schema_version` / `assert_schema_compatible` 做版本检查
 - 读取 JSON 可调用 `validate_backtest_json_artifact(payload)` 做 v1 结构校验
 - 如需双栈校验，可用 `validate_backtest_json_artifact(payload, supported_major=None, validators={2: ...})` 按 major 分派
+- 如导出时启用 `--with-checksum`，可调用 `verify_backtest_json_artifact_checksum(payload)` 做完整性校验
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`
 - 迁移助手：`migrate_backtest_artifact_v1_to_v2(payload)`（CLI: `backtest-migrate-v1-to-v2`）
@@ -39,6 +40,15 @@ monomarket backtest-migration-map --format json --out-json artifacts/backtest/mi
 
 mapping artifact 含：`schema_version/kind/checksum_algo/from_schema_major/to_schema_major/mappings/summary`。
 使用 `--with-checksum` 时会附带 `checksum_sha256`，用于跨系统完整性校验。
+
+## Backtest JSON 校验和（可选）
+
+对 `monomarket backtest --out-json ...` 传入 `--with-checksum` 时，导出 JSON 会增加：
+
+- `checksum_algo`（当前 `sha256`）
+- `checksum_sha256`
+
+消费端可使用 `verify_backtest_json_artifact_checksum(payload)` 进行校验。
 
 ## v2 Breaking Changes Checklist（草案）
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from monomarket.backtest import (
+    BACKTEST_ARTIFACT_CHECKSUM_ALGO,
     BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO,
     BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
@@ -15,6 +16,7 @@ from monomarket.backtest import (
     assert_schema_compatible,
     backtest_migration_v1_to_v2_field_map,
     build_backtest_migration_map_artifact,
+    compute_backtest_json_artifact_checksum,
     compute_backtest_migration_map_checksum,
     is_schema_compatible,
     migrate_backtest_artifact_v1_to_v2,
@@ -22,6 +24,7 @@ from monomarket.backtest import (
     validate_backtest_json_artifact,
     validate_backtest_json_artifact_v1,
     validate_backtest_json_artifact_v2,
+    verify_backtest_json_artifact_checksum,
     verify_backtest_migration_map_checksum,
 )
 
@@ -198,6 +201,24 @@ def test_verify_backtest_migration_map_checksum_tampered() -> None:
     artifact = build_backtest_migration_map_artifact(with_checksum=True)
     artifact["summary"]["total_fields"] = int(artifact["summary"]["total_fields"]) + 1
     assert not verify_backtest_migration_map_checksum(artifact)
+
+
+def test_verify_backtest_json_artifact_checksum() -> None:
+    payload = _v1_payload()
+    payload["checksum_algo"] = BACKTEST_ARTIFACT_CHECKSUM_ALGO
+    payload["checksum_sha256"] = compute_backtest_json_artifact_checksum(payload)
+
+    assert verify_backtest_json_artifact_checksum(payload)
+    assert payload["checksum_sha256"] == compute_backtest_json_artifact_checksum(payload)
+
+
+def test_verify_backtest_json_artifact_checksum_tampered() -> None:
+    payload = _v1_payload()
+    payload["checksum_algo"] = BACKTEST_ARTIFACT_CHECKSUM_ALGO
+    payload["checksum_sha256"] = compute_backtest_json_artifact_checksum(payload)
+    payload["total_signals"] = int(payload["total_signals"]) + 1
+
+    assert not verify_backtest_json_artifact_checksum(payload)
 
 
 def test_validate_backtest_json_artifact_fixture_samples() -> None:

@@ -7,11 +7,13 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from monomarket.backtest import (
+    BACKTEST_ARTIFACT_CHECKSUM_ALGO,
     BACKTEST_ARTIFACT_SCHEMA_VERSION,
     BacktestEngine,
     BacktestExecutionConfig,
     BacktestRiskConfig,
     validate_backtest_json_artifact,
+    verify_backtest_json_artifact_checksum,
 )
 from monomarket.cli import app
 from monomarket.config import AppSettings, DataSettings, RiskSettings, Settings, TradingSettings
@@ -479,6 +481,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     payload = json.loads(json_out.read_text())
     assert payload["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION
     validate_backtest_json_artifact(payload)
+    assert "checksum_sha256" not in payload
     assert payload["total_signals"] == 4
     assert payload["executed_signals"] == 4
     assert payload["rejected_signals"] == 0
@@ -513,6 +516,60 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert len(event_rows) == 2
     assert all(x["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION for x in event_rows)
     assert {x["event_id"] for x in event_rows} == {"e1", "e2"}
+
+
+def test_cli_backtest_json_with_checksum(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+    _seed_signals(storage)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "app:",
+                f"  db_path: {db}",
+                "trading:",
+                "  mode: paper",
+            ]
+        )
+    )
+
+    json_out = tmp_path / "artifacts" / "backtest.with-checksum.json"
+
+    runner = CliRunner()
+    res = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--strategies",
+            "s1",
+            "--from",
+            "2026-02-20T00:00:00Z",
+            "--to",
+            "2026-02-20T02:00:00Z",
+            "--slippage-bps",
+            "0",
+            "--out-json",
+            str(json_out),
+            "--with-checksum",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert "json exported" in res.output
+    assert "checksum" in res.output
+
+    payload = json.loads(json_out.read_text())
+    validate_backtest_json_artifact(payload)
+    assert payload["checksum_algo"] == BACKTEST_ARTIFACT_CHECKSUM_ALGO
+    assert isinstance(payload["checksum_sha256"], str)
+    assert len(payload["checksum_sha256"]) == 64
+    assert verify_backtest_json_artifact_checksum(payload)
 
 
 def test_cli_backtest_migrate_v1_to_v2(tmp_path: Path) -> None:

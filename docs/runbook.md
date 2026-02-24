@@ -136,7 +136,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   --fill-probability --min-fill-probability 0.05 \
   --dynamic-slippage --spread-slippage-weight-bps 50 --liquidity-slippage-weight-bps 25 \
   --replay-limit 30 \
-  --out-json artifacts/backtest/latest.json \
+  --out-json artifacts/backtest/latest.json --with-checksum \
   --out-replay-csv artifacts/backtest/replay.csv \
   --out-strategy-csv artifacts/backtest/strategy.csv \
   --out-event-csv artifacts/backtest/event.csv
@@ -148,6 +148,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
 - 回放账本：逐条 signal replay（时间、market、token、requested/filled qty、fill ratio、fill probability、slippage bps、realized、累计权益、risk allow/reject + reason）
 - 机器可读导出：
   - `--out-json`：完整报告（summary + execution/risk config snapshot + strategy/event attribution + replay rows）
+  - 可配 `--with-checksum`：在 JSON 中附带 `checksum_algo/checksum_sha256`
   - `--out-replay-csv`：replay ledger CSV（便于审计/外部分析）
   - `--out-strategy-csv`：策略维度归因 CSV
   - `--out-event-csv`：事件维度归因 CSV
