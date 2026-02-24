@@ -10,8 +10,10 @@ from monomarket.backtest import (
     BACKTEST_ARTIFACT_CHECKSUM_ALGO,
     BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO,
     BACKTEST_MIGRATION_MAP_SCHEMA_VERSION,
+    NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION,
     REQUIRED_BACKTEST_JSON_FIELDS_V1,
     REQUIRED_BACKTEST_JSON_FIELDS_V2,
+    REQUIRED_NIGHTLY_SUMMARY_SIDECAR_FIELDS,
     SUPPORTED_BACKTEST_SCHEMA_MAJOR,
     assert_schema_compatible,
     backtest_migration_v1_to_v2_field_map,
@@ -24,6 +26,7 @@ from monomarket.backtest import (
     validate_backtest_json_artifact,
     validate_backtest_json_artifact_v1,
     validate_backtest_json_artifact_v2,
+    validate_nightly_summary_sidecar,
     verify_backtest_json_artifact_checksum,
     verify_backtest_migration_map_checksum,
 )
@@ -219,6 +222,85 @@ def test_verify_backtest_json_artifact_checksum_tampered() -> None:
     payload["total_signals"] = int(payload["total_signals"]) + 1
 
     assert not verify_backtest_json_artifact_checksum(payload)
+
+
+def _nightly_sidecar_payload() -> dict[str, object]:
+    return {
+        "schema_version": NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION,
+        "nightly_date": "2026-02-24",
+        "window": {
+            "from_ts": "2026-02-24T00:00:00Z",
+            "to_ts": "2026-02-24T02:00:00Z",
+        },
+        "signals": {
+            "total": 10,
+            "executed": 8,
+            "rejected": 2,
+        },
+        "best": "best_strategy=s1 pnl=1.2000",
+        "rolling": {
+            "runs": 3,
+            "execution_rate": 0.8,
+            "positive_window_rate": 0.66,
+            "empty_window_count": 1,
+            "range_hours": 24.0,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.2,
+            "coverage_label": "full",
+            "reject_top_k": 2,
+            "reject_top": "riskA:3,riskB:1",
+            "reject_top_pairs": [
+                {"reason": "riskA", "count": 3},
+                {"reason": "riskB", "count": 1},
+            ],
+        },
+        "paths": {
+            "pdf": "/tmp/report.pdf",
+            "rolling_json": "/tmp/rolling-summary.json",
+        },
+    }
+
+
+def test_validate_nightly_summary_sidecar_ok() -> None:
+    validate_nightly_summary_sidecar(_nightly_sidecar_payload())
+
+
+def test_validate_nightly_summary_sidecar_missing_required() -> None:
+    payload = _nightly_sidecar_payload()
+    payload.pop("rolling")
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_wrong_schema() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["schema_version"] = "nightly-summary-sidecar-2.0"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_pairs() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top_pairs"] = [{"reason": "riskA", "count": "x"}]
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_nightly_sidecar_required_fields_contract() -> None:
+    assert REQUIRED_NIGHTLY_SUMMARY_SIDECAR_FIELDS == {
+        "schema_version",
+        "nightly_date",
+        "window",
+        "signals",
+        "best",
+        "rolling",
+        "paths",
+    }
 
 
 def test_validate_backtest_json_artifact_fixture_samples() -> None:

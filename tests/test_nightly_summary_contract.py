@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from monomarket.backtest import validate_nightly_summary_sidecar
+
 ROOT = Path(__file__).resolve().parents[1]
 BASH_SCRIPT_PATH = ROOT / "scripts" / "backtest_nightly_report.sh"
 SUMMARY_SCRIPT_PATH = ROOT / "scripts" / "nightly_summary_line.py"
@@ -94,6 +96,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "overlap_ratio=" in line_disabled
 
     disabled_sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(disabled_sidecar)
     assert str(disabled_sidecar["schema_version"]) == "nightly-summary-sidecar-1.0"
     assert int(disabled_sidecar["rolling"]["reject_top_k"]) == 0
     assert str(disabled_sidecar["rolling"]["reject_top"]) == "disabled"
@@ -136,6 +139,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top=none" in line_none
 
     none_sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(none_sidecar)
     assert int(none_sidecar["rolling"]["reject_top_k"]) == 2
     assert str(none_sidecar["rolling"]["reject_top"]) == "none"
 

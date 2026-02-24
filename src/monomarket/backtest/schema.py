@@ -10,6 +10,17 @@ SUPPORTED_BACKTEST_SCHEMA_MAJOR = 1
 BACKTEST_ARTIFACT_CHECKSUM_ALGO = "sha256"
 BACKTEST_MIGRATION_MAP_SCHEMA_VERSION = "1.0"
 BACKTEST_MIGRATION_MAP_CHECKSUM_ALGO = "sha256"
+NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION = "nightly-summary-sidecar-1.0"
+
+REQUIRED_NIGHTLY_SUMMARY_SIDECAR_FIELDS = {
+    "schema_version",
+    "nightly_date",
+    "window",
+    "signals",
+    "best",
+    "rolling",
+    "paths",
+}
 
 REQUIRED_BACKTEST_JSON_FIELDS_V1 = {
     "schema_version",
@@ -294,6 +305,92 @@ def verify_backtest_migration_map_checksum(payload: Mapping[str, Any]) -> bool:
     if not isinstance(checksum, str) or not checksum:
         return False
     return checksum == compute_backtest_migration_map_checksum(payload)
+
+
+def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
+    missing = sorted(REQUIRED_NIGHTLY_SUMMARY_SIDECAR_FIELDS - set(payload.keys()))
+    if missing:
+        raise ValueError(f"missing required nightly sidecar fields: {', '.join(missing)}")
+
+    schema_version = payload.get("schema_version")
+    if schema_version != NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION:
+        raise ValueError(
+            "unsupported nightly sidecar schema_version="
+            f"{schema_version!r}; expected {NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION!r}"
+        )
+
+    nightly_date = payload.get("nightly_date")
+    if not isinstance(nightly_date, str) or not nightly_date.strip():
+        raise ValueError("nightly sidecar nightly_date must be a non-empty string")
+
+    window = payload.get("window")
+    if not isinstance(window, Mapping):
+        raise ValueError("nightly sidecar window must be an object")
+    for key in ("from_ts", "to_ts"):
+        raw = window.get(key)
+        if not isinstance(raw, str):
+            raise ValueError(f"nightly sidecar window.{key} must be a string")
+
+    signals = payload.get("signals")
+    if not isinstance(signals, Mapping):
+        raise ValueError("nightly sidecar signals must be an object")
+    for key in ("total", "executed", "rejected"):
+        raw = signals.get(key)
+        if not isinstance(raw, int | float):
+            raise ValueError(f"nightly sidecar signals.{key} must be numeric")
+
+    best = payload.get("best")
+    if not isinstance(best, str):
+        raise ValueError("nightly sidecar best must be a string")
+
+    rolling = payload.get("rolling")
+    if not isinstance(rolling, Mapping):
+        raise ValueError("nightly sidecar rolling must be an object")
+
+    rolling_required_numeric = (
+        "runs",
+        "execution_rate",
+        "positive_window_rate",
+        "empty_window_count",
+        "range_hours",
+        "coverage_ratio",
+        "overlap_ratio",
+        "reject_top_k",
+    )
+    for key in rolling_required_numeric:
+        raw = rolling.get(key)
+        if not isinstance(raw, int | float):
+            raise ValueError(f"nightly sidecar rolling.{key} must be numeric")
+
+    for key in ("coverage_label", "reject_top"):
+        raw = rolling.get(key)
+        if not isinstance(raw, str):
+            raise ValueError(f"nightly sidecar rolling.{key} must be a string")
+
+    reject_pairs = rolling.get("reject_top_pairs")
+    if not isinstance(reject_pairs, list):
+        raise ValueError("nightly sidecar rolling.reject_top_pairs must be an array")
+    for idx, row in enumerate(reject_pairs):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"nightly sidecar rolling.reject_top_pairs[{idx}] must be an object")
+        reason = row.get("reason")
+        count = row.get("count")
+        if not isinstance(reason, str):
+            raise ValueError(
+                f"nightly sidecar rolling.reject_top_pairs[{idx}].reason must be a string"
+            )
+        if not isinstance(count, int | float):
+            raise ValueError(
+                f"nightly sidecar rolling.reject_top_pairs[{idx}].count must be numeric"
+            )
+
+    paths = payload.get("paths")
+    if not isinstance(paths, Mapping):
+        raise ValueError("nightly sidecar paths must be an object")
+    for key in ("pdf", "rolling_json"):
+        raw = paths.get(key)
+        if not isinstance(raw, str):
+            raise ValueError(f"nightly sidecar paths.{key} must be a string")
 
 
 DEFAULT_BACKTEST_JSON_VALIDATORS: dict[int, BacktestJsonArtifactValidator] = {
