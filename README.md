@@ -142,7 +142,7 @@ bash scripts/backtest_nightly_report.sh \
 
 Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 - `report.pdf`
-- `summary.txt`
+- `summary.txt`（含 rolling `range_h/coverage/overlap/coverage_label` 与主要拒单原因摘要）
 - `rolling-summary.json`
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 
