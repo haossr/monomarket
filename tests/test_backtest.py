@@ -14,8 +14,10 @@ from monomarket.backtest import (
     validate_backtest_json_artifact,
 )
 from monomarket.cli import app
+from monomarket.config import AppSettings, DataSettings, RiskSettings, Settings, TradingSettings
 from monomarket.db.storage import Storage
 from monomarket.models import MarketView, Signal
+from monomarket.signals import SignalEngine
 
 
 def _seed_market_snapshots(storage: Storage) -> None:
@@ -154,6 +156,52 @@ def _seed_signals(storage: Storage) -> None:
             )
         ],
         created_at="2026-02-20T00:55:00+00:00",
+    )
+
+
+def _seed_extreme_s8_markets(storage: Storage) -> None:
+    rows = [
+        MarketView(
+            market_id=f"m{i}",
+            canonical_id=f"c{i}",
+            source="gamma",
+            event_id=f"e{i}",
+            question=f"Q{i}",
+            status="open",
+            neg_risk=False,
+            liquidity=100000.0,
+            volume=1000.0,
+            yes_price=0.01 + (i * 0.005),
+            no_price=0.99 - (i * 0.005),
+            mid_price=0.01 + (i * 0.005),
+        )
+        for i in range(1, 7)
+    ]
+    storage.upsert_markets(rows, snapshot_at="2026-02-24T01:39:20+00:00")
+
+
+def _default_settings_for_test(db_path: str) -> Settings:
+    return Settings(
+        app=AppSettings(db_path=db_path, log_level="INFO"),
+        trading=TradingSettings(
+            mode="paper",
+            enable_live_trading=False,
+            require_manual_confirm=True,
+            kill_switch=False,
+        ),
+        risk=RiskSettings(
+            max_daily_loss=250.0,
+            max_strategy_notional=1000.0,
+            max_event_notional=1500.0,
+            circuit_breaker_rejections=5,
+        ),
+        data=DataSettings(),
+        strategies={
+            "s8": {
+                "yes_price_max_for_no": 0.25,
+                "hedge_budget_ratio": 0.15,
+            }
+        },
     )
 
 
@@ -332,6 +380,39 @@ def test_backtest_risk_replay_rejection(tmp_path: Path) -> None:
     assert abs(rejected_rows[0].risk_max_event_notional - 5.0) < 1e-9
     assert rejected_rows[0].risk_rejections_before == 0
     assert rejected_rows[0].risk_allowed is False
+
+
+def test_backtest_default_sizing_avoids_zero_execution_rate(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_extreme_s8_markets(storage)
+
+    settings = _default_settings_for_test(str(db))
+    generated = SignalEngine(storage, settings).generate(["s8"])
+    assert len(generated) == 6
+
+    created = [row["created_at"] for row in storage.list_signals(limit=100, strategy="s8")]
+    assert created
+    from_ts = min(created)
+    to_ts = max(created)
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+        risk=BacktestRiskConfig(
+            max_daily_loss=settings.risk.max_daily_loss,
+            max_strategy_notional=settings.risk.max_strategy_notional,
+            max_event_notional=settings.risk.max_event_notional,
+            circuit_breaker_rejections=settings.risk.circuit_breaker_rejections,
+        ),
+    ).run(["s8"], from_ts=from_ts, to_ts=to_ts)
+
+    assert report.total_signals == 6
+    assert report.executed_signals == 6
+    assert report.rejected_signals == 0
+    assert all(x.risk_reason == "ok" for x in report.replay)
+    assert all(x.risk_notional <= 25.0 + 1e-9 for x in report.replay)
 
 
 def test_cli_backtest_command(tmp_path: Path) -> None:

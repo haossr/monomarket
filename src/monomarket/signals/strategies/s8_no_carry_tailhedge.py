@@ -21,6 +21,7 @@ class S8NoCarryTailHedge(Strategy):
         cfg = strategy_config or {}
         yes_cap = float(cfg.get("yes_price_max_for_no", 0.25))
         hedge_ratio = float(cfg.get("hedge_budget_ratio", 0.15))
+        max_order_notional = float(cfg.get("max_order_notional", 25.0))
 
         mains = [
             m
@@ -47,6 +48,9 @@ class S8NoCarryTailHedge(Strategy):
         for m in mains[:30]:
             no_px = float(m.no_price or 1.0 - float(m.yes_price or 0.0))
             base_qty = max(3.0, m.liquidity * 0.012)
+            if max_order_notional > 0 and no_px > 0:
+                base_qty = min(base_qty, max_order_notional / no_px)
+
             hedge_budget = base_qty * no_px * hedge_ratio
             hedge = tails[0] if tails else None
             hedge_qty = 0.0

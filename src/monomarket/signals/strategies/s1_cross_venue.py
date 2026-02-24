@@ -17,6 +17,7 @@ class S1CrossVenueScanner(Strategy):
     ) -> list[Signal]:
         cfg = strategy_config or {}
         min_spread = float(cfg.get("min_spread", 0.03))
+        max_order_notional = float(cfg.get("max_order_notional", 25.0))
 
         by_canonical: dict[str, list[MarketView]] = defaultdict(list)
         for m in markets:
@@ -37,6 +38,9 @@ class S1CrossVenueScanner(Strategy):
                 continue
             score = spread * (1 + min(low.liquidity, high.liquidity) / 2000)
             qty = max(5.0, min(low.liquidity, high.liquidity) * 0.02)
+            target_price = min(0.99, float(low.mid_price or 0.5) + 0.005)
+            if max_order_notional > 0 and target_price > 0:
+                qty = min(qty, max_order_notional / target_price)
             signals.append(
                 Signal(
                     strategy=self.name,
@@ -45,7 +49,7 @@ class S1CrossVenueScanner(Strategy):
                     side="buy",
                     score=score,
                     confidence=min(0.95, 0.5 + spread),
-                    target_price=min(0.99, float(low.mid_price or 0.5) + 0.005),
+                    target_price=target_price,
                     size_hint=qty,
                     rationale=(
                         f"跨平台价差 {spread:.4f} (buy {low.source}/{low.market_id}, "

@@ -17,6 +17,7 @@ class S4LowProbYesBasket(Strategy):
         cfg = strategy_config or {}
         p_min = float(cfg.get("yes_price_min", 0.01))
         p_max = float(cfg.get("yes_price_max", 0.15))
+        max_order_notional = float(cfg.get("max_order_notional", 20.0))
 
         candidates = [
             m
@@ -36,6 +37,9 @@ class S4LowProbYesBasket(Strategy):
             size = base_qty * tier_mult
             px = float(m.yes_price or 0.05)
             ladder = [max(0.01, px), max(0.01, px - 0.01), max(0.01, px - 0.02)]
+            target_price = ladder[0]
+            if max_order_notional > 0 and target_price > 0:
+                size = min(size, max_order_notional / target_price)
             score = (p_max - px + 0.01) * (1 + m.liquidity / 2000)
 
             signals.append(
@@ -46,7 +50,7 @@ class S4LowProbYesBasket(Strategy):
                     side="buy",
                     score=score,
                     confidence=min(0.9, 0.45 + (p_max - px)),
-                    target_price=ladder[0],
+                    target_price=target_price,
                     size_hint=size,
                     rationale=f"低概率YES篮子候选 tier={tier}, yes={px:.3f}, liq={m.liquidity:.1f}",
                     payload={

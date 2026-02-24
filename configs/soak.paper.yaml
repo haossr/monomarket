@@ -28,11 +28,14 @@ data:
 strategies:
   s1:
     min_spread: 0.03
+    max_order_notional: 25.0
   s2:
     prob_sum_tolerance: 0.04
   s4:
     yes_price_min: 0.01
     yes_price_max: 0.15
+    max_order_notional: 20.0
   s8:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.15
+    max_order_notional: 25.0
