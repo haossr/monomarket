@@ -60,13 +60,15 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   --out-json artifacts/backtest/latest.json --with-checksum \
   --out-replay-csv artifacts/backtest/replay.csv \
   --out-strategy-csv artifacts/backtest/strategy.csv \
-  --out-event-csv artifacts/backtest/event.csv
+  --out-event-csv artifacts/backtest/event.csv \
+  --with-csv-digest-sidecar
 ```
 
 回放账本（终端 + CSV）包含 `requested/filled qty`、`fill_ratio`、`fill_probability`、`slippage_bps_applied` 以及风控决策字段：`risk_allowed` / `risk_reason` 与阈值快照，便于离线审计。
 所有导出工件（JSON + 各 CSV）均包含 `schema_version` 字段，用于向后兼容与审计解析。
 JSON 额外包含 `execution_config` / `risk_config` 快照，用于可重复回放与参数审计。
 使用 `backtest --out-json ... --with-checksum` 时，还会附带 `checksum_algo/checksum_sha256` 便于跨系统完整性校验。
+使用 `--with-csv-digest-sidecar` 时，会为每个导出 CSV 写入同名 `.sha256` sidecar。
 归因结果可分别导出 strategy/event CSV，便于接审计流水线与 BI。
 
 多样本滚动回测（用于策略稳定性观察）：
@@ -113,6 +115,7 @@ bash scripts/backtest_cycle.sh \
 ```
 
 输出：`artifacts/backtest/runs/<timestamp>/latest.json|replay.csv|strategy.csv|event.csv|summary.md`
+（并为各 CSV 生成 `.sha256` sidecar）。
 并自动更新 latest 指针：`artifacts/backtest/latest-run.json`（及 `artifacts/backtest/latest` symlink）。
 
 生成 PDF：

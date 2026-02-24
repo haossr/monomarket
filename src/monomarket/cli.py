@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -180,6 +181,14 @@ def _write_backtest_event_csv(report: BacktestReport, output_path: str) -> None:
             csv_row = asdict(row)
             csv_row["schema_version"] = report.schema_version
             writer.writerow(csv_row)
+
+
+def _write_sha256_sidecar(path: str | Path) -> Path:
+    artifact_path = Path(path)
+    digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    sidecar_path = artifact_path.with_name(artifact_path.name + ".sha256")
+    sidecar_path.write_text(f"{digest}  {artifact_path.name}\n")
+    return sidecar_path
 
 
 @app.command("init-db")
@@ -590,6 +599,11 @@ def backtest(
         None,
         help="Write event attribution as CSV",
     ),
+    with_csv_digest_sidecar: bool = typer.Option(
+        False,
+        "--with-csv-digest-sidecar/--no-csv-digest-sidecar",
+        help="Write <csv>.sha256 sidecar for each exported CSV artifact",
+    ),
     config: str | None = typer.Option(None),
 ) -> None:
     settings, storage = _ctx(config)
@@ -715,14 +729,23 @@ def backtest(
     if out_replay_csv:
         _write_backtest_replay_csv(report, out_replay_csv)
         console.print(f"[green]replay csv exported[/green] {out_replay_csv}")
+        if with_csv_digest_sidecar:
+            sidecar = _write_sha256_sidecar(out_replay_csv)
+            console.print(f"[green]replay csv digest exported[/green] {sidecar}")
 
     if out_strategy_csv:
         _write_backtest_strategy_csv(report, out_strategy_csv)
         console.print(f"[green]strategy csv exported[/green] {out_strategy_csv}")
+        if with_csv_digest_sidecar:
+            sidecar = _write_sha256_sidecar(out_strategy_csv)
+            console.print(f"[green]strategy csv digest exported[/green] {sidecar}")
 
     if out_event_csv:
         _write_backtest_event_csv(report, out_event_csv)
         console.print(f"[green]event csv exported[/green] {out_event_csv}")
+        if with_csv_digest_sidecar:
+            sidecar = _write_sha256_sidecar(out_event_csv)
+            console.print(f"[green]event csv digest exported[/green] {sidecar}")
 
 
 @app.command("backtest-rolling")

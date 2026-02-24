@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -462,6 +463,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
             str(strategy_csv_out),
             "--out-event-csv",
             str(event_csv_out),
+            "--with-csv-digest-sidecar",
             "--config",
             str(config_path),
         ],
@@ -476,6 +478,9 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert "replay csv exported" in res.output
     assert "strategy csv exported" in res.output
     assert "event csv exported" in res.output
+    assert "replay csv digest exported" in res.output
+    assert "strategy csv digest exported" in res.output
+    assert "event csv digest exported" in res.output
     assert "s1" in res.output
 
     payload = json.loads(json_out.read_text())
@@ -516,6 +521,14 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert len(event_rows) == 2
     assert all(x["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION for x in event_rows)
     assert {x["event_id"] for x in event_rows} == {"e1", "e2"}
+
+    for csv_path in [csv_out, strategy_csv_out, event_csv_out]:
+        sidecar_path = csv_path.with_name(csv_path.name + ".sha256")
+        assert sidecar_path.exists()
+        line = sidecar_path.read_text().strip()
+        digest, filename = line.split("  ", 1)
+        assert filename == csv_path.name
+        assert digest == hashlib.sha256(csv_path.read_bytes()).hexdigest()
 
 
 def test_cli_backtest_rolling_command(tmp_path: Path) -> None:

@@ -139,7 +139,8 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   --out-json artifacts/backtest/latest.json --with-checksum \
   --out-replay-csv artifacts/backtest/replay.csv \
   --out-strategy-csv artifacts/backtest/strategy.csv \
-  --out-event-csv artifacts/backtest/event.csv
+  --out-event-csv artifacts/backtest/event.csv \
+  --with-csv-digest-sidecar
 ```
 
 输出包含：
@@ -152,6 +153,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
   - `--out-replay-csv`：replay ledger CSV（便于审计/外部分析）
   - `--out-strategy-csv`：策略维度归因 CSV
   - `--out-event-csv`：事件维度归因 CSV
+  - 可配 `--with-csv-digest-sidecar`：为每个导出 CSV 生成 `.sha256` sidecar
   - 导出工件统一带 `schema_version` 字段（兼容解析）
   - 解析端可使用 `monomarket.backtest.parse_schema_version` / `assert_schema_compatible`
   - JSON 解析可进一步使用 `monomarket.backtest.validate_backtest_json_artifact`
@@ -214,9 +216,9 @@ bash scripts/backtest_cycle.sh \
 
 产物目录：`artifacts/backtest/runs/<timestamp>/`
 - `latest.json`
-- `replay.csv`
-- `strategy.csv`
-- `event.csv`
+- `replay.csv` + `replay.csv.sha256`
+- `strategy.csv` + `strategy.csv.sha256`
+- `event.csv` + `event.csv.sha256`
 - `summary.md`
 
 并会更新 latest 指针：

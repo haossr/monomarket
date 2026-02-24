@@ -199,6 +199,7 @@ monomarket backtest \
   --out-replay-csv "$RUN_DIR/replay.csv" \
   --out-strategy-csv "$RUN_DIR/strategy.csv" \
   --out-event-csv "$RUN_DIR/event.csv" \
+  --with-csv-digest-sidecar \
   --config "$CONFIG_PATH"
 
 "$PYTHON_BIN" - "$RUN_DIR/latest.json" "$RUN_DIR/summary.md" <<'PY'
@@ -287,8 +288,11 @@ ln -sfn "$RUN_DIR" artifacts/backtest/latest || true
 echo "[backtest-cycle] artifacts"
 echo "- $RUN_DIR/latest.json"
 echo "- $RUN_DIR/replay.csv"
+echo "- $RUN_DIR/replay.csv.sha256"
 echo "- $RUN_DIR/strategy.csv"
+echo "- $RUN_DIR/strategy.csv.sha256"
 echo "- $RUN_DIR/event.csv"
+echo "- $RUN_DIR/event.csv.sha256"
 echo "- $RUN_DIR/summary.md"
 echo "- artifacts/backtest/latest-run.json"
 echo "- artifacts/backtest/latest (symlink)"
