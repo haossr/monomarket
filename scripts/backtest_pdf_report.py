@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,29 @@ def _safe_int(value: object, default: int = 0) -> int:
         return int(float(value))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return default
+
+
+def _nice_step(span: float, target_ticks: int = 5) -> float:
+    if span <= 0:
+        return 1.0
+    rough = span / max(1, target_ticks)
+    magnitude = 10 ** math.floor(math.log10(abs(rough)))
+    normalized = rough / magnitude
+    if normalized <= 1:
+        nice = 1.0
+    elif normalized <= 2:
+        nice = 2.0
+    elif normalized <= 5:
+        nice = 5.0
+    else:
+        nice = 10.0
+    return nice * magnitude
+
+
+def _truncate_label(text: str, max_len: int = 16) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
@@ -55,6 +79,34 @@ def _load_event_rows(payload: dict[str, Any], event_csv: Path | None) -> list[di
     return [dict(row) for row in raw_rows if isinstance(row, dict)]
 
 
+def _build_cumulative_realized_points(payload: dict[str, Any]) -> list[tuple[float, float]]:
+    replay = payload.get("replay")
+    if not isinstance(replay, list):
+        return []
+
+    points: list[tuple[float, float]] = []
+    cumulative = 0.0
+    idx = 1
+    for row in replay:
+        if not isinstance(row, dict):
+            continue
+        cumulative += _safe_float(row.get("realized_change"))
+        points.append((float(idx), cumulative))
+        idx += 1
+    return points
+
+
+def _build_strategy_pnl_bars(
+    strategy_rows: list[dict[str, Any]], max_items: int = 12
+) -> list[tuple[str, float]]:
+    bars: list[tuple[str, float]] = []
+    for row in strategy_rows:
+        strategy = str(row.get("strategy", "")).strip() or "(unknown)"
+        bars.append((strategy, _safe_float(row.get("pnl"))))
+    bars.sort(key=lambda item: item[1], reverse=True)
+    return bars[:max_items]
+
+
 def _format_pct(raw: object) -> str:
     return f"{_safe_float(raw) * 100.0:.2f}%"
 
@@ -68,6 +120,11 @@ def render_pdf(
     title: str,
 ) -> None:
     try:
+        from reportlab.graphics import renderPDF
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+        from reportlab.graphics.charts.lineplots import LinePlot
+        from reportlab.graphics.shapes import Drawing, Line, String
+        from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
     except Exception as exc:  # pragma: no cover - runtime dependency guidance
@@ -82,13 +139,18 @@ def render_pdf(
     width, height = A4
     margin_x = 40
     margin_y = 40
+    content_width = width - margin_x * 2
     y = height - margin_y
+
+    def ensure_space(required_height: float) -> None:
+        nonlocal y
+        if y - required_height < margin_y:
+            pdf.showPage()
+            y = height - margin_y
 
     def write_line(text: str, *, bold: bool = False, size: int = 10, leading: int = 14) -> None:
         nonlocal y
-        if y < margin_y + leading:
-            pdf.showPage()
-            y = height - margin_y
+        ensure_space(leading)
         pdf.setFont("Helvetica-Bold" if bold else "Helvetica", size)
         pdf.drawString(margin_x, y, text)
         y -= leading
@@ -99,6 +161,152 @@ def render_pdf(
         chunks = textwrap.wrap(text, width=width_chars) or [""]
         for chunk in chunks:
             write_line(chunk, bold=bold, size=size)
+
+    def draw_chart(drawing: Any) -> None:
+        nonlocal y
+        ensure_space(float(drawing.height) + 8)
+        draw_y = y - float(drawing.height)
+        renderPDF.draw(drawing, pdf, margin_x, draw_y)
+        y = draw_y - 8
+
+    def make_cumulative_chart() -> tuple[Any | None, str | None]:
+        points = _build_cumulative_realized_points(payload)
+        if len(points) < 2:
+            return None, "Not enough replay points for cumulative realized PnL chart"
+
+        drawing = Drawing(content_width, 220)
+        chart = LinePlot()
+        chart.x = 48
+        chart.y = 40
+        chart.width = content_width - 70
+        chart.height = 135
+        chart.data = [points]
+        chart.lines[0].strokeColor = colors.HexColor("#1f77b4")
+        chart.lines[0].strokeWidth = 1.6
+
+        x_max = max(2, len(points))
+        chart.xValueAxis.valueMin = 1
+        chart.xValueAxis.valueMax = x_max
+        chart.xValueAxis.valueStep = max(1, x_max // 5)
+        chart.xValueAxis.labelTextFormat = "%d"
+
+        y_values = [p[1] for p in points]
+        y_min = min(y_values)
+        y_max = max(y_values)
+        if abs(y_max - y_min) < 1e-9:
+            pad = max(0.5, abs(y_max) * 0.1 + 0.1)
+        else:
+            pad = max(0.2, (y_max - y_min) * 0.08)
+        y_min -= pad
+        y_max += pad
+        chart.yValueAxis.valueMin = y_min
+        chart.yValueAxis.valueMax = y_max
+        chart.yValueAxis.valueStep = _nice_step(y_max - y_min, target_ticks=5)
+        chart.yValueAxis.labelTextFormat = "%.2f"
+
+        if y_min < 0 < y_max:
+            zero_ratio = (0.0 - y_min) / (y_max - y_min)
+            zero_y = chart.y + chart.height * zero_ratio
+            drawing.add(
+                Line(
+                    chart.x,
+                    zero_y,
+                    chart.x + chart.width,
+                    zero_y,
+                    strokeColor=colors.HexColor("#bbbbbb"),
+                    strokeWidth=0.8,
+                )
+            )
+
+        drawing.add(chart)
+        drawing.add(
+            String(
+                content_width / 2,
+                204,
+                "Cumulative Realized PnL (from replay.realized_change)",
+                textAnchor="middle",
+                fontName="Helvetica-Bold",
+                fontSize=10,
+            )
+        )
+        drawing.add(
+            String(
+                content_width / 2,
+                190,
+                f"points={len(points)} final={points[-1][1]:.4f}",
+                textAnchor="middle",
+                fontName="Helvetica",
+                fontSize=9,
+                fillColor=colors.HexColor("#444444"),
+            )
+        )
+        return drawing, None
+
+    def make_strategy_bar_chart() -> tuple[Any | None, str | None]:
+        bars = _build_strategy_pnl_bars(strategy_rows)
+        if not bars:
+            return None, "No strategy attribution rows for strategy PnL bar chart"
+
+        labels = [_truncate_label(name) for name, _ in bars]
+        values = [pnl for _, pnl in bars]
+
+        drawing = Drawing(content_width, 240)
+        chart = VerticalBarChart()
+        chart.x = 48
+        chart.y = 58
+        chart.width = content_width - 70
+        chart.height = 140
+        chart.data = [values]
+        chart.groupSpacing = 8
+
+        chart.categoryAxis.categoryNames = labels
+        chart.categoryAxis.labels.angle = 28
+        chart.categoryAxis.labels.boxAnchor = "ne"
+        chart.categoryAxis.labels.fontName = "Helvetica"
+        chart.categoryAxis.labels.fontSize = 8
+
+        y_min = min(values + [0.0])
+        y_max = max(values + [0.0])
+        if abs(y_max - y_min) < 1e-9:
+            pad = max(0.5, abs(y_max) * 0.1 + 0.1)
+        else:
+            pad = max(0.2, (y_max - y_min) * 0.1)
+        y_min -= pad
+        y_max += pad
+        chart.valueAxis.valueMin = y_min
+        chart.valueAxis.valueMax = y_max
+        chart.valueAxis.valueStep = _nice_step(y_max - y_min, target_ticks=5)
+        chart.valueAxis.labelTextFormat = "%.2f"
+
+        for idx, value in enumerate(values):
+            chart.bars[(0, idx)].fillColor = (
+                colors.HexColor("#2ca02c") if value >= 0 else colors.HexColor("#d62728")
+            )
+            chart.bars[(0, idx)].strokeColor = colors.HexColor("#333333")
+
+        drawing.add(chart)
+        drawing.add(
+            String(
+                content_width / 2,
+                220,
+                "Strategy PnL Attribution",
+                textAnchor="middle",
+                fontName="Helvetica-Bold",
+                fontSize=10,
+            )
+        )
+        drawing.add(
+            String(
+                content_width / 2,
+                206,
+                "green>=0, red<0",
+                textAnchor="middle",
+                fontName="Helvetica",
+                fontSize=9,
+                fillColor=colors.HexColor("#444444"),
+            )
+        )
+        return drawing, None
 
     write_line(title, bold=True, size=16, leading=22)
     write_line(f"Generated at: {payload.get('generated_at', '')}")
@@ -137,6 +345,21 @@ def render_pdf(
                 + f"{strategy}: pnl={pnl:.4f}, winrate={winrate}, "
                 + f"max_drawdown={max_dd:.4f}, trades={trades}, wins={wins}, losses={losses}"
             )
+
+    write_line("")
+    write_line("PnL Charts", bold=True, size=12, leading=18)
+
+    cumulative_chart, cumulative_msg = make_cumulative_chart()
+    if cumulative_chart is not None:
+        draw_chart(cumulative_chart)
+    else:
+        write_wrapped(f" - Cumulative realized PnL chart unavailable: {cumulative_msg}")
+
+    strategy_chart, strategy_chart_msg = make_strategy_bar_chart()
+    if strategy_chart is not None:
+        draw_chart(strategy_chart)
+    else:
+        write_wrapped(f" - Strategy PnL chart unavailable: {strategy_chart_msg}")
 
     write_line("")
     write_line("Top Events by |PnL|", bold=True, size=12, leading=18)
