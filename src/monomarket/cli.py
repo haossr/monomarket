@@ -740,6 +740,13 @@ def backtest_rolling(
     if step_delta <= timedelta(0):
         raise typer.BadParameter("--step-hours must be positive")
 
+    if step_delta < window_delta:
+        overlap_mode = "overlap"
+    elif step_delta == window_delta:
+        overlap_mode = "tiled"
+    else:
+        overlap_mode = "gapped"
+
     selected = [s.strip().lower() for s in strategies.split(",") if s.strip()]
     execution_cfg = BacktestExecutionConfig(
         slippage_bps=slippage_bps,
@@ -829,7 +836,8 @@ def backtest_rolling(
         f"executed={executed_signals} rejected={rejected_signals} "
         f"execution_rate={overall_exec_rate:.2%} "
         f"positive_window_rate={positive_window_rate:.2%} "
-        f"empty_windows={empty_window_count}"
+        f"empty_windows={empty_window_count} "
+        f"overlap_mode={overlap_mode}"
     )
 
     tb = Table(title=f"Backtest rolling windows ({runs})")
@@ -955,6 +963,7 @@ def backtest_rolling(
             "to_ts": to_dt.isoformat(),
             "window_hours": window_hours,
             "step_hours": step_hours,
+            "overlap_mode": overlap_mode,
             "strategies": selected,
             "execution_config": asdict(execution_cfg),
             "risk_config": asdict(risk_cfg),

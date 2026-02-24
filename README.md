@@ -80,6 +80,7 @@ monomarket backtest-rolling --strategies s1,s2,s4,s8 \
 
 rolling summary 会额外输出：
 - `schema_version`（当前 `rolling-1.0`）
+- `overlap_mode`（`overlap`/`tiled`/`gapped`）用于标记窗口重叠语义
 - `execution_config` / `risk_config` 快照
 - `summary` 扩展指标：`empty_window_count` / `positive_window_rate` / `pnl_sum` / `pnl_avg`
 - 风控拒单原因分布（`risk_rejection_reasons`，窗口级 + 汇总级）

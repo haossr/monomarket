@@ -170,6 +170,7 @@ monomarket backtest-rolling --strategies s1,s2,s4,s8 \
 输出包含每个窗口的 `signals/executed/rejected/execution_rate/pnl_total`，以及策略级 `avg_pnl/avg_winrate/total_trades` 聚合。
 rolling JSON 工件还包含：
 - `schema_version`（当前 `rolling-1.0`）
+- `overlap_mode`（`overlap`/`tiled`/`gapped`）标记窗口重叠语义
 - `execution_config` / `risk_config` 参数快照
 - `summary` 扩展指标：`empty_window_count` / `positive_window_rate` / `pnl_sum` / `pnl_avg`
 - 风控拒单原因分布（`risk_rejection_reasons`，窗口级 + 汇总级）

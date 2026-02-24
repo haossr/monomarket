@@ -566,12 +566,14 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert "backtest rolling runs=2" in res.output
     assert "Backtest rolling windows" in res.output
     assert "Backtest rolling strategy aggregate" in res.output
+    assert "overlap_mode=tiled" in res.output
     assert "rejection reasons" in res.output.lower()
     assert "rolling json exported" in res.output
 
     payload = json.loads(out_json.read_text())
     assert payload["schema_version"] == "rolling-1.0"
     assert payload["kind"] == "backtest_rolling_summary"
+    assert payload["overlap_mode"] == "tiled"
     assert payload["execution_config"]["slippage_bps"] == 0.0
     assert payload["execution_config"]["fee_bps"] == 0.0
     assert payload["risk_config"]["max_event_notional"] == 1500.0
@@ -649,6 +651,7 @@ def test_cli_backtest_rolling_risk_reason_histogram(tmp_path: Path) -> None:
 
     payload = json.loads(out_json.read_text())
     assert payload["schema_version"] == "rolling-1.0"
+    assert payload["overlap_mode"] == "tiled"
     assert payload["execution_config"]["slippage_bps"] == 0.0
     assert payload["risk_config"]["max_event_notional"] == 5.0
 
@@ -676,6 +679,84 @@ def test_cli_backtest_rolling_risk_reason_histogram(tmp_path: Path) -> None:
     assert isinstance(win_reasons, dict)
     assert sum(int(v) for v in win_reasons.values()) == 1
     assert any("event notional limit exceeded" in str(k) for k in win_reasons.keys())
+
+
+def test_cli_backtest_rolling_overlap_mode_flags(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+    _seed_signals(storage)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "app:",
+                f"  db_path: {db}",
+                "trading:",
+                "  mode: paper",
+            ]
+        )
+    )
+
+    runner = CliRunner()
+
+    overlap_out = tmp_path / "artifacts" / "rolling-overlap.json"
+    overlap_res = runner.invoke(
+        app,
+        [
+            "backtest-rolling",
+            "--strategies",
+            "s1",
+            "--from",
+            "2026-02-20T00:00:00Z",
+            "--to",
+            "2026-02-20T02:00:00Z",
+            "--window-hours",
+            "1",
+            "--step-hours",
+            "0.5",
+            "--slippage-bps",
+            "0",
+            "--out-json",
+            str(overlap_out),
+            "--config",
+            str(config_path),
+        ],
+    )
+    assert overlap_res.exit_code == 0, overlap_res.output
+    assert "overlap_mode=overlap" in overlap_res.output
+    overlap_payload = json.loads(overlap_out.read_text())
+    assert overlap_payload["overlap_mode"] == "overlap"
+
+    gapped_out = tmp_path / "artifacts" / "rolling-gapped.json"
+    gapped_res = runner.invoke(
+        app,
+        [
+            "backtest-rolling",
+            "--strategies",
+            "s1",
+            "--from",
+            "2026-02-20T00:00:00Z",
+            "--to",
+            "2026-02-20T02:00:00Z",
+            "--window-hours",
+            "1",
+            "--step-hours",
+            "2",
+            "--slippage-bps",
+            "0",
+            "--out-json",
+            str(gapped_out),
+            "--config",
+            str(config_path),
+        ],
+    )
+    assert gapped_res.exit_code == 0, gapped_res.output
+    assert "overlap_mode=gapped" in gapped_res.output
+    gapped_payload = json.loads(gapped_out.read_text())
+    assert gapped_payload["overlap_mode"] == "gapped"
 
 
 def test_cli_backtest_json_with_checksum(tmp_path: Path) -> None:
