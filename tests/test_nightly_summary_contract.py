@@ -104,6 +104,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     disabled_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(disabled_sidecar)
     assert str(disabled_sidecar["schema_version"]) == "nightly-summary-sidecar-1.0"
+    assert str(disabled_sidecar["schema_note"]).startswith("best is structured object")
+    assert str(disabled_sidecar["best_version"]) == "1.0"
     assert str(disabled_sidecar["checksum_algo"]) == NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO
     assert verify_nightly_summary_sidecar_checksum(disabled_sidecar)
     assert int(disabled_sidecar["rolling"]["reject_top_k"]) == 0

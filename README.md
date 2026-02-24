@@ -146,7 +146,7 @@ bash scripts/backtest_nightly_report.sh \
 Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 - `report.pdf`
 - `summary.txt`（含 rolling `pos_win_rate/empty_windows` 与 canonical 别名 `positive_window_rate/empty_window_count`，以及 `range_h/coverage/overlap` 与 canonical 别名 `range_hours/coverage_ratio/overlap_ratio`、`coverage_label`、`rolling_reject_top_k`、主要拒单原因摘要）
-- `summary.json`（结构化 sidecar，便于机器解析；含 `best` 对象、rolling 指标与 `checksum_algo/checksum_sha256`）
+- `summary.json`（结构化 sidecar，便于机器解析；含 `best` 对象、`best_version`、`schema_note`、rolling 指标与 `checksum_algo/checksum_sha256`）
 - `rolling-summary.json`
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 

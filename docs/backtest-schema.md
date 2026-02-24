@@ -24,7 +24,8 @@
   - 可选 checksum：`checksum_algo/checksum_sha256`（当前 `sha256`）
   - 可调用 `verify_nightly_summary_sidecar_checksum(payload)` 做完整性校验
   - 其中 `rolling.reject_top_delimiter` 当前为 `";"`；消费端优先使用 `rolling.reject_top_pairs`
-  - `best` 当前为结构化对象（`available/strategy/pnl/text`）；校验器仍兼容历史字符串格式
+  - `best` 当前为结构化对象（`available/strategy/pnl/text`），并带 `best_version` 与 `schema_note`
+  - 校验器仍兼容历史字符串格式 `best`
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`
 - 迁移助手：`migrate_backtest_artifact_v1_to_v2(payload)`（CLI: `backtest-migrate-v1-to-v2`）

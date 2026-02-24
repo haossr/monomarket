@@ -124,6 +124,8 @@ def build_summary_bundle(
 
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
+        "schema_note": "best is structured object; prefer rolling.reject_top_pairs for machine parsing",
+        "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
             "from_ts": str(payload.get("from_ts", "")),
