@@ -639,6 +639,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "active_filters=" in res_empty.output
     assert "min_total_runs=3" in res_empty.output
     assert "relax order: min_share/min_count" in res_empty.output
+    assert "first_relax=min_total_runs" in res_empty.output
     relax_idx = res_empty.output.index("relax order:")
     order_tokens = [
         "min_share/min_count",
@@ -648,3 +649,21 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     ]
     positions = [res_empty.output.index(token, relax_idx) for token in order_tokens]
     assert positions == sorted(positions), positions
+
+    res_empty_runs = runner.invoke(
+        app,
+        [
+            "ingest-health",
+            "--source",
+            "gamma",
+            "--run-window",
+            "5",
+            "--error-share-min-runs-with-error",
+            "2",
+            "--config",
+            str(config_path),
+        ],
+    )
+    assert res_empty_runs.exit_code == 0, res_empty_runs.output
+    assert "error share empty after filters" in res_empty_runs.output
+    assert "first_relax=min_runs_with_error" in res_empty_runs.output

@@ -233,6 +233,28 @@ def ingest(
         console.print(f"[red]error[/red] {res.error}")
 
 
+def _suggest_error_share_first_relax(
+    *,
+    top_k: int,
+    min_share: float,
+    min_count: int,
+    min_runs_with_error: int,
+    min_total_runs: int,
+    min_source_bucket_total: int,
+) -> str:
+    if min_share > 0 or min_count > 0:
+        return "min_share/min_count"
+    if min_total_runs > 0:
+        return "min_total_runs"
+    if min_source_bucket_total > 0:
+        return "min_source_bucket_total"
+    if top_k > 0:
+        return "top_k"
+    if min_runs_with_error > 0:
+        return "min_runs_with_error"
+    return "min_share/min_count"
+
+
 @app.command("ingest-health")
 def ingest_health(
     source: str | None = typer.Option(None, help="gamma|data|clob (default: all)"),
@@ -483,9 +505,21 @@ def ingest_health(
             f"min_total_runs={error_share_min_total_runs},"
             f"min_source_bucket_total={error_share_min_source_bucket_total}"
         )
+        first_relax = _suggest_error_share_first_relax(
+            top_k=error_share_top_k,
+            min_share=error_share_min_share,
+            min_count=error_share_min_count,
+            min_runs_with_error=error_share_min_runs_with_error,
+            min_total_runs=error_share_min_total_runs,
+            min_source_bucket_total=error_share_min_source_bucket_total,
+        )
         console.print(
             "[yellow]error share empty after filters[/yellow] "
-            f"({active_filters}; relax order: min_share/min_count -> min_total_runs -> min_source_bucket_total -> top_k)"
+            "("
+            f"{active_filters}; "
+            "relax order: min_share/min_count -> min_total_runs -> min_source_bucket_total -> top_k; "
+            f"first_relax={first_relax}"
+            ")"
         )
 
     tb6 = Table(title=f"Recent ingestion errors (per source <= {error_sample_limit})")
