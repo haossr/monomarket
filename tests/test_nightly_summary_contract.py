@@ -88,6 +88,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     )
     line_disabled = summary_txt.read_text().strip()
     assert "rolling_reject_top_k=0" in line_disabled
+    assert "rolling_reject_top_delim=;" in line_disabled
     assert "rolling_reject_top=disabled" in line_disabled
     assert "positive_window_rate=" in line_disabled
     assert "empty_window_count=" in line_disabled
@@ -99,6 +100,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     validate_nightly_summary_sidecar(disabled_sidecar)
     assert str(disabled_sidecar["schema_version"]) == "nightly-summary-sidecar-1.0"
     assert int(disabled_sidecar["rolling"]["reject_top_k"]) == 0
+    assert str(disabled_sidecar["rolling"]["reject_top_delimiter"]) == ";"
     assert str(disabled_sidecar["rolling"]["reject_top"]) == "disabled"
     assert "coverage_ratio" in disabled_sidecar["rolling"]
     assert "overlap_ratio" in disabled_sidecar["rolling"]
@@ -136,12 +138,49 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     )
     line_none = summary_txt.read_text().strip()
     assert "rolling_reject_top_k=2" in line_none
+    assert "rolling_reject_top_delim=;" in line_none
     assert "rolling_reject_top=none" in line_none
 
     none_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(none_sidecar)
     assert int(none_sidecar["rolling"]["reject_top_k"]) == 2
+    assert str(none_sidecar["rolling"]["reject_top_delimiter"]) == ";"
     assert str(none_sidecar["rolling"]["reject_top"]) == "none"
+
+    # k>0 with reasons containing comma: delimiter must remain ';'
+    rolling_payload_reasons = {
+        "summary": {
+            **base_summary,
+            "risk_rejection_reasons": {"risk,A": 3, "riskB": 1},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload_reasons))
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    line_reasons = summary_txt.read_text().strip()
+    assert "rolling_reject_top_delim=;" in line_reasons
+    assert "rolling_reject_top=risk,A:3;riskB:1" in line_reasons
 
 
 def test_nightly_script_help_mentions_disabled_semantics() -> None:

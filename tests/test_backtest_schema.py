@@ -248,7 +248,8 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             "overlap_ratio": 0.2,
             "coverage_label": "full",
             "reject_top_k": 2,
-            "reject_top": "riskA:3,riskB:1",
+            "reject_top_delimiter": ";",
+            "reject_top": "riskA:3;riskB:1",
             "reject_top_pairs": [
                 {"reason": "riskA", "count": 3},
                 {"reason": "riskB", "count": 1},
@@ -286,6 +287,16 @@ def test_validate_nightly_summary_sidecar_reject_bad_pairs() -> None:
     rolling = payload["rolling"]
     assert isinstance(rolling, dict)
     rolling["reject_top_pairs"] = [{"reason": "riskA", "count": "x"}]
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_delimiter_type() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top_delimiter"] = 1
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

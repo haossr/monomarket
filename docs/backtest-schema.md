@@ -21,6 +21,7 @@
 - 如需双栈校验，可用 `validate_backtest_json_artifact(payload, supported_major=None, validators={2: ...})` 按 major 分派
 - 如导出时启用 `--with-checksum`，可调用 `verify_backtest_json_artifact_checksum(payload)` 做完整性校验
 - nightly `summary.json` sidecar 可调用 `validate_nightly_summary_sidecar(payload)` 做结构校验
+  - 其中 `rolling.reject_top_delimiter` 当前为 `";"`；消费端优先使用 `rolling.reject_top_pairs`
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`
 - 迁移助手：`migrate_backtest_artifact_v1_to_v2(payload)`（CLI: `backtest-migrate-v1-to-v2`）

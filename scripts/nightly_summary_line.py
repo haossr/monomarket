@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any
 
 
+ROLLING_REJECT_TOP_DELIMITER = ";"
+
+
 def _f(raw: object) -> float:
     try:
         return float(raw)  # type: ignore[arg-type]
@@ -79,7 +82,7 @@ def build_summary_bundle(
             if reason_items and k_norm > 0:
                 reason_items.sort(key=lambda x: (-x[1], x[0]))
                 rolling_reject_top_pairs = reason_items[:k_norm]
-                rolling_reject_top = ",".join(
+                rolling_reject_top = ROLLING_REJECT_TOP_DELIMITER.join(
                     f"{reason}:{count}" for reason, count in rolling_reject_top_pairs
                 )
 
@@ -96,6 +99,7 @@ def build_summary_bundle(
         f"range_hours={rolling_range_hours:.2f} coverage_ratio={rolling_coverage_ratio:.2%} "
         f"overlap_ratio={rolling_overlap_ratio:.2%} coverage_label={rolling_coverage_label} "
         f"rolling_reject_top_k={k_norm} "
+        f"rolling_reject_top_delim={ROLLING_REJECT_TOP_DELIMITER} "
         f"rolling_reject_top={rolling_reject_top} "
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
@@ -128,6 +132,7 @@ def build_summary_bundle(
             "overlap_ratio": rolling_overlap_ratio,
             "coverage_label": rolling_coverage_label,
             "reject_top_k": k_norm,
+            "reject_top_delimiter": ROLLING_REJECT_TOP_DELIMITER,
             "reject_top": rolling_reject_top,
             "reject_top_pairs": [
                 {"reason": reason, "count": count}

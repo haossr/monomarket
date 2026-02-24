@@ -367,6 +367,10 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if not isinstance(raw, str):
             raise ValueError(f"nightly sidecar rolling.{key} must be a string")
 
+    reject_top_delimiter = rolling.get("reject_top_delimiter")
+    if reject_top_delimiter is not None and not isinstance(reject_top_delimiter, str):
+        raise ValueError("nightly sidecar rolling.reject_top_delimiter must be a string")
+
     reject_pairs = rolling.get("reject_top_pairs")
     if not isinstance(reject_pairs, list):
         raise ValueError("nightly sidecar rolling.reject_top_pairs must be an array")
