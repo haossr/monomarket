@@ -291,6 +291,159 @@ def test_nightly_window_coverage_history_limited_runtime(tmp_path: Path) -> None
     assert abs(float(window_coverage["coverage_ratio"]) - 0.2) < 1e-9
 
 
+def test_nightly_window_coverage_full_history_runtime(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T10:00:00Z",
+        "total_signals": 2,
+        "executed_signals": 0,
+        "rejected_signals": 2,
+        "results": [],
+        "replay": [
+            {"ts": "2026-02-24T00:00:00Z", "realized_change": 0.0},
+            {"ts": "2026-02-24T09:00:00Z", "realized_change": 0.0},
+        ],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 0.0,
+            "positive_window_rate": 0.0,
+            "empty_window_count": 1,
+            "range_hours": 10,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "history_limited=false" in line
+    assert "window_note=full_history" in line
+    assert "main_coverage=100.00%" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    assert verify_nightly_summary_sidecar_checksum(sidecar)
+
+    window_coverage = sidecar["window_coverage"]
+    assert isinstance(window_coverage, dict)
+    assert bool(window_coverage["history_limited"]) is False
+    assert str(window_coverage["note"]) == "full_history"
+    assert abs(float(window_coverage["coverage_ratio"]) - 1.0) < 1e-9
+
+
+def test_nightly_window_coverage_no_replay_rows_runtime(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T10:00:00Z",
+        "total_signals": 0,
+        "executed_signals": 0,
+        "rejected_signals": 0,
+        "results": [],
+        "replay": [],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 0.0,
+            "positive_window_rate": 0.0,
+            "empty_window_count": 1,
+            "range_hours": 10,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "history_limited=false" in line
+    assert "window_note=no_replay_rows" in line
+    assert "main_coverage=0.00%" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    assert verify_nightly_summary_sidecar_checksum(sidecar)
+
+    window_coverage = sidecar["window_coverage"]
+    assert isinstance(window_coverage, dict)
+    assert bool(window_coverage["history_limited"]) is False
+    assert str(window_coverage["note"]) == "no_replay_rows"
+    assert abs(float(window_coverage["covered_hours"]) - 0.0) < 1e-9
+    assert abs(float(window_coverage["coverage_ratio"]) - 0.0) < 1e-9
+    assert str(window_coverage["effective_from_ts"]) == ""
+
+
 def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> None:
     backtest_json = tmp_path / "latest.json"
     rolling_json = tmp_path / "rolling.json"

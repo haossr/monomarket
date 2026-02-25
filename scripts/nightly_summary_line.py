@@ -170,7 +170,7 @@ def _compute_window_coverage(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     window_hours = max(0.0, (to_ts - from_ts).total_seconds() / 3600.0)
-    effective_from_dt = from_ts
+    effective_from_dt: datetime | None = from_ts
     history_limited = False
     note = "full_history"
 
@@ -178,10 +178,14 @@ def _compute_window_coverage(payload: dict[str, Any]) -> dict[str, Any]:
         effective_from_dt = first_replay_dt
         history_limited = True
         note = "history_limited"
-    elif not replay_rows:
+    elif first_replay_dt is None:
+        effective_from_dt = None
         note = "no_replay_rows"
 
-    covered_hours = max(0.0, (to_ts - effective_from_dt).total_seconds() / 3600.0)
+    if effective_from_dt is None:
+        covered_hours = 0.0
+    else:
+        covered_hours = max(0.0, (to_ts - effective_from_dt).total_seconds() / 3600.0)
     coverage_ratio = (covered_hours / window_hours) if window_hours > 0 else 0.0
 
     return {
@@ -195,7 +199,11 @@ def _compute_window_coverage(payload: dict[str, Any]) -> dict[str, Any]:
             if first_replay_dt is not None
             else ""
         ),
-        "effective_from_ts": effective_from_dt.isoformat().replace("+00:00", "Z"),
+        "effective_from_ts": (
+            effective_from_dt.isoformat().replace("+00:00", "Z")
+            if effective_from_dt is not None
+            else ""
+        ),
     }
 
 
