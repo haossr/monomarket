@@ -218,8 +218,11 @@ class BacktestEngine:
                 requested_qty=requested_qty,
             )
 
+            # Risk checks should use executable size when available;
+            # otherwise fallback to requested size so no-liquidity paths keep clear reasons.
+            risk_qty = executed_qty if executed_qty > 1e-12 else requested_qty
             risk_decision = self._risk_check(
-                qty=requested_qty,
+                qty=risk_qty,
                 price=fill_price,
                 strategy=strategy,
                 event_id=event_id,
