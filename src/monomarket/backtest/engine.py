@@ -192,7 +192,7 @@ class BacktestEngine:
 
         replay: list[BacktestReplayRow] = []
         rejection_count = 0
-        rejection_streak = 0
+        rejection_streak_by_strategy: dict[str, int] = defaultdict(int)
         executed_signals = 0
 
         for row in rows:
@@ -230,12 +230,12 @@ class BacktestEngine:
                 positions=positions,
                 strategy_market_event=strategy_market_event,
                 realized_pnl=total_realized,
-                rejection_streak=rejection_streak,
+                rejection_streak=rejection_streak_by_strategy[strategy],
             )
 
             if not risk_decision.ok:
                 rejection_count += 1
-                rejection_streak += 1
+                rejection_streak_by_strategy[strategy] += 1
                 strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
                     positions,
                     strategy,
@@ -287,7 +287,7 @@ class BacktestEngine:
 
             if executed_qty <= 1e-12:
                 rejection_count += 1
-                rejection_streak += 1
+                rejection_streak_by_strategy[strategy] += 1
                 strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
                     positions,
                     strategy,
@@ -365,7 +365,7 @@ class BacktestEngine:
             total_realized += realized_change
             trade_count[strategy] += 1
             executed_signals += 1
-            rejection_streak = 0
+            rejection_streak_by_strategy[strategy] = 0
 
             realized_by_event[event_key] += realized_change
             event_trade_count[event_key] += 1
