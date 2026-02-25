@@ -15,6 +15,48 @@ from monomarket.backtest import (
 ROLLING_REJECT_TOP_DELIMITER = ";"
 
 
+def _normalize_reject_reason(reason: str) -> str:
+    text = reason.strip()
+    if text.startswith("strategy notional limit exceeded:"):
+        return "strategy notional limit exceeded"
+    if text.startswith("circuit breaker open:"):
+        return "circuit breaker open"
+    return text
+
+
+def _format_reject_top(
+    raw_reasons: dict[str, Any],
+    *,
+    k_norm: int,
+    normalize: bool,
+) -> tuple[str, list[tuple[str, int]]]:
+    if k_norm <= 0:
+        return "disabled", []
+
+    reason_items: list[tuple[str, int]] = []
+    for key, value in raw_reasons.items():
+        reason_raw = str(key).strip() or "unknown"
+        reason = _normalize_reject_reason(reason_raw) if normalize else reason_raw
+        count = int(_f(value))
+        if count <= 0:
+            continue
+        reason_items.append((reason, count))
+
+    if not reason_items:
+        return "none", []
+
+    if normalize:
+        merged: dict[str, int] = {}
+        for reason, count in reason_items:
+            merged[reason] = merged.get(reason, 0) + count
+        reason_items = list(merged.items())
+
+    reason_items.sort(key=lambda x: (-x[1], x[0]))
+    top_pairs = reason_items[:k_norm]
+    top_text = ROLLING_REJECT_TOP_DELIMITER.join(f"{reason}:{count}" for reason, count in top_pairs)
+    return top_text, top_pairs
+
+
 def _f(raw: object) -> float:
     try:
         return float(raw)  # type: ignore[arg-type]
@@ -242,6 +284,8 @@ def build_summary_bundle(
     k_norm = max(0, int(rolling_reject_top_k))
     rolling_reject_top = "disabled" if k_norm <= 0 else "none"
     rolling_reject_top_pairs: list[tuple[str, int]] = []
+    rolling_reject_top_normalized = "disabled" if k_norm <= 0 else "none"
+    rolling_reject_top_pairs_normalized: list[tuple[str, int]] = []
 
     rolling_summary = None
     if isinstance(rolling_payload, dict):
@@ -261,19 +305,14 @@ def build_summary_bundle(
 
         raw_reasons = rolling_summary.get("risk_rejection_reasons")
         if isinstance(raw_reasons, dict):
-            reason_items: list[tuple[str, int]] = []
-            for key, value in raw_reasons.items():
-                reason = str(key).strip() or "unknown"
-                count = int(_f(value))
-                if count <= 0:
-                    continue
-                reason_items.append((reason, count))
-            if reason_items and k_norm > 0:
-                reason_items.sort(key=lambda x: (-x[1], x[0]))
-                rolling_reject_top_pairs = reason_items[:k_norm]
-                rolling_reject_top = ROLLING_REJECT_TOP_DELIMITER.join(
-                    f"{reason}:{count}" for reason, count in rolling_reject_top_pairs
-                )
+            (
+                rolling_reject_top,
+                rolling_reject_top_pairs,
+            ) = _format_reject_top(raw_reasons, k_norm=k_norm, normalize=False)
+            (
+                rolling_reject_top_normalized,
+                rolling_reject_top_pairs_normalized,
+            ) = _format_reject_top(raw_reasons, k_norm=k_norm, normalize=True)
 
     line = (
         f"Nightly {nightly_date} | window={payload.get('from_ts', '')} -> {payload.get('to_ts', '')} "
@@ -298,13 +337,14 @@ def build_summary_bundle(
         f"rolling_reject_top_k={k_norm} "
         f"rolling_reject_top_delim={ROLLING_REJECT_TOP_DELIMITER} "
         f"rolling_reject_top={rolling_reject_top} "
+        f"rolling_reject_top_normalized={rolling_reject_top_normalized} "
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
 
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
         "schema_note_version": "1.0",
-        "schema_note": "best is structured object; prefer rolling.reject_top_pairs for machine parsing",
+        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized) for machine parsing",
         "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
@@ -361,6 +401,11 @@ def build_summary_bundle(
             "reject_top": rolling_reject_top,
             "reject_top_pairs": [
                 {"reason": reason, "count": count} for reason, count in rolling_reject_top_pairs
+            ],
+            "reject_top_normalized": rolling_reject_top_normalized,
+            "reject_top_pairs_normalized": [
+                {"reason": reason, "count": count}
+                for reason, count in rolling_reject_top_pairs_normalized
             ],
         },
         "paths": {

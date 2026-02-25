@@ -217,6 +217,15 @@ def _extract_rolling_summary(rolling_payload: dict[str, Any] | None) -> dict[str
     return summary
 
 
+def _normalize_rolling_reject_reason(reason: str) -> str:
+    text = reason.strip()
+    if text.startswith("strategy notional limit exceeded:"):
+        return "strategy notional limit exceeded"
+    if text.startswith("circuit breaker open:"):
+        return "circuit breaker open"
+    return text
+
+
 def _format_rolling_reject_top(
     rolling_summary: dict[str, Any], *, top_k: int = PDF_ROLLING_REJECT_TOP_K
 ) -> str:
@@ -224,19 +233,21 @@ def _format_rolling_reject_top(
     if not isinstance(raw, dict):
         return "none"
 
-    pairs: list[tuple[str, float]] = []
+    merged: dict[str, float] = {}
     for key, value in raw.items():
-        reason = str(key).strip()
-        if not reason:
+        reason_raw = str(key).strip()
+        if not reason_raw:
             continue
+        reason = _normalize_rolling_reject_reason(reason_raw)
         count = _safe_float(value)
         if count <= 0:
             continue
-        pairs.append((reason, count))
+        merged[reason] = merged.get(reason, 0.0) + count
 
-    if not pairs:
+    if not merged:
         return "none"
 
+    pairs = list(merged.items())
     # keep stable deterministic order on ties: higher count first, then reason asc
     pairs.sort(key=lambda item: (-item[1], item[0]))
     top_items = pairs[: max(0, top_k)]

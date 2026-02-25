@@ -285,6 +285,11 @@ def _nightly_sidecar_payload() -> dict[str, object]:
                 {"reason": "riskA", "count": 3},
                 {"reason": "riskB", "count": 1},
             ],
+            "reject_top_normalized": "riskA:3;riskB:1",
+            "reject_top_pairs_normalized": [
+                {"reason": "riskA", "count": 3},
+                {"reason": "riskB", "count": 1},
+            ],
         },
         "paths": {
             "pdf": "/tmp/report.pdf",
@@ -446,6 +451,36 @@ def test_validate_nightly_summary_sidecar_reject_bad_delimiter_type() -> None:
     rolling = payload["rolling"]
     assert isinstance(rolling, dict)
     rolling["reject_top_delimiter"] = 1
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_normalized_reject_top_type() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top_normalized"] = 1
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_normalized_pairs_type() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top_pairs_normalized"] = "bad"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_normalized_pairs_row() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top_pairs_normalized"] = [{"reason": "riskA", "count": "x"}]
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

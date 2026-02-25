@@ -489,6 +489,32 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                 f"nightly sidecar rolling.reject_top_pairs[{idx}].count must be numeric"
             )
 
+    reject_top_normalized = rolling.get("reject_top_normalized")
+    if reject_top_normalized is not None and not isinstance(reject_top_normalized, str):
+        raise ValueError("nightly sidecar rolling.reject_top_normalized must be a string")
+
+    reject_pairs_normalized = rolling.get("reject_top_pairs_normalized")
+    if reject_pairs_normalized is not None:
+        if not isinstance(reject_pairs_normalized, list):
+            raise ValueError("nightly sidecar rolling.reject_top_pairs_normalized must be an array")
+        for idx, row in enumerate(reject_pairs_normalized):
+            if not isinstance(row, Mapping):
+                raise ValueError(
+                    f"nightly sidecar rolling.reject_top_pairs_normalized[{idx}] must be an object"
+                )
+            reason = row.get("reason")
+            count = row.get("count")
+            if not isinstance(reason, str):
+                raise ValueError(
+                    "nightly sidecar rolling.reject_top_pairs_normalized"
+                    f"[{idx}].reason must be a string"
+                )
+            if not isinstance(count, int | float):
+                raise ValueError(
+                    "nightly sidecar rolling.reject_top_pairs_normalized"
+                    f"[{idx}].count must be numeric"
+                )
+
     paths = payload.get("paths")
     if not isinstance(paths, Mapping):
         raise ValueError("nightly sidecar paths must be an object")

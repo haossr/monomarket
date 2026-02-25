@@ -49,6 +49,7 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "coverage_ratio=",
         "overlap_ratio=",
         "rolling_reject_top_k=",
+        "rolling_reject_top_normalized=",
     ]
     for token in required_tokens:
         assert token in content
@@ -70,6 +71,7 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
         "def _extract_rolling_summary",
+        "def _normalize_rolling_reject_reason",
         "def _format_rolling_reject_top",
     ]
     for token in required_tokens:
@@ -93,6 +95,17 @@ def test_pdf_format_rolling_reject_top_none_and_top2() -> None:
         }
     )
     assert actual == "reason-a:3;reason-b:2"
+
+    normalized = fmt(
+        {
+            "risk_rejection_reasons": {
+                "strategy notional limit exceeded: 1019.19 > 1000.00": 3,
+                "strategy notional limit exceeded: 1019.21 > 1000.00": 2,
+                "circuit breaker open: rejected=10, threshold=5": 1,
+            }
+        }
+    )
+    assert normalized == "strategy notional limit exceeded:5;circuit breaker open:1"
 
 
 def test_pdf_format_rolling_reject_top_tie_is_stable() -> None:
@@ -577,6 +590,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top_k=0" in line_disabled
     assert "rolling_reject_top_delim=;" in line_disabled
     assert "rolling_reject_top=disabled" in line_disabled
+    assert "rolling_reject_top_normalized=disabled" in line_disabled
     assert "positive_window_rate=" in line_disabled
     assert "empty_window_count=" in line_disabled
     assert "range_hours=" in line_disabled
@@ -594,6 +608,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert int(disabled_sidecar["rolling"]["reject_top_k"]) == 0
     assert str(disabled_sidecar["rolling"]["reject_top_delimiter"]) == ";"
     assert str(disabled_sidecar["rolling"]["reject_top"]) == "disabled"
+    assert str(disabled_sidecar["rolling"]["reject_top_normalized"]) == "disabled"
+    assert disabled_sidecar["rolling"]["reject_top_pairs_normalized"] == []
     best_obj = disabled_sidecar["best"]
     assert isinstance(best_obj, dict)
     assert str(best_obj["strategy"]) == "s1"
@@ -638,6 +654,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top_k=2" in line_none
     assert "rolling_reject_top_delim=;" in line_none
     assert "rolling_reject_top=none" in line_none
+    assert "rolling_reject_top_normalized=none" in line_none
 
     none_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(none_sidecar)
@@ -646,6 +663,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert int(none_sidecar["rolling"]["reject_top_k"]) == 2
     assert str(none_sidecar["rolling"]["reject_top_delimiter"]) == ";"
     assert str(none_sidecar["rolling"]["reject_top"]) == "none"
+    assert str(none_sidecar["rolling"]["reject_top_normalized"]) == "none"
+    assert none_sidecar["rolling"]["reject_top_pairs_normalized"] == []
 
     # k>0 with reasons containing comma: delimiter must remain ';'
     rolling_payload_reasons = {
@@ -682,10 +701,65 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     line_reasons = summary_txt.read_text().strip()
     assert "rolling_reject_top_delim=;" in line_reasons
     assert "rolling_reject_top=risk,A:3;riskB:1" in line_reasons
+    assert "rolling_reject_top_normalized=risk,A:3;riskB:1" in line_reasons
 
     reasons_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(reasons_sidecar)
     assert verify_nightly_summary_sidecar_checksum(reasons_sidecar)
+
+    rolling_norm = reasons_sidecar["rolling"]
+    assert str(rolling_norm["reject_top_normalized"]) == "risk,A:3;riskB:1"
+
+    # normalization should collapse noisy numeric suffixes into family-level reasons
+    rolling_payload_normalized = {
+        "summary": {
+            **base_summary,
+            "risk_rejection_reasons": {
+                "strategy notional limit exceeded: 1019.19 > 1000.00": 3,
+                "strategy notional limit exceeded: 1019.21 > 1000.00": 2,
+                "circuit breaker open: rejected=10, threshold=5": 1,
+            },
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload_normalized))
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    line_normalized = summary_txt.read_text().strip()
+    assert (
+        "rolling_reject_top_normalized=" "strategy notional limit exceeded:5;circuit breaker open:1"
+    ) in line_normalized
+
+    normalized_sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(normalized_sidecar)
+    assert verify_nightly_summary_sidecar_checksum(normalized_sidecar)
+    rolling_norm_pairs = normalized_sidecar["rolling"]["reject_top_pairs_normalized"]
+    assert isinstance(rolling_norm_pairs, list)
+    assert rolling_norm_pairs == [
+        {"reason": "strategy notional limit exceeded", "count": 5},
+        {"reason": "circuit breaker open", "count": 1},
+    ]
 
 
 def test_nightly_summary_line_without_checksum_omits_checksum_fields(tmp_path: Path) -> None:

@@ -262,7 +262,7 @@ bash scripts/backtest_nightly_report.sh \
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 
 `--rolling-reject-top-k` 语义：`0=disabled`（关闭拒单原因摘要输出），`N>0` 输出前 N 个原因（无数据时为 `none`）。
-`rolling_reject_top` 使用 `;` 作为原因分隔符（如 `reasonA:3;reasonB:1`）；消费端优先读取 `summary.json` 的 `reject_top_pairs`。
+`rolling_reject_top` 使用 `;` 作为原因分隔符（如 `reasonA:3;reasonB:1`）；`rolling_reject_top_normalized` 为模板归一后的同口径摘要（如 `strategy notional limit exceeded:1088;circuit breaker open:5`）；消费端优先读取 `summary.json` 的 `reject_top_pairs` / `reject_top_pairs_normalized`。
 `summary.json` checksum 默认启用，可用 `--no-checksum` 关闭。
 
 CI/shell 快速验签（失败返回 non-zero）：
