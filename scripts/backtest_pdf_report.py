@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+PDF_ROLLING_REJECT_TOP_K = 2
+
 
 def _safe_float(value: object, default: float = 0.0) -> float:
     try:
@@ -215,7 +217,9 @@ def _extract_rolling_summary(rolling_payload: dict[str, Any] | None) -> dict[str
     return summary
 
 
-def _format_rolling_reject_top(rolling_summary: dict[str, Any], *, top_k: int = 2) -> str:
+def _format_rolling_reject_top(
+    rolling_summary: dict[str, Any], *, top_k: int = PDF_ROLLING_REJECT_TOP_K
+) -> str:
     raw = rolling_summary.get("risk_rejection_reasons")
     if not isinstance(raw, dict):
         return "none"
@@ -233,18 +237,14 @@ def _format_rolling_reject_top(rolling_summary: dict[str, Any], *, top_k: int = 
     if not pairs:
         return "none"
 
-    pairs.sort(key=lambda item: item[1], reverse=True)
-    total = sum(item[1] for item in pairs)
+    # keep stable deterministic order on ties: higher count first, then reason asc
+    pairs.sort(key=lambda item: (-item[1], item[0]))
     top_items = pairs[: max(0, top_k)]
     if not top_items:
         return "none"
 
-    chunks: list[str] = []
-    for reason, count in top_items:
-        share = (count / total * 100.0) if total > 0 else 0.0
-        chunks.append(f"{reason}: {int(round(count))} ({share:.2f}%)")
-
-    return "; ".join(chunks)
+    chunks = [f"{reason}:{int(round(count))}" for reason, count in top_items]
+    return ";".join(chunks)
 
 
 def _aggregate_winrate_from_rows(strategy_rows: list[dict[str, Any]]) -> dict[str, float | int]:
@@ -564,7 +564,9 @@ def render_pdf(
         rolling_positive_window_rate = _safe_float(rolling_summary.get("positive_window_rate"))
         rolling_empty_windows = _safe_int(rolling_summary.get("empty_window_count"))
         rolling_coverage_label = str(rolling_summary.get("coverage_label", "unknown"))
-        rolling_reject_top = _format_rolling_reject_top(rolling_summary, top_k=2)
+        rolling_reject_top = _format_rolling_reject_top(
+            rolling_summary, top_k=PDF_ROLLING_REJECT_TOP_K
+        )
         write_line(f"Rolling runs:            {rolling_runs}")
         write_line(f"Rolling execution rate:  {rolling_exec_rate * 100.0:.2f}%")
         write_line("Rolling positive windows: " f"{rolling_positive_window_rate * 100.0:.2f}%")

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from typer.testing import CliRunner
 
@@ -19,6 +21,15 @@ ROOT = Path(__file__).resolve().parents[1]
 BASH_SCRIPT_PATH = ROOT / "scripts" / "backtest_nightly_report.sh"
 SUMMARY_SCRIPT_PATH = ROOT / "scripts" / "nightly_summary_line.py"
 PDF_SCRIPT_PATH = ROOT / "scripts" / "backtest_pdf_report.py"
+
+
+def _load_pdf_report_module() -> Any:
+    spec = importlib.util.spec_from_file_location("backtest_pdf_report", PDF_SCRIPT_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("failed to load backtest_pdf_report module")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_nightly_summary_contains_canonical_alias_fields() -> None:
@@ -55,6 +66,7 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Rolling empty windows",
         "Rolling coverage label",
         "Rolling reject top",
+        "PDF_ROLLING_REJECT_TOP_K = 2",
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
         "def _extract_rolling_summary",
@@ -62,6 +74,41 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
     ]
     for token in required_tokens:
         assert token in content
+
+
+def test_pdf_format_rolling_reject_top_none_and_top2() -> None:
+    module = _load_pdf_report_module()
+    fmt = module._format_rolling_reject_top
+
+    assert fmt({}) == "none"
+    assert fmt({"risk_rejection_reasons": {}}) == "none"
+
+    actual = fmt(
+        {
+            "risk_rejection_reasons": {
+                "reason-a": 3,
+                "reason-b": 2,
+                "reason-c": 1,
+            }
+        }
+    )
+    assert actual == "reason-a:3;reason-b:2"
+
+
+def test_pdf_format_rolling_reject_top_tie_is_stable() -> None:
+    module = _load_pdf_report_module()
+    fmt = module._format_rolling_reject_top
+
+    actual = fmt(
+        {
+            "risk_rejection_reasons": {
+                "z-reason": 5,
+                "a-reason": 5,
+                "m-reason": 4,
+            }
+        }
+    )
+    assert actual == "a-reason:5;z-reason:5"
 
 
 def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> None:
