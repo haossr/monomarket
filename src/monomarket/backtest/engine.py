@@ -225,6 +225,7 @@ class BacktestEngine:
                     price=fill_price,
                     strategy=strategy,
                     positions=positions,
+                    ts=created_at,
                 )
                 if capped_qty < executed_qty:
                     executed_qty = capped_qty
@@ -246,6 +247,7 @@ class BacktestEngine:
                 strategy_market_event=strategy_market_event,
                 realized_pnl=total_realized,
                 rejection_streak=rejection_streak_by_strategy[strategy],
+                ts=created_at,
             )
 
             if not risk_decision.ok:
@@ -752,12 +754,18 @@ class BacktestEngine:
         self,
         positions: dict[tuple[str, str, str], _Position],
         strategy: str,
+        ts: str | None = None,
     ) -> float:
         total = 0.0
-        for (s, _, _), pos in positions.items():
+        for (s, market_id, token_id), pos in positions.items():
             if s != strategy:
                 continue
-            total += abs(pos.net_qty * pos.avg_price)
+            ref_price = pos.avg_price
+            if ts:
+                mark = self.storage.get_snapshot_price_at(market_id, token_id, ts)
+                if mark is not None and mark > 0:
+                    ref_price = float(mark)
+            total += abs(pos.net_qty * ref_price)
         return total
 
     def _event_notional(
@@ -766,14 +774,20 @@ class BacktestEngine:
         strategy: str,
         event_id: str,
         strategy_market_event: dict[tuple[str, str], str],
+        ts: str | None = None,
     ) -> float:
         total = 0.0
-        for (s, market_id, _), pos in positions.items():
+        for (s, market_id, token_id), pos in positions.items():
             if s != strategy:
                 continue
             if strategy_market_event.get((strategy, market_id)) != event_id:
                 continue
-            total += abs(pos.net_qty * pos.avg_price)
+            ref_price = pos.avg_price
+            if ts:
+                mark = self.storage.get_snapshot_price_at(market_id, token_id, ts)
+                if mark is not None and mark > 0:
+                    ref_price = float(mark)
+            total += abs(pos.net_qty * ref_price)
         return total
 
     def _cap_qty_to_strategy_headroom(
@@ -783,11 +797,12 @@ class BacktestEngine:
         price: float,
         strategy: str,
         positions: dict[tuple[str, str, str], _Position],
+        ts: str,
     ) -> float:
         if qty <= 1e-12 or price <= 1e-12 or self.risk.max_strategy_notional <= 0:
             return qty
 
-        strategy_notional = self._strategy_notional(positions, strategy)
+        strategy_notional = self._strategy_notional(positions, strategy, ts)
         headroom = self.risk.max_strategy_notional - strategy_notional
         if headroom <= 1e-12:
             return qty
@@ -809,10 +824,13 @@ class BacktestEngine:
         strategy_market_event: dict[tuple[str, str], str],
         realized_pnl: float,
         rejection_streak: int,
+        ts: str,
     ) -> _RiskDecision:
         notional = abs(qty * price)
-        strategy_notional = self._strategy_notional(positions, strategy)
-        event_notional = self._event_notional(positions, strategy, event_id, strategy_market_event)
+        strategy_notional = self._strategy_notional(positions, strategy, ts)
+        event_notional = self._event_notional(
+            positions, strategy, event_id, strategy_market_event, ts
+        )
 
         if qty <= 0 or price <= 0:
             return _RiskDecision(

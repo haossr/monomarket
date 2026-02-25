@@ -465,6 +465,103 @@ def test_backtest_risk_uses_executable_qty_for_notional(tmp_path: Path) -> None:
     assert abs(row.risk_notional - 2.0) < 1e-9
 
 
+def test_backtest_strategy_notional_uses_mark_price_at_order_ts(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="m1",
+                canonical_id="c1",
+                source="gamma",
+                event_id="e1",
+                question="Q1",
+                status="open",
+                neg_risk=False,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.90,
+                no_price=0.10,
+                mid_price=0.90,
+            )
+        ],
+        snapshot_at="2026-02-20T00:00:00+00:00",
+    )
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="m1",
+                canonical_id="c1",
+                source="gamma",
+                event_id="e1",
+                question="Q1",
+                status="open",
+                neg_risk=False,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.20,
+                no_price=0.80,
+                mid_price=0.20,
+            )
+        ],
+        snapshot_at="2026-02-20T00:20:00+00:00",
+    )
+
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.90,
+                size_hint=1.0,
+                rationale="seed-high-cost-position",
+            )
+        ],
+        created_at="2026-02-20T00:10:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.20,
+                size_hint=1.0,
+                rationale="mark-based-notional-should-pass",
+            )
+        ],
+        created_at="2026-02-20T00:20:00+00:00",
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+        risk=BacktestRiskConfig(
+            max_daily_loss=1000.0,
+            max_strategy_notional=1.0,
+            max_event_notional=1000.0,
+            circuit_breaker_rejections=5,
+        ),
+    ).run(["s1"], from_ts="2026-02-20T00:00:00+00:00", to_ts="2026-02-20T01:00:00+00:00")
+
+    assert report.total_signals == 2
+    assert report.executed_signals == 2
+    assert report.rejected_signals == 0
+    second = report.replay[1]
+    assert second.risk_allowed is True
+    assert second.risk_reason == "ok"
+    assert abs(second.risk_strategy_notional_before - 0.2) < 1e-9
+
+
 def test_backtest_circuit_breaker_counts_consecutive_rejections(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
