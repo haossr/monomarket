@@ -7,7 +7,7 @@ import pytest
 import requests
 from typer.testing import CliRunner
 
-from monomarket.cli import _suggest_error_share_first_relax, app
+from monomarket.cli import _suggest_error_share_first_relax, _suggest_error_share_relax_step, app
 from monomarket.config import DataSettings
 from monomarket.data.clients import (
     FetchBatch,
@@ -641,6 +641,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "min_total_runs=3" in res_empty.output
     assert "relax order: min_share/min_count" in res_empty.output
     assert "first_relax=min_total_runs" in res_empty.output
+    assert "suggest_next=min_total_runs=2" in res_empty.output
     relax_idx = res_empty.output.index("relax order:")
     order_tokens = [
         "min_share/min_count",
@@ -668,6 +669,28 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert res_empty_runs.exit_code == 0, res_empty_runs.output
     assert "error share empty after filters" in res_empty_runs.output
     assert "first_relax=min_runs_with_error" in res_empty_runs.output
+    assert "suggest_next=min_runs_with_error=1" in res_empty_runs.output
+
+    res_empty_share = runner.invoke(
+        app,
+        [
+            "ingest-health",
+            "--source",
+            "gamma",
+            "--run-window",
+            "5",
+            "--error-share-min-share",
+            "0.9",
+            "--error-share-min-count",
+            "2",
+            "--config",
+            str(config_path),
+        ],
+    )
+    assert res_empty_share.exit_code == 0, res_empty_share.output
+    assert "error share empty after filters" in res_empty_share.output
+    assert "first_relax=min_share/min_count" in res_empty_share.output
+    assert "suggest_next=min_share=45.00% or min_count=1" in res_empty_share.output
 
 
 @pytest.mark.parametrize(
@@ -701,6 +724,47 @@ def test_suggest_error_share_first_relax_priority(
     expected: str,
 ) -> None:
     actual = _suggest_error_share_first_relax(
+        top_k=top_k,
+        min_share=min_share,
+        min_count=min_count,
+        min_runs_with_error=min_runs_with_error,
+        min_total_runs=min_total_runs,
+        min_source_bucket_total=min_source_bucket_total,
+    )
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    (
+        "top_k",
+        "min_share",
+        "min_count",
+        "min_runs_with_error",
+        "min_total_runs",
+        "min_source_bucket_total",
+        "expected",
+    ),
+    [
+        (0, 0.02, 0, 0, 0, 0, "min_share=1.00%"),
+        (0, 0.0, 2, 0, 0, 0, "min_count=1"),
+        (0, 0.9, 2, 0, 0, 0, "min_share=45.00% or min_count=1"),
+        (0, 0.0, 0, 0, 3, 0, "min_total_runs=2"),
+        (0, 0.0, 0, 0, 0, 5, "min_source_bucket_total=4"),
+        (2, 0.0, 0, 0, 0, 0, "top_k=3"),
+        (0, 0.0, 0, 2, 0, 0, "min_runs_with_error=1"),
+        (0, 0.0, 0, 0, 0, 0, "n/a"),
+    ],
+)
+def test_suggest_error_share_relax_step(
+    top_k: int,
+    min_share: float,
+    min_count: int,
+    min_runs_with_error: int,
+    min_total_runs: int,
+    min_source_bucket_total: int,
+    expected: str,
+) -> None:
+    actual = _suggest_error_share_relax_step(
         top_k=top_k,
         min_share=min_share,
         min_count=min_count,

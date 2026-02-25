@@ -257,6 +257,32 @@ def _suggest_error_share_first_relax(
     return "min_share/min_count"
 
 
+def _suggest_error_share_relax_step(
+    *,
+    top_k: int,
+    min_share: float,
+    min_count: int,
+    min_runs_with_error: int,
+    min_total_runs: int,
+    min_source_bucket_total: int,
+) -> str:
+    if min_share > 0 and min_count > 0:
+        return f"min_share={max(0.0, min_share / 2):.2%} or min_count={max(0, min_count - 1)}"
+    if min_share > 0:
+        return f"min_share={max(0.0, min_share / 2):.2%}"
+    if min_count > 0:
+        return f"min_count={max(0, min_count - 1)}"
+    if min_total_runs > 0:
+        return f"min_total_runs={max(0, min_total_runs - 1)}"
+    if min_source_bucket_total > 0:
+        return f"min_source_bucket_total={max(0, min_source_bucket_total - 1)}"
+    if top_k > 0:
+        return f"top_k={top_k + 1}"
+    if min_runs_with_error > 0:
+        return f"min_runs_with_error={max(0, min_runs_with_error - 1)}"
+    return "n/a"
+
+
 @app.command("ingest-health")
 def ingest_health(
     source: str | None = typer.Option(None, help="gamma|data|clob (default: all)"),
@@ -515,12 +541,21 @@ def ingest_health(
             min_total_runs=error_share_min_total_runs,
             min_source_bucket_total=error_share_min_source_bucket_total,
         )
+        suggest_next = _suggest_error_share_relax_step(
+            top_k=error_share_top_k,
+            min_share=error_share_min_share,
+            min_count=error_share_min_count,
+            min_runs_with_error=error_share_min_runs_with_error,
+            min_total_runs=error_share_min_total_runs,
+            min_source_bucket_total=error_share_min_source_bucket_total,
+        )
         console.print(
             "[yellow]error share empty after filters[/yellow] "
             "("
             f"{active_filters}; "
             "relax order: min_share/min_count -> min_total_runs -> min_source_bucket_total -> top_k; "
-            f"first_relax={first_relax}"
+            f"first_relax={first_relax}; "
+            f"suggest_next={suggest_next}"
             ")"
         )
 
