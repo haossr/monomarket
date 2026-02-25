@@ -567,6 +567,35 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                     f"nightly sidecar reject_by_strategy.rows[{idx}].top_reason must be a string"
                 )
 
+    cycle_meta = payload.get("cycle_meta")
+    if cycle_meta is not None:
+        if not isinstance(cycle_meta, Mapping):
+            raise ValueError("nightly sidecar cycle_meta must be an object")
+
+        fixed_window_mode = cycle_meta.get("fixed_window_mode")
+        if not isinstance(fixed_window_mode, bool):
+            raise ValueError("nightly sidecar cycle_meta.fixed_window_mode must be a boolean")
+
+        signal_generation = cycle_meta.get("signal_generation")
+        if not isinstance(signal_generation, Mapping):
+            raise ValueError("nightly sidecar cycle_meta.signal_generation must be an object")
+
+        new_total = signal_generation.get("new_signals_total")
+        if not isinstance(new_total, int | float):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.new_signals_total must be numeric"
+            )
+        new_in_window = signal_generation.get("new_signals_in_window")
+        if not isinstance(new_in_window, int | float):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.new_signals_in_window must be numeric"
+            )
+        historical_replay_only = signal_generation.get("historical_replay_only")
+        if not isinstance(historical_replay_only, bool):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.historical_replay_only must be a boolean"
+            )
+
     paths = payload.get("paths")
     if not isinstance(paths, Mapping):
         raise ValueError("nightly sidecar paths must be an object")

@@ -209,6 +209,7 @@ fi
   --backtest-json "$RUN_DIR/latest.json" \
   --pdf-path "$PDF_PATH" \
   --rolling-json "$ROLLING_JSON" \
+  --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
   --summary-path "$SUMMARY_TXT" \
   --summary-json-path "$SUMMARY_JSON" \
   --nightly-date "$NIGHTLY_DATE" \

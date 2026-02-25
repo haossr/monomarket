@@ -293,6 +293,7 @@ def build_summary_bundle(
     *,
     payload: dict[str, Any],
     rolling_payload: dict[str, Any] | None,
+    cycle_meta_payload: dict[str, Any] | None,
     pdf_path: Path,
     rolling_path: Path,
     nightly_date: str,
@@ -314,6 +315,20 @@ def build_summary_bundle(
 
     reject_strategy_info = _reject_by_strategy(payload, top_k=3)
     reject_strategy_top = str(reject_strategy_info.get("top", "none"))
+
+    cycle_fixed_window_mode = False
+    cycle_new_signals_total = 0
+    cycle_new_signals_in_window = 0
+    cycle_historical_replay_only = False
+    if isinstance(cycle_meta_payload, dict):
+        cycle_fixed_window_mode = bool(cycle_meta_payload.get("fixed_window_mode", False))
+        signal_generation = cycle_meta_payload.get("signal_generation")
+        if isinstance(signal_generation, dict):
+            cycle_new_signals_total = int(_f(signal_generation.get("new_signals_total")))
+            cycle_new_signals_in_window = int(_f(signal_generation.get("new_signals_in_window")))
+            cycle_historical_replay_only = bool(
+                signal_generation.get("historical_replay_only", False)
+            )
 
     rolling_runs = 0
     rolling_exec_rate = 0.0
@@ -372,6 +387,10 @@ def build_summary_bundle(
         f"main_coverage={window_coverage_ratio:.2%} "
         f"history_limited={str(window_history_limited).lower()} "
         f"window_note={window_note} "
+        f"fixed_window={str(cycle_fixed_window_mode).lower()} "
+        f"generated_signals={cycle_new_signals_total} "
+        f"generated_in_window={cycle_new_signals_in_window} "
+        f"historical_replay_only={str(cycle_historical_replay_only).lower()} "
         f"| {best_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
@@ -392,7 +411,7 @@ def build_summary_bundle(
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
         "schema_note_version": "1.0",
-        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized) and reject_by_strategy.rows for machine parsing",
+        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation for machine parsing",
         "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
@@ -472,6 +491,14 @@ def build_summary_bundle(
                 if isinstance(row, dict)
             ],
         },
+        "cycle_meta": {
+            "fixed_window_mode": cycle_fixed_window_mode,
+            "signal_generation": {
+                "new_signals_total": cycle_new_signals_total,
+                "new_signals_in_window": cycle_new_signals_in_window,
+                "historical_replay_only": cycle_historical_replay_only,
+            },
+        },
         "paths": {
             "pdf": str(pdf_path.resolve()),
             "rolling_json": str(rolling_path.resolve()),
@@ -485,6 +512,7 @@ def build_summary_line(
     *,
     payload: dict[str, Any],
     rolling_payload: dict[str, Any] | None,
+    cycle_meta_payload: dict[str, Any] | None = None,
     pdf_path: Path,
     rolling_path: Path,
     nightly_date: str,
@@ -493,6 +521,7 @@ def build_summary_line(
     line, _ = build_summary_bundle(
         payload=payload,
         rolling_payload=rolling_payload,
+        cycle_meta_payload=cycle_meta_payload,
         pdf_path=pdf_path,
         rolling_path=rolling_path,
         nightly_date=nightly_date,
@@ -506,6 +535,7 @@ def main() -> None:
     parser.add_argument("--backtest-json", required=True)
     parser.add_argument("--pdf-path", required=True)
     parser.add_argument("--rolling-json", required=True)
+    parser.add_argument("--cycle-meta-json", default=None)
     parser.add_argument("--summary-path", required=True)
     parser.add_argument("--summary-json-path", default=None)
     parser.add_argument("--nightly-date", required=True)
@@ -519,9 +549,16 @@ def main() -> None:
     if rolling_path.exists():
         rolling_payload = json.loads(rolling_path.read_text())
 
+    cycle_meta_payload: dict[str, Any] | None = None
+    if args.cycle_meta_json:
+        cycle_meta_path = Path(args.cycle_meta_json)
+        if cycle_meta_path.exists():
+            cycle_meta_payload = json.loads(cycle_meta_path.read_text())
+
     line, sidecar = build_summary_bundle(
         payload=payload,
         rolling_payload=rolling_payload,
+        cycle_meta_payload=cycle_meta_payload,
         pdf_path=Path(args.pdf_path),
         rolling_path=rolling_path,
         nightly_date=args.nightly_date,

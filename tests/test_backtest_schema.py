@@ -312,6 +312,14 @@ def _nightly_sidecar_payload() -> dict[str, object]:
                 },
             ],
         },
+        "cycle_meta": {
+            "fixed_window_mode": True,
+            "signal_generation": {
+                "new_signals_total": 82,
+                "new_signals_in_window": 0,
+                "historical_replay_only": True,
+            },
+        },
         "paths": {
             "pdf": "/tmp/report.pdf",
             "rolling_json": "/tmp/rolling-summary.json",
@@ -520,6 +528,26 @@ def test_validate_nightly_summary_sidecar_reject_bad_reject_by_strategy_row() ->
     reject_by_strategy = payload["reject_by_strategy"]
     assert isinstance(reject_by_strategy, dict)
     reject_by_strategy["rows"] = [{"strategy": "s4", "total": 1, "rejected": "x"}]
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_cycle_meta_type() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["cycle_meta"] = "bad"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_cycle_meta_signal_generation() -> None:
+    payload = _nightly_sidecar_payload()
+    cycle_meta = payload["cycle_meta"]
+    assert isinstance(cycle_meta, dict)
+    signal_generation = cycle_meta["signal_generation"]
+    assert isinstance(signal_generation, dict)
+    signal_generation["historical_replay_only"] = "bad"
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)
