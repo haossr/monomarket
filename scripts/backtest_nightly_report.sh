@@ -157,6 +157,7 @@ if command -v uv >/dev/null 2>&1; then
     --backtest-json "$RUN_DIR/latest.json" \
     --strategy-csv "$RUN_DIR/strategy.csv" \
     --event-csv "$RUN_DIR/event.csv" \
+    --rolling-json "$ROLLING_JSON" \
     --output "$PDF_PATH" \
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 else
@@ -165,6 +166,7 @@ else
     --backtest-json "$RUN_DIR/latest.json" \
     --strategy-csv "$RUN_DIR/strategy.csv" \
     --event-csv "$RUN_DIR/event.csv" \
+    --rolling-json "$ROLLING_JSON" \
     --output "$PDF_PATH" \
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 fi

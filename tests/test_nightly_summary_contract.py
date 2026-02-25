@@ -51,8 +51,12 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Main window coverage",
         "Main history limited",
         "Main window note",
+        "Rolling execution rate",
+        "Rolling empty windows",
+        "Rolling coverage label",
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
+        "def _extract_rolling_summary",
     ]
     for token in required_tokens:
         assert token in content
@@ -955,3 +959,4 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     content = BASH_SCRIPT_PATH.read_text()
     assert "0=disabled" in content
     assert "--no-checksum" in content
+    assert '--rolling-json "$ROLLING_JSON"' in content

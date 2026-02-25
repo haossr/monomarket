@@ -206,6 +206,15 @@ def _format_rate_with_samples(rate_raw: object, sample_count_raw: object) -> str
     return _format_pct(rate_raw)
 
 
+def _extract_rolling_summary(rolling_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(rolling_payload, dict):
+        return None
+    summary = rolling_payload.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    return summary
+
+
 def _aggregate_winrate_from_rows(strategy_rows: list[dict[str, Any]]) -> dict[str, float | int]:
     closed_wins = 0
     closed_losses = 0
@@ -262,6 +271,7 @@ def render_pdf(
     payload: dict[str, Any],
     strategy_rows: list[dict[str, Any]],
     event_rows: list[dict[str, Any]],
+    rolling_payload: dict[str, Any] | None,
     output_path: Path,
     title: str,
 ) -> None:
@@ -512,6 +522,23 @@ def render_pdf(
     write_line("(winrate shown as n/a when sample count is zero)")
     write_line("")
 
+    rolling_summary = _extract_rolling_summary(rolling_payload)
+    write_line("Rolling Summary", bold=True, size=12, leading=18)
+    if rolling_summary is None:
+        write_line("(Rolling summary unavailable)")
+    else:
+        rolling_runs = _safe_int(rolling_summary.get("run_count"))
+        rolling_exec_rate = _safe_float(rolling_summary.get("execution_rate"))
+        rolling_positive_window_rate = _safe_float(rolling_summary.get("positive_window_rate"))
+        rolling_empty_windows = _safe_int(rolling_summary.get("empty_window_count"))
+        rolling_coverage_label = str(rolling_summary.get("coverage_label", "unknown"))
+        write_line(f"Rolling runs:            {rolling_runs}")
+        write_line(f"Rolling execution rate:  {rolling_exec_rate * 100.0:.2f}%")
+        write_line("Rolling positive windows: " f"{rolling_positive_window_rate * 100.0:.2f}%")
+        write_line(f"Rolling empty windows:   {rolling_empty_windows}")
+        write_line(f"Rolling coverage label:  {rolling_coverage_label}")
+    write_line("")
+
     write_line("Strategy Metrics", bold=True, size=12, leading=18)
     if not strategy_rows:
         write_line("(No strategy rows)")
@@ -586,6 +613,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backtest-json", required=True, help="Path to backtest JSON artifact")
     parser.add_argument("--strategy-csv", help="Optional strategy attribution CSV")
     parser.add_argument("--event-csv", help="Optional event attribution CSV")
+    parser.add_argument("--rolling-json", help="Optional rolling summary JSON")
     parser.add_argument("--output", required=True, help="Output PDF path")
     parser.add_argument("--title", default="Monomarket Backtest Report", help="PDF title")
     return parser.parse_args()
@@ -596,16 +624,21 @@ def main() -> None:
     backtest_json = Path(args.backtest_json)
     strategy_csv = Path(args.strategy_csv) if args.strategy_csv else None
     event_csv = Path(args.event_csv) if args.event_csv else None
+    rolling_json = Path(args.rolling_json) if args.rolling_json else None
     output = Path(args.output)
 
     payload = _load_payload(backtest_json)
     strategy_rows = _load_strategy_rows(payload, strategy_csv)
     event_rows = _load_event_rows(payload, event_csv)
+    rolling_payload: dict[str, Any] | None = None
+    if rolling_json and rolling_json.exists():
+        rolling_payload = _load_payload(rolling_json)
 
     render_pdf(
         payload=payload,
         strategy_rows=strategy_rows,
         event_rows=event_rows,
+        rolling_payload=rolling_payload,
         output_path=output,
         title=args.title,
     )
