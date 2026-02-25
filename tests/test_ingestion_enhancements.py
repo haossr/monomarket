@@ -641,7 +641,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert "min_total_runs=3" in res_empty.output
     assert "relax order: min_share/min_count" in res_empty.output
     assert "first_relax=min_total_runs" in res_empty.output
-    assert "suggest_next=min_total_runs=2" in res_empty.output
+    assert "suggest_next=min_total_runs=3->2" in res_empty.output
     relax_idx = res_empty.output.index("relax order:")
     order_tokens = [
         "min_share/min_count",
@@ -669,7 +669,7 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert res_empty_runs.exit_code == 0, res_empty_runs.output
     assert "error share empty after filters" in res_empty_runs.output
     assert "first_relax=min_runs_with_error" in res_empty_runs.output
-    assert "suggest_next=min_runs_with_error=1" in res_empty_runs.output
+    assert "suggest_next=min_runs_with_error=2->1" in res_empty_runs.output
 
     res_empty_share = runner.invoke(
         app,
@@ -690,7 +690,8 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert res_empty_share.exit_code == 0, res_empty_share.output
     assert "error share empty after filters" in res_empty_share.output
     assert "first_relax=min_share/min_count" in res_empty_share.output
-    assert "suggest_next=min_share=45.00% or min_count=1" in res_empty_share.output
+    compact_empty_share = " ".join(res_empty_share.output.split())
+    assert "suggest_next=min_share=90.00%->45.00% or min_count=2->1" in compact_empty_share
 
 
 @pytest.mark.parametrize(
@@ -745,13 +746,14 @@ def test_suggest_error_share_first_relax_priority(
         "expected",
     ),
     [
-        (0, 0.02, 0, 0, 0, 0, "min_share=1.00%"),
-        (0, 0.0, 2, 0, 0, 0, "min_count=1"),
-        (0, 0.9, 2, 0, 0, 0, "min_share=45.00% or min_count=1"),
-        (0, 0.0, 0, 0, 3, 0, "min_total_runs=2"),
-        (0, 0.0, 0, 0, 0, 5, "min_source_bucket_total=4"),
-        (2, 0.0, 0, 0, 0, 0, "top_k=3"),
-        (0, 0.0, 0, 2, 0, 0, "min_runs_with_error=1"),
+        (0, 0.02, 0, 0, 0, 0, "min_share=2.00%->1.00%"),
+        (0, 0.0, 2, 0, 0, 0, "min_count=2->1"),
+        (0, 0.9, 2, 0, 0, 0, "min_share=90.00%->45.00% or min_count=2->1"),
+        (0, 0.0, 0, 0, 3, 0, "min_total_runs=3->2"),
+        (0, 0.0, 0, 0, 1, 0, "min_total_runs=1->0"),
+        (0, 0.0, 0, 0, 0, 5, "min_source_bucket_total=5->4"),
+        (2, 0.0, 0, 0, 0, 0, "top_k=2->3"),
+        (0, 0.0, 0, 2, 0, 0, "min_runs_with_error=2->1"),
         (0, 0.0, 0, 0, 0, 0, "n/a"),
     ],
 )

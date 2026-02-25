@@ -267,19 +267,28 @@ def _suggest_error_share_relax_step(
     min_source_bucket_total: int,
 ) -> str:
     if min_share > 0 and min_count > 0:
-        return f"min_share={max(0.0, min_share / 2):.2%} or min_count={max(0, min_count - 1)}"
+        next_share = max(0.0, min_share / 2)
+        next_count = max(0, min_count - 1)
+        return (
+            f"min_share={min_share:.2%}->{next_share:.2%} "
+            f"or min_count={min_count}->{next_count}"
+        )
     if min_share > 0:
-        return f"min_share={max(0.0, min_share / 2):.2%}"
+        next_share = max(0.0, min_share / 2)
+        return f"min_share={min_share:.2%}->{next_share:.2%}"
     if min_count > 0:
-        return f"min_count={max(0, min_count - 1)}"
+        return f"min_count={min_count}->{max(0, min_count - 1)}"
     if min_total_runs > 0:
-        return f"min_total_runs={max(0, min_total_runs - 1)}"
+        return f"min_total_runs={min_total_runs}->{max(0, min_total_runs - 1)}"
     if min_source_bucket_total > 0:
-        return f"min_source_bucket_total={max(0, min_source_bucket_total - 1)}"
+        return (
+            "min_source_bucket_total="
+            f"{min_source_bucket_total}->{max(0, min_source_bucket_total - 1)}"
+        )
     if top_k > 0:
-        return f"top_k={top_k + 1}"
+        return f"top_k={top_k}->{top_k + 1}"
     if min_runs_with_error > 0:
-        return f"min_runs_with_error={max(0, min_runs_with_error - 1)}"
+        return "min_runs_with_error=" f"{min_runs_with_error}->{max(0, min_runs_with_error - 1)}"
     return "n/a"
 
 
