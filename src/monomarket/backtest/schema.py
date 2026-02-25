@@ -354,6 +354,10 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if not verify_nightly_summary_sidecar_checksum(payload):
             raise ValueError("nightly sidecar checksum verification failed")
 
+    schema_note_version = payload.get("schema_note_version")
+    if schema_note_version is not None and not isinstance(schema_note_version, str):
+        raise ValueError("nightly sidecar schema_note_version must be a string")
+
     schema_note = payload.get("schema_note")
     if schema_note is not None and not isinstance(schema_note, str):
         raise ValueError("nightly sidecar schema_note must be a string")

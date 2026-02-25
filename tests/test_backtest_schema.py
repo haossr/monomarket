@@ -230,6 +230,7 @@ def test_verify_backtest_json_artifact_checksum_tampered() -> None:
 def _nightly_sidecar_payload() -> dict[str, object]:
     return {
         "schema_version": NIGHTLY_SUMMARY_SIDECAR_SCHEMA_VERSION,
+        "schema_note_version": "1.0",
         "schema_note": "best is structured object; prefer rolling.reject_top_pairs for machine parsing",
         "best_version": "1.0",
         "nightly_date": "2026-02-24",
@@ -323,6 +324,14 @@ def test_validate_nightly_summary_sidecar_reject_wrong_checksum_algo() -> None:
         validate_nightly_summary_sidecar(payload)
 
 
+def test_validate_nightly_summary_sidecar_reject_bad_schema_note_version_type() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["schema_note_version"] = 1
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
 def test_validate_nightly_summary_sidecar_reject_bad_schema_note_type() -> None:
     payload = _nightly_sidecar_payload()
     payload["schema_note"] = 1
@@ -341,6 +350,7 @@ def test_validate_nightly_summary_sidecar_reject_bad_best_version_type() -> None
 
 def test_validate_nightly_summary_sidecar_compat_without_best_metadata() -> None:
     payload = _nightly_sidecar_payload()
+    payload.pop("schema_note_version", None)
     payload.pop("schema_note", None)
     payload.pop("best_version", None)
     payload["checksum_algo"] = NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO
