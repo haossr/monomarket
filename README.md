@@ -89,6 +89,25 @@ rolling summary 会额外输出：
 - 覆盖与复用指标：`coverage_label`（full/partial/sparse）+ `range_hours` / `coverage_ratio` / `overlap_ratio`（含 `sampled_hours` / `covered_hours` / `overlap_hours`）
 - 风控拒单原因分布（`risk_rejection_reasons`，窗口级 + 汇总级）
 
+历史数据 + 信号回填（6m 数据集）：
+
+```bash
+./.venv/bin/python scripts/backfill_history_signals.py \
+  --window-days 180 \
+  --step-hours 12 \
+  --fidelity 720 \
+  --market-limit 220 \
+  --strategies s2,s4,s8
+```
+
+输出：
+- 使用 `gamma` 市场元数据 + `clob /prices-history` 真实历史价格回填 `market_snapshots`
+- 回建过去 6 个月信号（默认 `s2/s4/s8`，按 `--step-hours`）
+- 生成 `dataset_id` 与 `artifacts/backtest/datasets/<dataset_id>.json`
+- 自动给出 rolling 6m 的回填前后对比（`non_empty_window_ratio`、`execution_rate`）
+
+> 说明：S1 依赖同 canonical 的多来源同步历史快照；最小可用版本先覆盖 S4/S8（可选 S2）。
+
 v1->v2 迁移（校验 + 转换）：
 
 ```bash
@@ -129,7 +148,7 @@ uv run --with reportlab python scripts/backtest_pdf_report.py \
   --output artifacts/backtest/runs/<timestamp>/report.pdf
 ```
 
-报告会自动包含收益图表（累计 realized PnL 曲线 + 策略 PnL 柱状图；数据不足时显示降级提示），并展示主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）。
+报告会自动包含收益图表（累计 realized PnL 曲线 + 策略 PnL 柱状图；数据不足时显示降级提示），并在 Sample Coverage 区块展示总览胜率（Closed/MTM winrate summary）与主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）。
 
 回测胜率口径：
 - `closed_winrate`：仅统计已闭合交易（`wins/(wins+losses)`）

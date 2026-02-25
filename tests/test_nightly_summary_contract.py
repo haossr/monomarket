@@ -46,6 +46,8 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
 def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
     content = PDF_SCRIPT_PATH.read_text()
     required_tokens = [
+        "Closed winrate summary",
+        "MTM winrate summary",
         "Main window coverage",
         "Main history limited",
         "Main window note",

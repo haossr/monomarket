@@ -199,6 +199,57 @@ def _format_rate_with_samples(rate_raw: object, sample_count_raw: object) -> str
     return _format_pct(rate_raw)
 
 
+def _aggregate_winrate_from_rows(strategy_rows: list[dict[str, Any]]) -> dict[str, float | int]:
+    closed_wins = 0
+    closed_losses = 0
+    mtm_wins = 0
+    mtm_losses = 0
+
+    for row in strategy_rows:
+        row_closed_wins = _safe_int(row.get("wins"))
+        row_closed_losses = _safe_int(row.get("losses"))
+        if row_closed_wins <= 0 and row_closed_losses <= 0:
+            row_closed_samples = _safe_int(row.get("closed_sample_count"))
+            if row_closed_samples > 0:
+                row_closed_rate = _safe_float(row.get("closed_winrate", row.get("winrate")))
+                row_closed_wins = max(
+                    0, min(row_closed_samples, int(round(row_closed_samples * row_closed_rate)))
+                )
+                row_closed_losses = max(0, row_closed_samples - row_closed_wins)
+
+        row_mtm_wins = _safe_int(row.get("mtm_wins"))
+        row_mtm_losses = _safe_int(row.get("mtm_losses"))
+        if row_mtm_wins <= 0 and row_mtm_losses <= 0:
+            row_mtm_samples = _safe_int(row.get("mtm_sample_count"))
+            if row_mtm_samples > 0:
+                row_mtm_rate = _safe_float(row.get("mtm_winrate"))
+                row_mtm_wins = max(
+                    0, min(row_mtm_samples, int(round(row_mtm_samples * row_mtm_rate)))
+                )
+                row_mtm_losses = max(0, row_mtm_samples - row_mtm_wins)
+
+        closed_wins += max(0, row_closed_wins)
+        closed_losses += max(0, row_closed_losses)
+        mtm_wins += max(0, row_mtm_wins)
+        mtm_losses += max(0, row_mtm_losses)
+
+    closed_samples = closed_wins + closed_losses
+    mtm_samples = mtm_wins + mtm_losses
+    closed_rate = (closed_wins / closed_samples) if closed_samples > 0 else 0.0
+    mtm_rate = (mtm_wins / mtm_samples) if mtm_samples > 0 else 0.0
+
+    return {
+        "closed_wins": closed_wins,
+        "closed_losses": closed_losses,
+        "closed_samples": closed_samples,
+        "closed_rate": closed_rate,
+        "mtm_wins": mtm_wins,
+        "mtm_losses": mtm_losses,
+        "mtm_samples": mtm_samples,
+        "mtm_rate": mtm_rate,
+    }
+
+
 def render_pdf(
     *,
     payload: dict[str, Any],
@@ -416,8 +467,14 @@ def render_pdf(
     write_line(f"Rejected signals: {rejected_signals}")
     write_line("")
 
-    closed_samples_total = sum(_safe_int(row.get("closed_sample_count")) for row in strategy_rows)
-    mtm_samples_total = sum(_safe_int(row.get("mtm_sample_count")) for row in strategy_rows)
+    winrate_summary = _aggregate_winrate_from_rows(strategy_rows)
+    closed_summary_samples = _safe_int(winrate_summary.get("closed_samples"))
+    mtm_summary_samples = _safe_int(winrate_summary.get("mtm_samples"))
+    closed_summary_wins = _safe_int(winrate_summary.get("closed_wins"))
+    mtm_summary_wins = _safe_int(winrate_summary.get("mtm_wins"))
+    closed_summary_rate = _safe_float(winrate_summary.get("closed_rate"))
+    mtm_summary_rate = _safe_float(winrate_summary.get("mtm_rate"))
+
     main_cov = _compute_main_window_coverage(payload)
     main_cov_ratio = _safe_float(main_cov.get("coverage_ratio"))
     main_cov_history_limited = bool(main_cov.get("history_limited", False))
@@ -426,8 +483,16 @@ def render_pdf(
     effective_from_ts = str(main_cov.get("effective_from_ts", ""))
 
     write_line("Sample Coverage", bold=True, size=12, leading=18)
-    write_line(f"Closed-winrate samples: {closed_samples_total}")
-    write_line(f"MTM-winrate samples:    {mtm_samples_total}")
+    write_line(
+        "Closed winrate summary: "
+        f"{_format_rate_with_samples(closed_summary_rate, closed_summary_samples)} "
+        f"({closed_summary_wins}/{closed_summary_samples})"
+    )
+    write_line(
+        "MTM winrate summary:    "
+        f"{_format_rate_with_samples(mtm_summary_rate, mtm_summary_samples)} "
+        f"({mtm_summary_wins}/{mtm_summary_samples})"
+    )
     write_line(f"Main window coverage:   {main_cov_ratio * 100.0:.2f}%")
     write_line(f"Main history limited:   {'true' if main_cov_history_limited else 'false'}")
     write_line(f"Main window note:       {main_cov_note}")
