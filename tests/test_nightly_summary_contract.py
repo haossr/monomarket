@@ -5,11 +5,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from typer.testing import CliRunner
+
 from monomarket.backtest import (
     NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO,
     validate_nightly_summary_sidecar,
     verify_nightly_summary_sidecar_checksum,
 )
+from monomarket.cli import app
 
 ROOT = Path(__file__).resolve().parents[1]
 BASH_SCRIPT_PATH = ROOT / "scripts" / "backtest_nightly_report.sh"
@@ -271,6 +274,120 @@ def test_nightly_summary_line_without_checksum_omits_checksum_fields(tmp_path: P
     validate_nightly_summary_sidecar(payload)
     assert "checksum_algo" not in payload
     assert "checksum_sha256" not in payload
+
+
+def _write_nightly_summary_sidecar(tmp_path: Path, *, with_checksum: bool) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_json.write_text(
+        json.dumps(
+            {
+                "from_ts": "2026-02-24T00:00:00Z",
+                "to_ts": "2026-02-24T02:00:00Z",
+                "total_signals": 1,
+                "executed_signals": 1,
+                "rejected_signals": 0,
+                "results": [{"strategy": "s1", "pnl": 1.0}],
+            }
+        )
+    )
+    rolling_json.write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "run_count": 1,
+                    "execution_rate": 1.0,
+                    "positive_window_rate": 1.0,
+                    "empty_window_count": 0,
+                    "range_hours": 2.0,
+                    "coverage_ratio": 1.0,
+                    "overlap_ratio": 0.0,
+                    "coverage_label": "full",
+                    "risk_rejection_reasons": {},
+                }
+            }
+        )
+    )
+
+    cmd = [
+        sys.executable,
+        str(SUMMARY_SCRIPT_PATH),
+        "--backtest-json",
+        str(backtest_json),
+        "--pdf-path",
+        str(pdf_path),
+        "--rolling-json",
+        str(rolling_json),
+        "--summary-path",
+        str(summary_txt),
+        "--summary-json-path",
+        str(summary_json),
+        "--nightly-date",
+        "2026-02-24",
+        "--rolling-reject-top-k",
+        "2",
+    ]
+    if with_checksum:
+        cmd.append("--with-checksum")
+
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return summary_json
+
+
+def test_cli_nightly_summary_verify_modes(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    summary_json_with = _write_nightly_summary_sidecar(tmp_path / "with", with_checksum=True)
+    res_with = runner.invoke(
+        app,
+        ["nightly-summary-verify", "--summary-json", str(summary_json_with)],
+    )
+    assert res_with.exit_code == 0, res_with.output
+    assert "nightly sidecar ok" in res_with.output
+    assert "with-checksum" in res_with.output
+
+    summary_json_without = _write_nightly_summary_sidecar(tmp_path / "without", with_checksum=False)
+    res_without = runner.invoke(
+        app,
+        ["nightly-summary-verify", "--summary-json", str(summary_json_without)],
+    )
+    assert res_without.exit_code == 1, res_without.output
+    assert "missing checksum fields" in res_without.output
+
+    res_without_allow = runner.invoke(
+        app,
+        [
+            "nightly-summary-verify",
+            "--summary-json",
+            str(summary_json_without),
+            "--allow-missing-checksum",
+        ],
+    )
+    assert res_without_allow.exit_code == 0, res_without_allow.output
+    assert "nightly sidecar ok" in res_without_allow.output
+    assert "no-checksum" in res_without_allow.output
+
+
+def test_cli_nightly_summary_verify_reject_tampered_checksum(tmp_path: Path) -> None:
+    runner = CliRunner()
+    summary_json = _write_nightly_summary_sidecar(tmp_path / "tampered", with_checksum=True)
+
+    payload = json.loads(summary_json.read_text())
+    assert isinstance(payload["signals"], dict)
+    payload["signals"]["executed"] = 0
+    summary_json.write_text(json.dumps(payload))
+
+    res = runner.invoke(
+        app,
+        ["nightly-summary-verify", "--summary-json", str(summary_json)],
+    )
+    assert res.exit_code == 1, res.output
+    assert "nightly sidecar invalid" in res.output
 
 
 def test_nightly_script_help_mentions_disabled_semantics() -> None:

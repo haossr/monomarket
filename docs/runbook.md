@@ -263,6 +263,14 @@ bash scripts/backtest_nightly_report.sh \
 `rolling_reject_top` 使用 `;` 作为原因分隔符（如 `reasonA:3;reasonB:1`）；消费端优先读取 `summary.json` 的 `reject_top_pairs`。
 `summary.json` checksum 默认启用，可用 `--no-checksum` 关闭。
 
+CI/shell 快速验签（失败返回 non-zero）：
+
+```bash
+monomarket nightly-summary-verify \
+  --summary-json artifacts/backtest/nightly/<YYYY-MM-DD>/summary.json \
+  --require-checksum
+```
+
 消费端验签示例（Python helper）：
 
 ```bash

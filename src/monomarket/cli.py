@@ -22,6 +22,8 @@ from monomarket.backtest import (
     compute_backtest_json_artifact_checksum,
     migrate_backtest_artifact_v1_to_v2,
     validate_backtest_json_artifact,
+    validate_nightly_summary_sidecar,
+    verify_nightly_summary_sidecar_checksum,
 )
 from monomarket.config import Settings, load_settings
 from monomarket.data import IngestionService, MarketDataClients
@@ -1239,6 +1241,40 @@ def backtest_migration_map(
         )
 
     console.print(tb)
+
+
+@app.command("nightly-summary-verify")
+def nightly_summary_verify(
+    summary_json: str = typer.Option(..., help="Path to nightly summary.json sidecar"),
+    require_checksum: bool = typer.Option(
+        True,
+        "--require-checksum/--allow-missing-checksum",
+        help="Require checksum fields to exist (recommended for CI)",
+    ),
+) -> None:
+    path = Path(summary_json)
+    payload = json.loads(path.read_text())
+
+    try:
+        validate_nightly_summary_sidecar(payload)
+    except ValueError as exc:
+        console.print(f"[red]nightly sidecar invalid[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    has_checksum = "checksum_algo" in payload and "checksum_sha256" in payload
+    if require_checksum and not has_checksum:
+        console.print(
+            "[red]nightly sidecar invalid[/red] missing checksum fields "
+            "(expected checksum_algo + checksum_sha256)"
+        )
+        raise typer.Exit(code=1)
+
+    if has_checksum and not verify_nightly_summary_sidecar_checksum(payload):
+        console.print("[red]nightly sidecar invalid[/red] checksum verification failed")
+        raise typer.Exit(code=1)
+
+    mode = "with-checksum" if has_checksum else "no-checksum"
+    console.print(f"[green]nightly sidecar ok[/green] {path} ({mode})")
 
 
 @app.command("execute-signal")
