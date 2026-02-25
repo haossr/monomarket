@@ -1251,6 +1251,11 @@ def nightly_summary_verify(
         "--require-checksum/--allow-missing-checksum",
         help="Require checksum fields to exist (recommended for CI)",
     ),
+    strict_schema_note_version: str | None = typer.Option(
+        None,
+        "--strict-schema-note-version",
+        help="Require schema_note_version to match exactly (optional CI guard)",
+    ),
 ) -> None:
     path = Path(summary_json)
     payload = json.loads(path.read_text())
@@ -1272,6 +1277,16 @@ def nightly_summary_verify(
     if has_checksum and not verify_nightly_summary_sidecar_checksum(payload):
         console.print("[red]nightly sidecar invalid[/red] checksum verification failed")
         raise typer.Exit(code=1)
+
+    if strict_schema_note_version is not None:
+        raw_note_version = payload.get("schema_note_version")
+        if raw_note_version != strict_schema_note_version:
+            actual = "(missing)" if raw_note_version is None else str(raw_note_version)
+            console.print(
+                "[red]nightly sidecar invalid[/red] schema_note_version mismatch "
+                f"(expected={strict_schema_note_version}, actual={actual})"
+            )
+            raise typer.Exit(code=1)
 
     mode = "with-checksum" if has_checksum else "no-checksum"
     console.print(f"[green]nightly sidecar ok[/green] {path} ({mode})")
