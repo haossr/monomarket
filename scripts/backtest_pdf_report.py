@@ -6,6 +6,7 @@ import csv
 import json
 import math
 import textwrap
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +106,86 @@ def _build_strategy_pnl_bars(
         bars.append((strategy, _safe_float(row.get("pnl"))))
     bars.sort(key=lambda item: item[1], reverse=True)
     return bars[:max_items]
+
+
+def _parse_iso_ts(raw: object) -> datetime | None:
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _compute_main_window_coverage(payload: dict[str, Any]) -> dict[str, Any]:
+    from_ts = _parse_iso_ts(payload.get("from_ts"))
+    to_ts = _parse_iso_ts(payload.get("to_ts"))
+
+    replay = payload.get("replay")
+    replay_rows = replay if isinstance(replay, list) else []
+
+    first_replay_dt: datetime | None = None
+    for row in replay_rows:
+        if not isinstance(row, dict):
+            continue
+        ts = _parse_iso_ts(row.get("ts"))
+        if ts is None:
+            continue
+        if first_replay_dt is None or ts < first_replay_dt:
+            first_replay_dt = ts
+
+    if from_ts is None or to_ts is None:
+        return {
+            "coverage_ratio": 0.0,
+            "history_limited": False,
+            "note": "window_parse_error",
+            "first_replay_ts": "",
+            "effective_from_ts": "",
+        }
+
+    effective_from_dt: datetime | None = from_ts
+    history_limited = False
+    note = "full_history"
+
+    if first_replay_dt is not None and first_replay_dt > from_ts:
+        effective_from_dt = first_replay_dt
+        history_limited = True
+        note = "history_limited"
+    elif first_replay_dt is None:
+        effective_from_dt = None
+        note = "no_replay_rows"
+
+    window_hours = max(0.0, (to_ts - from_ts).total_seconds() / 3600.0)
+    covered_hours = (
+        max(0.0, (to_ts - effective_from_dt).total_seconds() / 3600.0)
+        if effective_from_dt is not None
+        else 0.0
+    )
+    coverage_ratio = (covered_hours / window_hours) if window_hours > 0 else 0.0
+
+    return {
+        "coverage_ratio": max(0.0, min(1.0, coverage_ratio)),
+        "history_limited": history_limited,
+        "note": note,
+        "first_replay_ts": (
+            first_replay_dt.isoformat().replace("+00:00", "Z")
+            if first_replay_dt is not None
+            else ""
+        ),
+        "effective_from_ts": (
+            effective_from_dt.isoformat().replace("+00:00", "Z")
+            if effective_from_dt is not None
+            else ""
+        ),
+    }
 
 
 def _format_pct(raw: object) -> str:
@@ -337,9 +418,23 @@ def render_pdf(
 
     closed_samples_total = sum(_safe_int(row.get("closed_sample_count")) for row in strategy_rows)
     mtm_samples_total = sum(_safe_int(row.get("mtm_sample_count")) for row in strategy_rows)
+    main_cov = _compute_main_window_coverage(payload)
+    main_cov_ratio = _safe_float(main_cov.get("coverage_ratio"))
+    main_cov_history_limited = bool(main_cov.get("history_limited", False))
+    main_cov_note = str(main_cov.get("note", ""))
+    first_replay_ts = str(main_cov.get("first_replay_ts", ""))
+    effective_from_ts = str(main_cov.get("effective_from_ts", ""))
+
     write_line("Sample Coverage", bold=True, size=12, leading=18)
     write_line(f"Closed-winrate samples: {closed_samples_total}")
     write_line(f"MTM-winrate samples:    {mtm_samples_total}")
+    write_line(f"Main window coverage:   {main_cov_ratio * 100.0:.2f}%")
+    write_line(f"Main history limited:   {'true' if main_cov_history_limited else 'false'}")
+    write_line(f"Main window note:       {main_cov_note}")
+    if first_replay_ts:
+        write_line(f"First replay ts:        {first_replay_ts}")
+    if effective_from_ts:
+        write_line(f"Effective from ts:      {effective_from_ts}")
     write_line("(winrate shown as n/a when sample count is zero)")
     write_line("")
 

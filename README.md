@@ -129,7 +129,7 @@ uv run --with reportlab python scripts/backtest_pdf_report.py \
   --output artifacts/backtest/runs/<timestamp>/report.pdf
 ```
 
-报告会自动包含收益图表（累计 realized PnL 曲线 + 策略 PnL 柱状图；数据不足时显示降级提示）。
+报告会自动包含收益图表（累计 realized PnL 曲线 + 策略 PnL 柱状图；数据不足时显示降级提示），并展示主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）。
 
 回测胜率口径：
 - `closed_winrate`：仅统计已闭合交易（`wins/(wins+losses)`）

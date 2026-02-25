@@ -18,6 +18,7 @@ from monomarket.cli import app
 ROOT = Path(__file__).resolve().parents[1]
 BASH_SCRIPT_PATH = ROOT / "scripts" / "backtest_nightly_report.sh"
 SUMMARY_SCRIPT_PATH = ROOT / "scripts" / "nightly_summary_line.py"
+PDF_SCRIPT_PATH = ROOT / "scripts" / "backtest_pdf_report.py"
 
 
 def test_nightly_summary_contains_canonical_alias_fields() -> None:
@@ -37,6 +38,17 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "coverage_ratio=",
         "overlap_ratio=",
         "rolling_reject_top_k=",
+    ]
+    for token in required_tokens:
+        assert token in content
+
+
+def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
+    content = PDF_SCRIPT_PATH.read_text()
+    required_tokens = [
+        "Main window coverage",
+        "Main history limited",
+        "Main window note",
     ]
     for token in required_tokens:
         assert token in content
