@@ -386,6 +386,24 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if not isinstance(raw, int | float):
             raise ValueError(f"nightly sidecar signals.{key} must be numeric")
 
+    winrate = payload.get("winrate")
+    if winrate is not None:
+        if not isinstance(winrate, Mapping):
+            raise ValueError("nightly sidecar winrate must be an object")
+        for key in (
+            "closed_winrate",
+            "closed_sample_count",
+            "closed_wins",
+            "closed_losses",
+            "mtm_winrate",
+            "mtm_sample_count",
+            "mtm_wins",
+            "mtm_losses",
+        ):
+            raw = winrate.get(key)
+            if not isinstance(raw, int | float):
+                raise ValueError(f"nightly sidecar winrate.{key} must be numeric")
+
     best = payload.get("best")
     if isinstance(best, Mapping):
         best_available = best.get("available")

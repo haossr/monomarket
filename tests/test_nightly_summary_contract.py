@@ -24,6 +24,10 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
     content = SUMMARY_SCRIPT_PATH.read_text()
 
     required_tokens = [
+        "closed_winrate=",
+        "closed_samples=",
+        "mtm_winrate=",
+        "mtm_samples=",
         "positive_window_rate=",
         "empty_window_count=",
         "range_hours=",
@@ -107,6 +111,102 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert float(best_obj["pnl"]) == 0.0
     assert str(best_obj["text"]) == "best_strategy=n/a"
     assert str(sidecar["best_text"]) == "best_strategy=n/a"
+
+
+def test_nightly_summary_reports_closed_and_mtm_winrate(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T02:00:00Z",
+        "total_signals": 10,
+        "executed_signals": 8,
+        "rejected_signals": 2,
+        "results": [
+            {
+                "strategy": "s1",
+                "pnl": 1.2,
+                "wins": 2,
+                "losses": 1,
+                "mtm_wins": 3,
+                "mtm_losses": 1,
+            },
+            {
+                "strategy": "s2",
+                "pnl": 0.8,
+                "wins": 1,
+                "losses": 2,
+                "mtm_wins": 1,
+                "mtm_losses": 3,
+            },
+        ],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 3,
+            "execution_rate": 0.8,
+            "positive_window_rate": 0.66,
+            "empty_window_count": 1,
+            "range_hours": 24,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.2,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "closed_winrate=50.00%" in line
+    assert "closed_samples=6" in line
+    assert "mtm_winrate=50.00%" in line
+    assert "mtm_samples=8" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    assert verify_nightly_summary_sidecar_checksum(sidecar)
+
+    winrate = sidecar["winrate"]
+    assert isinstance(winrate, dict)
+    assert abs(float(winrate["closed_winrate"]) - 0.5) < 1e-9
+    assert int(winrate["closed_sample_count"]) == 6
+    assert int(winrate["closed_wins"]) == 3
+    assert int(winrate["closed_losses"]) == 3
+    assert abs(float(winrate["mtm_winrate"]) - 0.5) < 1e-9
+    assert int(winrate["mtm_sample_count"]) == 8
+    assert int(winrate["mtm_wins"]) == 4
+    assert int(winrate["mtm_losses"]) == 4
 
 
 def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> None:

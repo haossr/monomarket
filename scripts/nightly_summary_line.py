@@ -56,6 +56,67 @@ def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _aggregate_winrate(payload: dict[str, Any]) -> dict[str, Any]:
+    rows = payload.get("results")
+    closed_wins = 0
+    closed_losses = 0
+    mtm_wins = 0
+    mtm_losses = 0
+
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+
+            row_closed_wins = int(_f(row.get("wins")))
+            row_closed_losses = int(_f(row.get("losses")))
+            if row_closed_wins <= 0 and row_closed_losses <= 0:
+                closed_sample = int(_f(row.get("closed_sample_count")))
+                if closed_sample > 0:
+                    closed_rate = _f(row.get("closed_winrate", row.get("winrate")))
+                    row_closed_wins = max(
+                        0, min(closed_sample, int(round(closed_sample * closed_rate)))
+                    )
+                    row_closed_losses = max(0, closed_sample - row_closed_wins)
+
+            row_mtm_wins = int(_f(row.get("mtm_wins")))
+            row_mtm_losses = int(_f(row.get("mtm_losses")))
+            if row_mtm_wins <= 0 and row_mtm_losses <= 0:
+                mtm_sample = int(_f(row.get("mtm_sample_count")))
+                if mtm_sample > 0:
+                    mtm_rate = _f(row.get("mtm_winrate"))
+                    row_mtm_wins = max(0, min(mtm_sample, int(round(mtm_sample * mtm_rate))))
+                    row_mtm_losses = max(0, mtm_sample - row_mtm_wins)
+
+            closed_wins += max(0, row_closed_wins)
+            closed_losses += max(0, row_closed_losses)
+            mtm_wins += max(0, row_mtm_wins)
+            mtm_losses += max(0, row_mtm_losses)
+
+    closed_sample_count = closed_wins + closed_losses
+    mtm_sample_count = mtm_wins + mtm_losses
+
+    closed_winrate = (closed_wins / closed_sample_count) if closed_sample_count > 0 else 0.0
+    mtm_winrate = (mtm_wins / mtm_sample_count) if mtm_sample_count > 0 else 0.0
+
+    return {
+        "closed_winrate": closed_winrate,
+        "closed_sample_count": closed_sample_count,
+        "closed_wins": closed_wins,
+        "closed_losses": closed_losses,
+        "mtm_winrate": mtm_winrate,
+        "mtm_sample_count": mtm_sample_count,
+        "mtm_wins": mtm_wins,
+        "mtm_losses": mtm_losses,
+    }
+
+
+def _format_winrate(rate: float, sample_count: int) -> str:
+    if sample_count <= 0:
+        return "n/a"
+    return f"{rate:.2%}"
+
+
 def build_summary_bundle(
     *,
     payload: dict[str, Any],
@@ -67,6 +128,12 @@ def build_summary_bundle(
 ) -> tuple[str, dict[str, Any]]:
     best_info = _best_strategy(payload)
     best_text = str(best_info.get("text") or "best_strategy=n/a")
+
+    winrate_info = _aggregate_winrate(payload)
+    closed_winrate = float(winrate_info.get("closed_winrate", 0.0))
+    closed_sample_count = int(winrate_info.get("closed_sample_count", 0))
+    mtm_winrate = float(winrate_info.get("mtm_winrate", 0.0))
+    mtm_sample_count = int(winrate_info.get("mtm_sample_count", 0))
 
     rolling_runs = 0
     rolling_exec_rate = 0.0
@@ -116,7 +183,12 @@ def build_summary_bundle(
     line = (
         f"Nightly {nightly_date} | window={payload.get('from_ts', '')} -> {payload.get('to_ts', '')} "
         f"| signals total={payload.get('total_signals', 0)} executed={payload.get('executed_signals', 0)} "
-        f"rejected={payload.get('rejected_signals', 0)} | {best_text} "
+        f"rejected={payload.get('rejected_signals', 0)} "
+        f"| closed_winrate={_format_winrate(closed_winrate, closed_sample_count)} "
+        f"closed_samples={closed_sample_count} "
+        f"mtm_winrate={_format_winrate(mtm_winrate, mtm_sample_count)} "
+        f"mtm_samples={mtm_sample_count} "
+        f"| {best_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
         f"positive_window_rate={rolling_positive_window_rate:.2%} "
@@ -145,6 +217,16 @@ def build_summary_bundle(
             "total": int(_f(payload.get("total_signals"))),
             "executed": int(_f(payload.get("executed_signals"))),
             "rejected": int(_f(payload.get("rejected_signals"))),
+        },
+        "winrate": {
+            "closed_winrate": closed_winrate,
+            "closed_sample_count": closed_sample_count,
+            "closed_wins": int(winrate_info.get("closed_wins", 0)),
+            "closed_losses": int(winrate_info.get("closed_losses", 0)),
+            "mtm_winrate": mtm_winrate,
+            "mtm_sample_count": mtm_sample_count,
+            "mtm_wins": int(winrate_info.get("mtm_wins", 0)),
+            "mtm_losses": int(winrate_info.get("mtm_losses", 0)),
         },
         "best": {
             "available": bool(best_info.get("available", False)),

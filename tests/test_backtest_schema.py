@@ -243,6 +243,16 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             "executed": 8,
             "rejected": 2,
         },
+        "winrate": {
+            "closed_winrate": 0.5,
+            "closed_sample_count": 4,
+            "closed_wins": 2,
+            "closed_losses": 2,
+            "mtm_winrate": 0.6,
+            "mtm_sample_count": 5,
+            "mtm_wins": 3,
+            "mtm_losses": 2,
+        },
         "best": {
             "available": True,
             "strategy": "s1",
@@ -343,6 +353,24 @@ def test_validate_nightly_summary_sidecar_reject_bad_schema_note_type() -> None:
 def test_validate_nightly_summary_sidecar_reject_bad_best_version_type() -> None:
     payload = _nightly_sidecar_payload()
     payload["best_version"] = 1
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_winrate_type() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["winrate"] = "bad"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_winrate_field_type() -> None:
+    payload = _nightly_sidecar_payload()
+    winrate = payload["winrate"]
+    assert isinstance(winrate, dict)
+    winrate["closed_winrate"] = "bad"
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)
