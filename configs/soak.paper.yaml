@@ -38,4 +38,4 @@ strategies:
   s8:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.15
-    max_order_notional: 25.0
+    max_order_notional: 10.0
