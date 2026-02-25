@@ -465,6 +465,117 @@ def test_backtest_risk_uses_executable_qty_for_notional(tmp_path: Path) -> None:
     assert abs(row.risk_notional - 2.0) < 1e-9
 
 
+def test_backtest_circuit_breaker_counts_consecutive_rejections(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    snapshot_ts = "2026-02-20T00:00:00+00:00"
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="m1",
+                canonical_id="c1",
+                source="gamma",
+                event_id="e1",
+                question="Q1",
+                status="open",
+                neg_risk=False,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.40,
+                no_price=0.60,
+                mid_price=0.40,
+            )
+        ],
+        snapshot_at=snapshot_ts,
+    )
+
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=10.0,
+                rationale="reject-1-notional",
+            )
+        ],
+        created_at="2026-02-20T00:10:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=2.5,
+                rationale="exec-1",
+            )
+        ],
+        created_at="2026-02-20T00:20:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=10.0,
+                rationale="reject-2-notional",
+            )
+        ],
+        created_at="2026-02-20T00:30:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=2.5,
+                rationale="exec-2-should-not-hit-breaker",
+            )
+        ],
+        created_at="2026-02-20T00:40:00+00:00",
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+        risk=BacktestRiskConfig(
+            max_daily_loss=1000.0,
+            max_strategy_notional=2.5,
+            max_event_notional=1000.0,
+            circuit_breaker_rejections=2,
+        ),
+    ).run(["s1"], from_ts=snapshot_ts, to_ts="2026-02-20T01:00:00+00:00")
+
+    assert report.total_signals == 4
+    assert report.executed_signals == 2
+    assert report.rejected_signals == 2
+
+    reasons = [row.risk_reason for row in report.replay]
+    assert any("strategy notional limit exceeded" in reason for reason in reasons)
+    assert all("circuit breaker open" not in reason for reason in reasons)
+
+
 def test_backtest_default_sizing_avoids_zero_execution_rate(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))

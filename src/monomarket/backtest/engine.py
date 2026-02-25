@@ -192,6 +192,7 @@ class BacktestEngine:
 
         replay: list[BacktestReplayRow] = []
         rejection_count = 0
+        rejection_streak = 0
         executed_signals = 0
 
         for row in rows:
@@ -229,11 +230,12 @@ class BacktestEngine:
                 positions=positions,
                 strategy_market_event=strategy_market_event,
                 realized_pnl=total_realized,
-                rejection_count=rejection_count,
+                rejection_streak=rejection_streak,
             )
 
             if not risk_decision.ok:
                 rejection_count += 1
+                rejection_streak += 1
                 strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
                     positions,
                     strategy,
@@ -285,6 +287,7 @@ class BacktestEngine:
 
             if executed_qty <= 1e-12:
                 rejection_count += 1
+                rejection_streak += 1
                 strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
                     positions,
                     strategy,
@@ -362,6 +365,7 @@ class BacktestEngine:
             total_realized += realized_change
             trade_count[strategy] += 1
             executed_signals += 1
+            rejection_streak = 0
 
             realized_by_event[event_key] += realized_change
             event_trade_count[event_key] += 1
@@ -753,7 +757,7 @@ class BacktestEngine:
         positions: dict[tuple[str, str, str], _Position],
         strategy_market_event: dict[tuple[str, str], str],
         realized_pnl: float,
-        rejection_count: int,
+        rejection_streak: int,
     ) -> _RiskDecision:
         notional = abs(qty * price)
         strategy_notional = self._strategy_notional(positions, strategy)
@@ -767,7 +771,7 @@ class BacktestEngine:
                 realized_pnl_before=realized_pnl,
                 strategy_notional_before=strategy_notional,
                 event_notional_before=event_notional,
-                rejections_before=rejection_count,
+                rejections_before=rejection_streak,
             )
 
         if realized_pnl <= -abs(self.risk.max_daily_loss):
@@ -778,7 +782,7 @@ class BacktestEngine:
                 realized_pnl_before=realized_pnl,
                 strategy_notional_before=strategy_notional,
                 event_notional_before=event_notional,
-                rejections_before=rejection_count,
+                rejections_before=rejection_streak,
             )
 
         if strategy_notional + notional > self.risk.max_strategy_notional:
@@ -792,7 +796,7 @@ class BacktestEngine:
                 realized_pnl_before=realized_pnl,
                 strategy_notional_before=strategy_notional,
                 event_notional_before=event_notional,
-                rejections_before=rejection_count,
+                rejections_before=rejection_streak,
             )
 
         if event_notional + notional > self.risk.max_event_notional:
@@ -806,22 +810,22 @@ class BacktestEngine:
                 realized_pnl_before=realized_pnl,
                 strategy_notional_before=strategy_notional,
                 event_notional_before=event_notional,
-                rejections_before=rejection_count,
+                rejections_before=rejection_streak,
             )
 
-        if rejection_count >= self.risk.circuit_breaker_rejections:
+        if rejection_streak >= self.risk.circuit_breaker_rejections:
             return _RiskDecision(
                 ok=False,
                 reason=(
                     "circuit breaker open: "
-                    f"rejected={rejection_count}, "
+                    f"consecutive_rejected={rejection_streak}, "
                     f"threshold={self.risk.circuit_breaker_rejections}"
                 ),
                 notional=notional,
                 realized_pnl_before=realized_pnl,
                 strategy_notional_before=strategy_notional,
                 event_notional_before=event_notional,
-                rejections_before=rejection_count,
+                rejections_before=rejection_streak,
             )
 
         return _RiskDecision(
@@ -831,5 +835,5 @@ class BacktestEngine:
             realized_pnl_before=realized_pnl,
             strategy_notional_before=strategy_notional,
             event_notional_before=event_notional,
-            rejections_before=rejection_count,
+            rejections_before=rejection_streak,
         )
