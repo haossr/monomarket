@@ -74,11 +74,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+FIXED_WINDOW_MODE="false"
 if [[ -n "$FROM_TS" || -n "$TO_TS" ]]; then
   if [[ -z "$FROM_TS" || -z "$TO_TS" ]]; then
     echo "[backtest-cycle] --from-ts and --to-ts must be provided together" >&2
     exit 1
   fi
+  FIXED_WINDOW_MODE="true"
 fi
 
 if [[ -x ".venv/bin/python" ]]; then
@@ -154,6 +156,47 @@ print((dt.astimezone(UTC) + timedelta(seconds=seconds)).isoformat().replace("+00
 PY
 }
 
+_signal_generation_overlap_stats() {
+  "$PYTHON_BIN" - "$CONFIG_PATH" "$1" "$2" "$3" "$STRATEGIES" <<'PY'
+from __future__ import annotations
+
+import sys
+
+from monomarket.config import load_settings
+from monomarket.db import Storage
+
+config_path, run_start_ts, from_ts, to_ts, strategies_csv = sys.argv[1:]
+settings = load_settings(config_path)
+storage = Storage(settings.app.db_path)
+strategies = [s.strip() for s in strategies_csv.split(",") if s.strip()]
+
+where_strat = ""
+params_tail: list[str] = []
+if strategies:
+    where_strat = " AND strategy IN (" + ",".join(["?"] * len(strategies)) + ")"
+    params_tail = strategies
+
+with storage.conn() as conn:
+    row_new = conn.execute(
+        "SELECT COUNT(*) AS c FROM signals "
+        "WHERE datetime(created_at) >= datetime(?)" + where_strat,
+        [run_start_ts, *params_tail],
+    ).fetchone()
+    row_in_window = conn.execute(
+        "SELECT COUNT(*) AS c FROM signals "
+        "WHERE datetime(created_at) >= datetime(?) "
+        "AND datetime(created_at) >= datetime(?) "
+        "AND datetime(created_at) <= datetime(?)" + where_strat,
+        [run_start_ts, from_ts, to_ts, *params_tail],
+    ).fetchone()
+
+new_count = int(row_new["c"]) if row_new else 0
+in_window_count = int(row_in_window["c"]) if row_in_window else 0
+print(new_count)
+print(in_window_count)
+PY
+}
+
 export ENABLE_LIVE_TRADING=false
 export MONOMARKET_MODE=paper
 
@@ -164,6 +207,8 @@ monomarket init-db --config "$CONFIG_PATH"
 
 echo "[backtest-cycle] ingest gamma incremental"
 monomarket ingest --source gamma --limit "$INGEST_LIMIT" --incremental --config "$CONFIG_PATH"
+
+RUN_START_TS="$(_now_iso)"
 
 echo "[backtest-cycle] generate signals: $STRATEGIES"
 monomarket generate-signals \
@@ -183,6 +228,15 @@ if [[ "$TO_TS" == "$FROM_TS" ]]; then
 fi
 
 echo "[backtest-cycle] window=${FROM_TS} -> ${TO_TS} (requested_lookback_hours=${LOOKBACK_HOURS})"
+
+OVERLAP_STATS="$(_signal_generation_overlap_stats "$RUN_START_TS" "$FROM_TS" "$TO_TS")"
+NEW_SIGNALS_TOTAL="$(echo "$OVERLAP_STATS" | sed -n '1p')"
+NEW_SIGNALS_IN_WINDOW="$(echo "$OVERLAP_STATS" | sed -n '2p')"
+
+echo "[backtest-cycle] signal_generation new_total=${NEW_SIGNALS_TOTAL} new_in_window=${NEW_SIGNALS_IN_WINDOW}"
+if [[ "$NEW_SIGNALS_TOTAL" -gt 0 && "$NEW_SIGNALS_IN_WINDOW" -eq 0 ]]; then
+  echo "[backtest-cycle] warning: generated signals are outside replay window; fixed-window runs may be replaying historical signals only" >&2
+fi
 
 echo "[backtest-cycle] backtest"
 monomarket backtest \
@@ -257,7 +311,7 @@ for row in rows:
 out_md.write_text("\n".join(lines) + "\n")
 PY
 
-"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" <<'PY'
+"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$FIXED_WINDOW_MODE" <<'PY'
 from __future__ import annotations
 
 import json
@@ -268,6 +322,10 @@ import sys
 run_dir = Path(sys.argv[1]).resolve()
 from_ts = sys.argv[2]
 to_ts = sys.argv[3]
+run_start_ts = sys.argv[4]
+new_signals_total = int(float(sys.argv[5]))
+new_signals_in_window = int(float(sys.argv[6]))
+fixed_window_mode = str(sys.argv[7]).strip().lower() == "true"
 
 pointer = {
     "updated_at": datetime.now(UTC).isoformat(),
@@ -280,6 +338,18 @@ pointer = {
 pointer_path = Path("artifacts/backtest/latest-run.json")
 pointer_path.parent.mkdir(parents=True, exist_ok=True)
 pointer_path.write_text(json.dumps(pointer, ensure_ascii=False, indent=2) + "\n")
+
+cycle_meta = {
+    "updated_at": pointer["updated_at"],
+    "run_start_ts": run_start_ts,
+    "fixed_window_mode": fixed_window_mode,
+    "signal_generation": {
+        "new_signals_total": new_signals_total,
+        "new_signals_in_window": new_signals_in_window,
+        "historical_replay_only": new_signals_total > 0 and new_signals_in_window == 0,
+    },
+}
+(run_dir / "cycle-meta.json").write_text(json.dumps(cycle_meta, ensure_ascii=False, indent=2) + "\n")
 PY
 
 ln -sfn "$RUN_DIR" artifacts/backtest/latest || true
@@ -293,5 +363,6 @@ echo "- $RUN_DIR/strategy.csv.sha256"
 echo "- $RUN_DIR/event.csv"
 echo "- $RUN_DIR/event.csv.sha256"
 echo "- $RUN_DIR/summary.md"
+echo "- $RUN_DIR/cycle-meta.json"
 echo "- artifacts/backtest/latest-run.json"
 echo "- artifacts/backtest/latest (symlink)"

@@ -261,7 +261,7 @@ bash scripts/backtest_nightly_report.sh \
 - `summary.txt`（含总览 `closed_winrate/mtm_winrate` + sample 数、主窗口样本覆盖 `main_coverage/history_limited/window_note`（`no_replay_rows` 时 `main_coverage=0.00%`）、rolling `pos_win_rate/empty_windows` 与 canonical 别名 `positive_window_rate/empty_window_count`，以及 `range_h/coverage/overlap` 与 canonical 别名 `range_hours/coverage_ratio/overlap_ratio`、`coverage_label`、`rolling_reject_top_k`、主要拒单原因摘要）
 - `summary.json`（结构化 sidecar，便于机器解析；含 `best` 对象、`best_version`、`schema_note_version`、`schema_note`、`winrate` 汇总对象、`window_coverage` 覆盖注记对象、rolling 指标与 `checksum_algo/checksum_sha256`；当 `executed_signals=0` 时 `best.available=false` 且 `best_strategy=n/a`）
 - `rolling-summary.json`（滚动窗口多样本回测汇总）
-- `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
+- `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件；含 `cycle-meta.json`，记录 fixed-window 模式与“本轮新生成信号是否落入回放窗口”）
 
 `--rolling-reject-top-k` 语义：`0=disabled`（关闭拒单原因摘要输出），`N>0` 输出前 N 个原因（无数据时为 `none`）。
 `rolling_reject_top` 使用 `;` 作为原因分隔符（如 `reasonA:3;reasonB:1`）；`rolling_reject_top_normalized` 为模板归一后的同口径摘要（如 `strategy notional limit exceeded:1088;circuit breaker open:5`）；消费端优先读取 `summary.json` 的 `reject_top_pairs` / `reject_top_pairs_normalized`。
