@@ -296,6 +296,101 @@ def test_nightly_summary_reports_closed_and_mtm_winrate(tmp_path: Path) -> None:
     assert int(winrate["mtm_losses"]) == 4
 
 
+def test_nightly_reject_by_strategy_runtime(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T02:00:00Z",
+        "total_signals": 6,
+        "executed_signals": 2,
+        "rejected_signals": 4,
+        "results": [{"strategy": "s4", "pnl": -1.0}],
+        "replay": [
+            {
+                "strategy": "s4",
+                "risk_allowed": False,
+                "risk_reason": "strategy notional limit exceeded: 1010 > 1000",
+            },
+            {
+                "strategy": "s4",
+                "risk_allowed": False,
+                "risk_reason": "strategy notional limit exceeded: 1020 > 1000",
+            },
+            {"strategy": "s4", "risk_allowed": True, "risk_reason": "ok"},
+            {
+                "strategy": "s8",
+                "risk_allowed": False,
+                "risk_reason": "circuit breaker open: 3 >= 3",
+            },
+            {"strategy": "s8", "risk_allowed": True, "risk_reason": "ok"},
+            {"strategy": "s1", "risk_allowed": False, "risk_reason": "custom reason"},
+        ],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 0.1,
+            "positive_window_rate": 0.0,
+            "empty_window_count": 0,
+            "range_hours": 2,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "reject_strategy_top=s4:2;s1:1;s8:1" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    reject_by_strategy = sidecar["reject_by_strategy"]
+    assert isinstance(reject_by_strategy, dict)
+    assert reject_by_strategy["top"] == "s4:2;s1:1;s8:1"
+    rows = reject_by_strategy["rows"]
+    assert isinstance(rows, list)
+    assert rows[0]["strategy"] == "s4"
+    assert rows[0]["top_reason"] == "strategy notional limit exceeded:2"
+    assert rows[1]["strategy"] == "s1"
+    assert rows[1]["top_reason"] == "custom reason:1"
+    assert rows[2]["strategy"] == "s8"
+    assert rows[2]["top_reason"] == "circuit breaker open:1"
+
+
 def test_nightly_window_coverage_history_limited_runtime(tmp_path: Path) -> None:
     backtest_json = tmp_path / "latest.json"
     rolling_json = tmp_path / "rolling.json"

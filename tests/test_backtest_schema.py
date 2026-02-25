@@ -291,6 +291,27 @@ def _nightly_sidecar_payload() -> dict[str, object]:
                 {"reason": "riskB", "count": 1},
             ],
         },
+        "reject_by_strategy": {
+            "top_k": 3,
+            "delimiter": ";",
+            "top": "s4:3;s8:1",
+            "rows": [
+                {
+                    "strategy": "s4",
+                    "total": 4,
+                    "rejected": 3,
+                    "reject_rate": 0.75,
+                    "top_reason": "strategy notional limit exceeded:3",
+                },
+                {
+                    "strategy": "s8",
+                    "total": 2,
+                    "rejected": 1,
+                    "reject_rate": 0.5,
+                    "top_reason": "circuit breaker open:1",
+                },
+            ],
+        },
         "paths": {
             "pdf": "/tmp/report.pdf",
             "rolling_json": "/tmp/rolling-summary.json",
@@ -481,6 +502,24 @@ def test_validate_nightly_summary_sidecar_reject_bad_normalized_pairs_row() -> N
     rolling = payload["rolling"]
     assert isinstance(rolling, dict)
     rolling["reject_top_pairs_normalized"] = [{"reason": "riskA", "count": "x"}]
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_reject_by_strategy_type() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["reject_by_strategy"] = "bad"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_reject_by_strategy_row() -> None:
+    payload = _nightly_sidecar_payload()
+    reject_by_strategy = payload["reject_by_strategy"]
+    assert isinstance(reject_by_strategy, dict)
+    reject_by_strategy["rows"] = [{"strategy": "s4", "total": 1, "rejected": "x"}]
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

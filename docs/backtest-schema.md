@@ -25,6 +25,9 @@
   - 可调用 `verify_nightly_summary_sidecar_checksum(payload)` 做完整性校验
   - 其中 `rolling.reject_top_delimiter` 当前为 `";"`；消费端优先使用 `rolling.reject_top_pairs`，模板归一场景优先 `rolling.reject_top_pairs_normalized`
   - 新增 `rolling.reject_top_normalized` / `rolling.reject_top_pairs_normalized`（当前归一规则：`strategy notional limit exceeded:*` 与 `circuit breaker open:*`）
+  - 新增 `reject_by_strategy` 诊断对象：`top_k/delimiter/top/rows[]`
+    - `rows[]` 字段：`strategy/total/rejected/reject_rate/top_reason`
+    - 用于快速定位“哪些策略贡献了最多拒单”，优先用于解释 reject 结构
   - `best` 当前为结构化对象（`available/strategy/pnl/text`），并带 `best_version`、`schema_note_version` 与 `schema_note`
   - 当 `signals.executed=0` 时，`best.available=false` 且 `best.text=best_strategy=n/a`（避免“全0最佳策略”误导）
   - 新增 `winrate` 汇总对象：`closed_winrate/closed_sample_count/closed_wins/closed_losses/mtm_winrate/mtm_sample_count/mtm_wins/mtm_losses`

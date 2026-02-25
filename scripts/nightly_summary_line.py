@@ -11,7 +11,7 @@ from monomarket.backtest import (
     NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO,
     compute_nightly_summary_sidecar_checksum,
 )
-from monomarket.backtest.reject_reason import format_reject_top
+from monomarket.backtest.reject_reason import format_reject_top, normalize_reject_reason
 
 ROLLING_REJECT_TOP_DELIMITER = ";"
 
@@ -208,6 +208,87 @@ def _compute_window_coverage(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _reject_by_strategy(payload: dict[str, Any], *, top_k: int = 3) -> dict[str, Any]:
+    replay = payload.get("replay")
+    rows = replay if isinstance(replay, list) else []
+
+    strategy_stats: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        strategy = str(row.get("strategy") or "").strip() or "unknown"
+        item = strategy_stats.setdefault(
+            strategy,
+            {
+                "strategy": strategy,
+                "total": 0,
+                "rejected": 0,
+                "reason_counts": {},
+            },
+        )
+        item["total"] = int(item["total"]) + 1
+
+        risk_allowed_raw = row.get("risk_allowed")
+        risk_allowed = True if risk_allowed_raw is None else bool(risk_allowed_raw)
+        risk_reason_raw = str(row.get("risk_reason") or "").strip()
+        rejected = (not risk_allowed) or (
+            risk_reason_raw != "" and risk_reason_raw.lower() != "ok"
+        )
+        if not rejected:
+            continue
+
+        item["rejected"] = int(item["rejected"]) + 1
+        reason = normalize_reject_reason(risk_reason_raw) if risk_reason_raw else "unknown"
+        reason_counts = item.get("reason_counts")
+        if isinstance(reason_counts, dict):
+            reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+
+    summary_rows: list[dict[str, Any]] = []
+    for strategy, item in strategy_stats.items():
+        total = int(item.get("total", 0))
+        rejected = int(item.get("rejected", 0))
+        if rejected <= 0:
+            continue
+
+        reason_counts = item.get("reason_counts")
+        top_reason_text = "none"
+        if isinstance(reason_counts, dict) and reason_counts:
+            top_reason_text, _ = format_reject_top(
+                reason_counts,
+                top_k=1,
+                delimiter=ROLLING_REJECT_TOP_DELIMITER,
+                normalize=True,
+            )
+
+        summary_rows.append(
+            {
+                "strategy": strategy,
+                "total": total,
+                "rejected": rejected,
+                "reject_rate": (rejected / total) if total > 0 else 0.0,
+                "top_reason": top_reason_text,
+            }
+        )
+
+    summary_rows.sort(key=lambda row: (-int(row["rejected"]), str(row["strategy"])))
+    top_rows = summary_rows[: max(0, int(top_k))]
+    top_text = (
+        ROLLING_REJECT_TOP_DELIMITER.join(
+            f"{row['strategy']}:{int(row['rejected'])}" for row in top_rows
+        )
+        if top_rows
+        else "none"
+    )
+
+    return {
+        "top_k": int(top_k),
+        "delimiter": ROLLING_REJECT_TOP_DELIMITER,
+        "top": top_text,
+        "rows": top_rows,
+    }
+
+
 def build_summary_bundle(
     *,
     payload: dict[str, Any],
@@ -230,6 +311,9 @@ def build_summary_bundle(
     window_coverage_ratio = float(window_coverage.get("coverage_ratio", 0.0))
     window_note = str(window_coverage.get("note", ""))
     window_history_limited = bool(window_coverage.get("history_limited", False))
+
+    reject_strategy_info = _reject_by_strategy(payload, top_k=3)
+    reject_strategy_top = str(reject_strategy_info.get("top", "none"))
 
     rolling_runs = 0
     rolling_exec_rate = 0.0
@@ -301,13 +385,14 @@ def build_summary_bundle(
         f"rolling_reject_top_delim={ROLLING_REJECT_TOP_DELIMITER} "
         f"rolling_reject_top={rolling_reject_top} "
         f"rolling_reject_top_normalized={rolling_reject_top_normalized} "
+        f"reject_strategy_top={reject_strategy_top} "
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
 
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
         "schema_note_version": "1.0",
-        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized) for machine parsing",
+        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized) and reject_by_strategy.rows for machine parsing",
         "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
@@ -369,6 +454,22 @@ def build_summary_bundle(
             "reject_top_pairs_normalized": [
                 {"reason": reason, "count": count}
                 for reason, count in rolling_reject_top_pairs_normalized
+            ],
+        },
+        "reject_by_strategy": {
+            "top_k": int(reject_strategy_info.get("top_k", 0)),
+            "delimiter": str(reject_strategy_info.get("delimiter", ROLLING_REJECT_TOP_DELIMITER)),
+            "top": reject_strategy_top,
+            "rows": [
+                {
+                    "strategy": str(row.get("strategy", "")),
+                    "total": int(_f(row.get("total"))),
+                    "rejected": int(_f(row.get("rejected"))),
+                    "reject_rate": float(_f(row.get("reject_rate"))),
+                    "top_reason": str(row.get("top_reason", "none")),
+                }
+                for row in reject_strategy_info.get("rows", [])
+                if isinstance(row, dict)
             ],
         },
         "paths": {

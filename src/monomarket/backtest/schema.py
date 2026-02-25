@@ -515,6 +515,58 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                     f"[{idx}].count must be numeric"
                 )
 
+    reject_by_strategy = payload.get("reject_by_strategy")
+    if reject_by_strategy is not None:
+        if not isinstance(reject_by_strategy, Mapping):
+            raise ValueError("nightly sidecar reject_by_strategy must be an object")
+
+        top_k = reject_by_strategy.get("top_k")
+        if not isinstance(top_k, int | float):
+            raise ValueError("nightly sidecar reject_by_strategy.top_k must be numeric")
+
+        delimiter = reject_by_strategy.get("delimiter")
+        if not isinstance(delimiter, str):
+            raise ValueError("nightly sidecar reject_by_strategy.delimiter must be a string")
+
+        top = reject_by_strategy.get("top")
+        if not isinstance(top, str):
+            raise ValueError("nightly sidecar reject_by_strategy.top must be a string")
+
+        rows = reject_by_strategy.get("rows")
+        if not isinstance(rows, list):
+            raise ValueError("nightly sidecar reject_by_strategy.rows must be an array")
+
+        for idx, row in enumerate(rows):
+            if not isinstance(row, Mapping):
+                raise ValueError(
+                    f"nightly sidecar reject_by_strategy.rows[{idx}] must be an object"
+                )
+            strategy = row.get("strategy")
+            total = row.get("total")
+            rejected = row.get("rejected")
+            reject_rate = row.get("reject_rate")
+            top_reason = row.get("top_reason")
+            if not isinstance(strategy, str):
+                raise ValueError(
+                    f"nightly sidecar reject_by_strategy.rows[{idx}].strategy must be a string"
+                )
+            if not isinstance(total, int | float):
+                raise ValueError(
+                    f"nightly sidecar reject_by_strategy.rows[{idx}].total must be numeric"
+                )
+            if not isinstance(rejected, int | float):
+                raise ValueError(
+                    f"nightly sidecar reject_by_strategy.rows[{idx}].rejected must be numeric"
+                )
+            if not isinstance(reject_rate, int | float):
+                raise ValueError(
+                    f"nightly sidecar reject_by_strategy.rows[{idx}].reject_rate must be numeric"
+                )
+            if not isinstance(top_reason, str):
+                raise ValueError(
+                    f"nightly sidecar reject_by_strategy.rows[{idx}].top_reason must be a string"
+                )
+
     paths = payload.get("paths")
     if not isinstance(paths, Mapping):
         raise ValueError("nightly sidecar paths must be an object")
