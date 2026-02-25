@@ -558,6 +558,16 @@ def render_pdf(
     write_line(f"Main window coverage:   {main_cov_ratio * 100.0:.2f}%")
     write_line(f"Main history limited:   {'true' if main_cov_history_limited else 'false'}")
     write_line(f"Main window note:       {main_cov_note}")
+    if main_cov_history_limited:
+        write_wrapped(
+            "Interpretation note: main-window metrics are history-limited; "
+            "prioritize Rolling Summary for trend-level decisions."
+        )
+    elif main_cov_note == "no_replay_rows":
+        write_wrapped(
+            "Interpretation note: no replay rows in main window; "
+            "treat main-window metrics as unavailable."
+        )
     if first_replay_ts:
         write_line(f"First replay ts:        {first_replay_ts}")
     if effective_from_ts:

@@ -67,6 +67,8 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Rolling empty windows",
         "Rolling coverage label",
         "Rolling reject top",
+        "Interpretation note: main-window metrics are history-limited",
+        "Interpretation note: no replay rows in main window",
         "PDF_ROLLING_REJECT_TOP_K = 2",
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
