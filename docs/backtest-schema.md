@@ -25,6 +25,7 @@
   - 可调用 `verify_nightly_summary_sidecar_checksum(payload)` 做完整性校验
   - 其中 `rolling.reject_top_delimiter` 当前为 `";"`；消费端优先使用 `rolling.reject_top_pairs`
   - `best` 当前为结构化对象（`available/strategy/pnl/text`），并带 `best_version`、`schema_note_version` 与 `schema_note`
+  - 当 `signals.executed=0` 时，`best.available=false` 且 `best.text=best_strategy=n/a`（避免“全0最佳策略”误导）
   - 校验器仍兼容历史字符串格式 `best`
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`

@@ -22,6 +22,15 @@ def _f(raw: object) -> float:
 
 
 def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
+    executed_signals = int(_f(payload.get("executed_signals")))
+    if executed_signals <= 0:
+        return {
+            "available": False,
+            "strategy": "",
+            "pnl": 0.0,
+            "text": "best_strategy=n/a",
+        }
+
     rows = payload.get("results") or []
     best: dict[str, Any] | None = None
     if isinstance(rows, list) and rows:
