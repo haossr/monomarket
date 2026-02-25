@@ -1256,6 +1256,11 @@ def nightly_summary_verify(
         "--strict-schema-note-version",
         help="Require schema_note_version to match exactly (optional CI guard)",
     ),
+    strict_best_version: str | None = typer.Option(
+        None,
+        "--strict-best-version",
+        help="Require best_version to match exactly (optional CI guard)",
+    ),
 ) -> None:
     path = Path(summary_json)
     payload = json.loads(path.read_text())
@@ -1285,6 +1290,16 @@ def nightly_summary_verify(
             console.print(
                 "[red]nightly sidecar invalid[/red] schema_note_version mismatch "
                 f"(expected={strict_schema_note_version}, actual={actual})"
+            )
+            raise typer.Exit(code=1)
+
+    if strict_best_version is not None:
+        raw_best_version = payload.get("best_version")
+        if raw_best_version != strict_best_version:
+            actual = "(missing)" if raw_best_version is None else str(raw_best_version)
+            console.print(
+                "[red]nightly sidecar invalid[/red] best_version mismatch "
+                f"(expected={strict_best_version}, actual={actual})"
             )
             raise typer.Exit(code=1)
 

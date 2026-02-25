@@ -269,8 +269,9 @@ CI/shell 快速验签（失败返回 non-zero）：
 monomarket nightly-summary-verify \
   --summary-json artifacts/backtest/nightly/<YYYY-MM-DD>/summary.json \
   --require-checksum
-# 可选：增加 schema note 版本门禁
+# 可选：增加 schema note / best 版本门禁
 # --strict-schema-note-version 1.0
+# --strict-best-version 1.0
 ```
 
 消费端验签示例（Python helper）：

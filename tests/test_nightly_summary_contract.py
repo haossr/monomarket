@@ -377,6 +377,31 @@ def test_cli_nightly_summary_verify_modes(tmp_path: Path) -> None:
     assert res_with_strict_bad.exit_code == 1, res_with_strict_bad.output
     assert "schema_note_version mismatch" in res_with_strict_bad.output
 
+    res_with_best_strict_ok = runner.invoke(
+        app,
+        [
+            "nightly-summary-verify",
+            "--summary-json",
+            str(summary_json_with),
+            "--strict-best-version",
+            "1.0",
+        ],
+    )
+    assert res_with_best_strict_ok.exit_code == 0, res_with_best_strict_ok.output
+
+    res_with_best_strict_bad = runner.invoke(
+        app,
+        [
+            "nightly-summary-verify",
+            "--summary-json",
+            str(summary_json_with),
+            "--strict-best-version",
+            "2.0",
+        ],
+    )
+    assert res_with_best_strict_bad.exit_code == 1, res_with_best_strict_bad.output
+    assert "best_version mismatch" in res_with_best_strict_bad.output
+
     summary_json_without = _write_nightly_summary_sidecar(tmp_path / "without", with_checksum=False)
     res_without = runner.invoke(
         app,
@@ -397,6 +422,32 @@ def test_cli_nightly_summary_verify_modes(tmp_path: Path) -> None:
     assert res_without_allow.exit_code == 0, res_without_allow.output
     assert "nightly sidecar ok" in res_without_allow.output
     assert "no-checksum" in res_without_allow.output
+
+    res_without_allow_note_strict = runner.invoke(
+        app,
+        [
+            "nightly-summary-verify",
+            "--summary-json",
+            str(summary_json_without),
+            "--allow-missing-checksum",
+            "--strict-schema-note-version",
+            "1.0",
+        ],
+    )
+    assert res_without_allow_note_strict.exit_code == 0, res_without_allow_note_strict.output
+
+    res_without_allow_best_strict = runner.invoke(
+        app,
+        [
+            "nightly-summary-verify",
+            "--summary-json",
+            str(summary_json_without),
+            "--allow-missing-checksum",
+            "--strict-best-version",
+            "1.0",
+        ],
+    )
+    assert res_without_allow_best_strict.exit_code == 0, res_without_allow_best_strict.output
 
 
 def test_cli_nightly_summary_verify_reject_tampered_checksum(tmp_path: Path) -> None:
@@ -444,6 +495,35 @@ def test_cli_nightly_summary_verify_reject_missing_schema_note_version_when_stri
     )
     assert res.exit_code == 1, res.output
     assert "schema_note_version mismatch" in res.output
+
+
+def test_cli_nightly_summary_verify_reject_missing_best_version_when_strict(
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    summary_json = _write_nightly_summary_sidecar(
+        tmp_path / "missing-best-version", with_checksum=True
+    )
+
+    payload = json.loads(summary_json.read_text())
+    payload.pop("best_version", None)
+    old_checksum = str(payload["checksum_sha256"])
+    payload["checksum_sha256"] = compute_nightly_summary_sidecar_checksum(payload)
+    assert str(payload["checksum_sha256"]) != old_checksum
+    summary_json.write_text(json.dumps(payload))
+
+    res = runner.invoke(
+        app,
+        [
+            "nightly-summary-verify",
+            "--summary-json",
+            str(summary_json),
+            "--strict-best-version",
+            "1.0",
+        ],
+    )
+    assert res.exit_code == 1, res.output
+    assert "best_version mismatch" in res.output
 
 
 def test_nightly_script_help_mentions_disabled_semantics() -> None:
