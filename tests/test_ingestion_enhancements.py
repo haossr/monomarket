@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 import requests
 from typer.testing import CliRunner
 
-from monomarket.cli import app
+from monomarket.cli import _suggest_error_share_first_relax, app
 from monomarket.config import DataSettings
 from monomarket.data.clients import (
     FetchBatch,
@@ -667,3 +668,44 @@ def test_cli_ingest_health(tmp_path: Path) -> None:
     assert res_empty_runs.exit_code == 0, res_empty_runs.output
     assert "error share empty after filters" in res_empty_runs.output
     assert "first_relax=min_runs_with_error" in res_empty_runs.output
+
+
+@pytest.mark.parametrize(
+    (
+        "top_k",
+        "min_share",
+        "min_count",
+        "min_runs_with_error",
+        "min_total_runs",
+        "min_source_bucket_total",
+        "expected",
+    ),
+    [
+        (0, 0.01, 0, 0, 0, 0, "min_share/min_count"),
+        (0, 0.0, 1, 0, 0, 0, "min_share/min_count"),
+        (0, 0.0, 0, 0, 2, 0, "min_total_runs"),
+        (0, 0.0, 0, 0, 0, 3, "min_source_bucket_total"),
+        (2, 0.0, 0, 0, 0, 0, "top_k"),
+        (2, 0.0, 0, 1, 0, 0, "top_k"),
+        (0, 0.0, 0, 1, 0, 0, "min_runs_with_error"),
+        (0, 0.0, 0, 0, 0, 0, "min_share/min_count"),
+    ],
+)
+def test_suggest_error_share_first_relax_priority(
+    top_k: int,
+    min_share: float,
+    min_count: int,
+    min_runs_with_error: int,
+    min_total_runs: int,
+    min_source_bucket_total: int,
+    expected: str,
+) -> None:
+    actual = _suggest_error_share_first_relax(
+        top_k=top_k,
+        min_share=min_share,
+        min_count=min_count,
+        min_runs_with_error=min_runs_with_error,
+        min_total_runs=min_total_runs,
+        min_source_bucket_total=min_source_bucket_total,
+    )
+    assert actual == expected
