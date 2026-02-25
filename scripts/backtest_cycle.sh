@@ -237,21 +237,25 @@ lines = [
     "",
     "## Strategy Metrics",
     "",
-    "| strategy | pnl | winrate | max_drawdown | trades | wins | losses |",
-    "|---|---:|---:|---:|---:|---:|---:|",
+    "| strategy | pnl | closed_winrate | mtm_winrate | max_drawdown | trades | closed_samples | mtm_samples |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|",
 ]
 
 for row in rows:
-    winrate = _f(row.get("winrate")) * 100.0
+    closed_samples = int(_f(row.get("closed_sample_count")))
+    mtm_samples = int(_f(row.get("mtm_sample_count")))
+    closed_winrate = "n/a" if closed_samples <= 0 else f"{(_f(row.get('closed_winrate', row.get('winrate'))) * 100.0):.2f}%"
+    mtm_winrate = "n/a" if mtm_samples <= 0 else f"{(_f(row.get('mtm_winrate')) * 100.0):.2f}%"
     lines.append(
         "| "
         + f"{row.get('strategy', '')} "
         + f"| {_f(row.get('pnl')):.4f} "
-        + f"| {winrate:.2f}% "
+        + f"| {closed_winrate} "
+        + f"| {mtm_winrate} "
         + f"| {_f(row.get('max_drawdown')):.4f} "
         + f"| {int(_f(row.get('trade_count')))} "
-        + f"| {int(_f(row.get('wins')))} "
-        + f"| {int(_f(row.get('losses')))} "
+        + f"| {closed_samples} "
+        + f"| {mtm_samples} "
         + "|"
     )
 

@@ -62,6 +62,12 @@ def _parse_cli_iso_ts(value: str, *, option_name: str) -> datetime:
     return dt.astimezone(UTC)
 
 
+def _format_rate_with_samples(rate: float, sample_count: int) -> str:
+    if sample_count <= 0:
+        return "n/a"
+    return f"{rate:.2%}"
+
+
 def _write_backtest_json(
     report: BacktestReport,
     output_path: str,
@@ -147,10 +153,16 @@ def _write_backtest_strategy_csv(report: BacktestReport, output_path: str) -> No
                 "strategy",
                 "pnl",
                 "winrate",
+                "closed_winrate",
+                "mtm_winrate",
                 "max_drawdown",
                 "trade_count",
                 "wins",
                 "losses",
+                "closed_sample_count",
+                "mtm_wins",
+                "mtm_losses",
+                "mtm_sample_count",
             ],
         )
         writer.writeheader()
@@ -172,10 +184,16 @@ def _write_backtest_event_csv(report: BacktestReport, output_path: str) -> None:
                 "event_id",
                 "pnl",
                 "winrate",
+                "closed_winrate",
+                "mtm_winrate",
                 "max_drawdown",
                 "trade_count",
                 "wins",
                 "losses",
+                "closed_sample_count",
+                "mtm_wins",
+                "mtm_losses",
+                "mtm_sample_count",
             ],
         )
         writer.writeheader()
@@ -780,7 +798,8 @@ def backtest(
     tb = Table(title="Backtest attribution")
     tb.add_column("strategy")
     tb.add_column("pnl")
-    tb.add_column("winrate")
+    tb.add_column("closed_wr")
+    tb.add_column("mtm_wr")
     tb.add_column("max_drawdown")
     tb.add_column("trades")
 
@@ -788,7 +807,8 @@ def backtest(
         tb.add_row(
             result.strategy,
             f"{result.pnl:.4f}",
-            f"{result.winrate:.2%}",
+            _format_rate_with_samples(result.closed_winrate, result.closed_sample_count),
+            _format_rate_with_samples(result.mtm_winrate, result.mtm_sample_count),
             f"{result.max_drawdown:.4f}",
             str(result.trade_count),
         )
@@ -798,7 +818,8 @@ def backtest(
     event_tb.add_column("strategy")
     event_tb.add_column("event")
     event_tb.add_column("pnl")
-    event_tb.add_column("winrate")
+    event_tb.add_column("closed_wr")
+    event_tb.add_column("mtm_wr")
     event_tb.add_column("max_drawdown")
     event_tb.add_column("trades")
 
@@ -807,7 +828,10 @@ def backtest(
             event_result.strategy,
             event_result.event_id,
             f"{event_result.pnl:.4f}",
-            f"{event_result.winrate:.2%}",
+            _format_rate_with_samples(
+                event_result.closed_winrate, event_result.closed_sample_count
+            ),
+            _format_rate_with_samples(event_result.mtm_winrate, event_result.mtm_sample_count),
             f"{event_result.max_drawdown:.4f}",
             str(event_result.trade_count),
         )
@@ -985,13 +1009,19 @@ def backtest_rolling(
                 {
                     "windows": 0.0,
                     "pnl_sum": 0.0,
-                    "winrate_sum": 0.0,
+                    "closed_wins_sum": 0.0,
+                    "closed_sample_sum": 0.0,
+                    "mtm_wins_sum": 0.0,
+                    "mtm_sample_sum": 0.0,
                     "trade_count_sum": 0.0,
                 },
             )
             acc["windows"] += 1.0
             acc["pnl_sum"] += result_row.pnl
-            acc["winrate_sum"] += result_row.winrate
+            acc["closed_wins_sum"] += float(result_row.wins)
+            acc["closed_sample_sum"] += float(result_row.closed_sample_count)
+            acc["mtm_wins_sum"] += float(result_row.mtm_wins)
+            acc["mtm_sample_sum"] += float(result_row.mtm_sample_count)
             acc["trade_count_sum"] += float(result_row.trade_count)
 
         cursor += step_delta
@@ -1096,17 +1126,28 @@ def backtest_rolling(
         )
     console.print(tb)
 
-    strategy_rows: list[tuple[str, int, float, float, int]] = []
+    strategy_rows: list[tuple[str, int, float, float, int, float, int, int]] = []
     for strategy, acc in sorted(strategy_agg.items()):
         windows = int(acc["windows"])
         avg_pnl = acc["pnl_sum"] / windows if windows > 0 else 0.0
-        avg_winrate = acc["winrate_sum"] / windows if windows > 0 else 0.0
+
+        closed_sample_sum = int(acc["closed_sample_sum"])
+        closed_wins_sum = int(acc["closed_wins_sum"])
+        avg_closed_winrate = (closed_wins_sum / closed_sample_sum) if closed_sample_sum > 0 else 0.0
+
+        mtm_sample_sum = int(acc["mtm_sample_sum"])
+        mtm_wins_sum = int(acc["mtm_wins_sum"])
+        avg_mtm_winrate = (mtm_wins_sum / mtm_sample_sum) if mtm_sample_sum > 0 else 0.0
+
         strategy_rows.append(
             (
                 strategy,
                 windows,
                 avg_pnl,
-                avg_winrate,
+                avg_closed_winrate,
+                closed_sample_sum,
+                avg_mtm_winrate,
+                mtm_sample_sum,
                 int(acc["trade_count_sum"]),
             )
         )
@@ -1115,14 +1156,25 @@ def backtest_rolling(
     tb2.add_column("strategy")
     tb2.add_column("windows")
     tb2.add_column("avg_pnl")
-    tb2.add_column("avg_winrate")
+    tb2.add_column("avg_closed_wr")
+    tb2.add_column("avg_mtm_wr")
     tb2.add_column("total_trades")
-    for strategy, windows, avg_pnl, avg_winrate, total_trades in strategy_rows:
+    for (
+        strategy,
+        windows,
+        avg_pnl,
+        avg_closed_winrate,
+        closed_sample_sum,
+        avg_mtm_winrate,
+        mtm_sample_sum,
+        total_trades,
+    ) in strategy_rows:
         tb2.add_row(
             strategy,
             str(windows),
             f"{avg_pnl:.4f}",
-            f"{avg_winrate:.2%}",
+            _format_rate_with_samples(avg_closed_winrate, closed_sample_sum),
+            _format_rate_with_samples(avg_mtm_winrate, mtm_sample_sum),
             str(total_trades),
         )
     console.print(tb2)
@@ -1166,7 +1218,11 @@ def backtest_rolling(
                 "windows": x[1],
                 "avg_pnl": x[2],
                 "avg_winrate": x[3],
-                "total_trades": x[4],
+                "avg_closed_winrate": x[3],
+                "closed_sample_count": x[4],
+                "avg_mtm_winrate": x[5],
+                "mtm_sample_count": x[6],
+                "total_trades": x[7],
             }
             for x in strategy_rows
         ]

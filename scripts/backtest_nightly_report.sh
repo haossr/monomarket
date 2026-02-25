@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-LOOKBACK_HOURS="24"
+LOOKBACK_HOURS="4380"
 MARKET_LIMIT="2000"
 INGEST_LIMIT="300"
 CONFIG_PATH="configs/config.yaml"
@@ -20,7 +20,7 @@ usage() {
 Usage: bash scripts/backtest_nightly_report.sh [options]
 
 Options:
-  --lookback-hours <float>   Backtest lookback in hours (default: 24)
+  --lookback-hours <float>   Backtest lookback in hours (default: 4380)
   --market-limit <int>       Market limit for signal generation (default: 2000)
   --ingest-limit <int>       Ingest limit for gamma source (default: 300)
   --config <path>            Config path (default: configs/config.yaml)

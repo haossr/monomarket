@@ -38,11 +38,18 @@ class BacktestRiskConfig:
 class BacktestStrategyResult:
     strategy: str
     pnl: float
+    # legacy alias kept for downstream compatibility; equals closed_winrate.
     winrate: float
+    closed_winrate: float
+    mtm_winrate: float
     max_drawdown: float
     trade_count: int
     wins: int
     losses: int
+    closed_sample_count: int
+    mtm_wins: int
+    mtm_losses: int
+    mtm_sample_count: int
 
 
 @dataclass(slots=True)
@@ -50,11 +57,18 @@ class BacktestEventResult:
     strategy: str
     event_id: str
     pnl: float
+    # legacy alias kept for downstream compatibility; equals closed_winrate.
     winrate: float
+    closed_winrate: float
+    mtm_winrate: float
     max_drawdown: float
     trade_count: int
     wins: int
     losses: int
+    closed_sample_count: int
+    mtm_wins: int
+    mtm_losses: int
+    mtm_sample_count: int
 
 
 @dataclass(slots=True)
@@ -164,12 +178,16 @@ class BacktestEngine:
         trade_count: dict[str, int] = defaultdict(int)
         wins: dict[str, int] = defaultdict(int)
         losses: dict[str, int] = defaultdict(int)
+        mtm_wins: dict[str, int] = defaultdict(int)
+        mtm_losses: dict[str, int] = defaultdict(int)
         equity_curve: dict[str, list[float]] = defaultdict(lambda: [0.0])
 
         realized_by_event: dict[tuple[str, str], float] = defaultdict(float)
         event_trade_count: dict[tuple[str, str], int] = defaultdict(int)
         event_wins: dict[tuple[str, str], int] = defaultdict(int)
         event_losses: dict[tuple[str, str], int] = defaultdict(int)
+        event_mtm_wins: dict[tuple[str, str], int] = defaultdict(int)
+        event_mtm_losses: dict[tuple[str, str], int] = defaultdict(int)
         event_equity_curve: dict[tuple[str, str], list[float]] = defaultdict(lambda: [0.0])
 
         replay: list[BacktestReplayRow] = []
@@ -315,6 +333,19 @@ class BacktestEngine:
 
             fee = fill_price * executed_qty * max(0.0, self.execution.fee_bps) / 10000.0
 
+            strategy_equity_before = realized_by_strategy[strategy] + self._strategy_unrealized(
+                positions,
+                strategy,
+                created_at,
+            )
+            event_equity_before = realized_by_event[event_key] + self._event_unrealized(
+                positions,
+                strategy,
+                event_id,
+                created_at,
+                strategy_market_event,
+            )
+
             key = (strategy, market_id, token_id)
             pos = positions.get(key)
             if pos is None:
@@ -352,6 +383,18 @@ class BacktestEngine:
                 created_at,
                 strategy_market_event,
             )
+
+            mtm_delta = strategy_equity - strategy_equity_before
+            if mtm_delta > 1e-12:
+                mtm_wins[strategy] += 1
+            elif mtm_delta < -1e-12:
+                mtm_losses[strategy] += 1
+
+            event_mtm_delta = event_equity - event_equity_before
+            if event_mtm_delta > 1e-12:
+                event_mtm_wins[event_key] += 1
+            elif event_mtm_delta < -1e-12:
+                event_mtm_losses[event_key] += 1
             equity_curve[strategy].append(strategy_equity)
             event_equity_curve[event_key].append(event_equity)
 
@@ -402,17 +445,25 @@ class BacktestEngine:
             equity_curve[strategy].append(final_equity)
 
             closed_total = wins[strategy] + losses[strategy]
-            winrate = (wins[strategy] / closed_total) if closed_total else 0.0
+            closed_winrate = (wins[strategy] / closed_total) if closed_total else 0.0
+            mtm_total = mtm_wins[strategy] + mtm_losses[strategy]
+            mtm_winrate = (mtm_wins[strategy] / mtm_total) if mtm_total else 0.0
 
             results.append(
                 BacktestStrategyResult(
                     strategy=strategy,
                     pnl=final_equity,
-                    winrate=winrate,
+                    winrate=closed_winrate,
+                    closed_winrate=closed_winrate,
+                    mtm_winrate=mtm_winrate,
                     max_drawdown=self._max_drawdown(equity_curve[strategy]),
                     trade_count=trade_count[strategy],
                     wins=wins[strategy],
                     losses=losses[strategy],
+                    closed_sample_count=closed_total,
+                    mtm_wins=mtm_wins[strategy],
+                    mtm_losses=mtm_losses[strategy],
+                    mtm_sample_count=mtm_total,
                 )
             )
 
@@ -434,17 +485,25 @@ class BacktestEngine:
             event_equity_curve[event_key].append(final_event_equity)
 
             closed_total = event_wins[event_key] + event_losses[event_key]
-            winrate = (event_wins[event_key] / closed_total) if closed_total else 0.0
+            closed_winrate = (event_wins[event_key] / closed_total) if closed_total else 0.0
+            mtm_total = event_mtm_wins[event_key] + event_mtm_losses[event_key]
+            mtm_winrate = (event_mtm_wins[event_key] / mtm_total) if mtm_total else 0.0
             event_results.append(
                 BacktestEventResult(
                     strategy=strategy,
                     event_id=event_id,
                     pnl=final_event_equity,
-                    winrate=winrate,
+                    winrate=closed_winrate,
+                    closed_winrate=closed_winrate,
+                    mtm_winrate=mtm_winrate,
                     max_drawdown=self._max_drawdown(event_equity_curve[event_key]),
                     trade_count=event_trade_count[event_key],
                     wins=event_wins[event_key],
                     losses=event_losses[event_key],
+                    closed_sample_count=closed_total,
+                    mtm_wins=event_mtm_wins[event_key],
+                    mtm_losses=event_mtm_losses[event_key],
+                    mtm_sample_count=mtm_total,
                 )
             )
 

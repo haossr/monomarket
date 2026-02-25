@@ -111,6 +111,13 @@ def _format_pct(raw: object) -> str:
     return f"{_safe_float(raw) * 100.0:.2f}%"
 
 
+def _format_rate_with_samples(rate_raw: object, sample_count_raw: object) -> str:
+    sample_count = _safe_int(sample_count_raw)
+    if sample_count <= 0:
+        return "n/a"
+    return _format_pct(rate_raw)
+
+
 def render_pdf(
     *,
     payload: dict[str, Any],
@@ -328,6 +335,14 @@ def render_pdf(
     write_line(f"Rejected signals: {rejected_signals}")
     write_line("")
 
+    closed_samples_total = sum(_safe_int(row.get("closed_sample_count")) for row in strategy_rows)
+    mtm_samples_total = sum(_safe_int(row.get("mtm_sample_count")) for row in strategy_rows)
+    write_line("Sample Coverage", bold=True, size=12, leading=18)
+    write_line(f"Closed-winrate samples: {closed_samples_total}")
+    write_line(f"MTM-winrate samples:    {mtm_samples_total}")
+    write_line("(winrate shown as n/a when sample count is zero)")
+    write_line("")
+
     write_line("Strategy Metrics", bold=True, size=12, leading=18)
     if not strategy_rows:
         write_line("(No strategy rows)")
@@ -335,15 +350,23 @@ def render_pdf(
         for row in strategy_rows:
             strategy = str(row.get("strategy", ""))
             pnl = _safe_float(row.get("pnl"))
-            winrate = _format_pct(row.get("winrate"))
+            closed_winrate = _format_rate_with_samples(
+                row.get("closed_winrate", row.get("winrate")), row.get("closed_sample_count")
+            )
+            mtm_winrate = _format_rate_with_samples(
+                row.get("mtm_winrate"), row.get("mtm_sample_count")
+            )
             max_dd = _safe_float(row.get("max_drawdown"))
             trades = _safe_int(row.get("trade_count"))
             wins = _safe_int(row.get("wins"))
             losses = _safe_int(row.get("losses"))
+            closed_samples = _safe_int(row.get("closed_sample_count"))
+            mtm_samples = _safe_int(row.get("mtm_sample_count"))
             write_wrapped(
                 " - "
-                + f"{strategy}: pnl={pnl:.4f}, winrate={winrate}, "
-                + f"max_drawdown={max_dd:.4f}, trades={trades}, wins={wins}, losses={losses}"
+                + f"{strategy}: pnl={pnl:.4f}, closed_winrate={closed_winrate}"
+                + f" ({wins}/{closed_samples}), mtm_winrate={mtm_winrate}, "
+                + f"max_drawdown={max_dd:.4f}, trades={trades}, losses={losses}, mtm_samples={mtm_samples}"
             )
 
     write_line("")
@@ -376,10 +399,14 @@ def render_pdf(
             event_id = str(row.get("event_id", ""))
             pnl = _safe_float(row.get("pnl"))
             trades = _safe_int(row.get("trade_count"))
+            closed_wr = _format_rate_with_samples(
+                row.get("closed_winrate", row.get("winrate")), row.get("closed_sample_count")
+            )
+            mtm_wr = _format_rate_with_samples(row.get("mtm_winrate"), row.get("mtm_sample_count"))
             write_wrapped(
                 " - "
                 + f"{strategy}/{event_id}: pnl={pnl:.4f}, "
-                + f"winrate={_format_pct(row.get('winrate'))}, trades={trades}"
+                + f"closed_winrate={closed_wr}, mtm_winrate={mtm_wr}, trades={trades}"
             )
 
     pdf.save()

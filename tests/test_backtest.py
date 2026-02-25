@@ -233,6 +233,12 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert abs(r.pnl - 1.5) < 1e-9
     assert r.trade_count == 4
     assert r.winrate == 0.5
+    assert r.closed_winrate == 0.5
+    assert r.closed_sample_count == 2
+    assert r.mtm_winrate == 0.5
+    assert r.mtm_wins == 1
+    assert r.mtm_losses == 1
+    assert r.mtm_sample_count == 2
     assert r.max_drawdown >= 0.0
 
     assert len(report.event_results) == 2
@@ -495,6 +501,10 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert len(payload["results"]) == 1
     assert len(payload["event_results"]) == 2
     assert len(payload["replay"]) == 4
+    assert abs(float(payload["results"][0]["closed_winrate"]) - 0.5) < 1e-9
+    assert abs(float(payload["results"][0]["mtm_winrate"]) - 0.5) < 1e-9
+    assert int(payload["results"][0]["closed_sample_count"]) == 2
+    assert int(payload["results"][0]["mtm_sample_count"]) == 2
 
     with csv_out.open() as f:
         rows = list(csv.DictReader(f))
@@ -515,12 +525,18 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert strategy_rows[0]["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION
     assert strategy_rows[0]["strategy"] == "s1"
     assert abs(float(strategy_rows[0]["pnl"]) - 1.5) < 1e-9
+    assert abs(float(strategy_rows[0]["closed_winrate"]) - 0.5) < 1e-9
+    assert abs(float(strategy_rows[0]["mtm_winrate"]) - 0.5) < 1e-9
+    assert int(strategy_rows[0]["closed_sample_count"]) == 2
+    assert int(strategy_rows[0]["mtm_sample_count"]) == 2
 
     with event_csv_out.open() as f:
         event_rows = list(csv.DictReader(f))
     assert len(event_rows) == 2
     assert all(x["schema_version"] == BACKTEST_ARTIFACT_SCHEMA_VERSION for x in event_rows)
     assert {x["event_id"] for x in event_rows} == {"e1", "e2"}
+    assert all("closed_winrate" in x for x in event_rows)
+    assert all("mtm_winrate" in x for x in event_rows)
 
     for csv_path in [csv_out, strategy_csv_out, event_csv_out]:
         sidecar_path = csv_path.with_name(csv_path.name + ".sha256")
@@ -617,6 +633,11 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert payload["windows"][0]["risk_rejection_reasons"] == {}
     assert payload["windows"][1]["risk_rejection_reasons"] == {}
     assert any(x["strategy"] == "s1" for x in payload["strategy_aggregate"])
+    s1_row = next(x for x in payload["strategy_aggregate"] if x["strategy"] == "s1")
+    assert "avg_closed_winrate" in s1_row
+    assert "avg_mtm_winrate" in s1_row
+    assert "closed_sample_count" in s1_row
+    assert "mtm_sample_count" in s1_row
 
 
 def test_cli_backtest_rolling_risk_reason_histogram(tmp_path: Path) -> None:

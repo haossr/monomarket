@@ -131,11 +131,16 @@ uv run --with reportlab python scripts/backtest_pdf_report.py \
 
 报告会自动包含收益图表（累计 realized PnL 曲线 + 策略 PnL 柱状图；数据不足时显示降级提示）。
 
+回测胜率口径：
+- `closed_winrate`：仅统计已闭合交易（`wins/(wins+losses)`）
+- `mtm_winrate`：按每次成交后的权益变化统计（`mtm_wins/(mtm_wins+mtm_losses)`；无样本显示 `n/a`）
+- `winrate` 为兼容字段，等价于 `closed_winrate`
+
 Nightly 一键：
 
 ```bash
 bash scripts/backtest_nightly_report.sh \
-  --lookback-hours 24 \
+  --lookback-hours 4380 \
   --market-limit 2000 \
   --ingest-limit 300 \
   --rolling-reject-top-k 2 \

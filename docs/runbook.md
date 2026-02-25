@@ -145,8 +145,8 @@ monomarket backtest --strategies s1,s2,s4,s8 \
 ```
 
 输出包含：
-- 按策略归因：`pnl / winrate / max drawdown / 交易次数`
-- 按事件归因：`strategy + event + pnl / winrate / max drawdown / 交易次数`
+- 按策略归因：`pnl / closed_winrate / mtm_winrate / max drawdown / 交易次数`
+- 按事件归因：`strategy + event + pnl / closed_winrate / mtm_winrate / max drawdown / 交易次数`
 - 回放账本：逐条 signal replay（时间、market、token、requested/filled qty、fill ratio、fill probability、slippage bps、realized、累计权益、risk allow/reject + reason）
 - 机器可读导出：
   - `--out-json`：完整报告（summary + execution/risk config snapshot + strategy/event attribution + replay rows）
@@ -170,7 +170,7 @@ monomarket backtest-rolling --strategies s1,s2,s4,s8 \
   --out-json artifacts/backtest/rolling-summary.json
 ```
 
-输出包含每个窗口的 `signals/executed/rejected/execution_rate/pnl_total`，以及策略级 `avg_pnl/avg_winrate/total_trades` 聚合。
+输出包含每个窗口的 `signals/executed/rejected/execution_rate/pnl_total`，以及策略级 `avg_pnl/avg_closed_winrate/avg_mtm_winrate/total_trades` 聚合（`avg_winrate` 兼容等价于 `avg_closed_winrate`）。
 rolling JSON 工件还包含：
 - `schema_version`（当前 `rolling-1.0`）
 - `overlap_mode`（`overlap`/`tiled`/`gapped`）标记窗口重叠语义
@@ -242,7 +242,7 @@ uv run --with reportlab python scripts/backtest_pdf_report.py \
 
 ```bash
 bash scripts/backtest_nightly_report.sh \
-  --lookback-hours 24 \
+  --lookback-hours 4380 \
   --market-limit 2000 \
   --ingest-limit 300 \
   --rolling-window-hours 24 \
@@ -293,7 +293,9 @@ PY
 ## 13) 指标解释（回测与报告通用）
 
 - `executed_signals / rejected_signals`：信号执行/拒绝数量（风控与流动性影响的核心观测项）
-- `winrate`：已闭合交易中的胜率（`wins / (wins + losses)`）
+- `closed_winrate`：已闭合交易中的胜率（`wins / (wins + losses)`）
+- `mtm_winrate`：按每次成交后权益变化（mark-to-market）统计的胜率（`mtm_wins / (mtm_wins + mtm_losses)`）；当样本为 0 时报告显示 `n/a`
+- `winrate`：兼容别名，等价于 `closed_winrate`
 - `max_drawdown`：权益曲线历史峰值到后续低点的最大回撤
 - `pnl`：策略（或事件）维度最终盈亏
 - `trade_count`：成交交易次数
