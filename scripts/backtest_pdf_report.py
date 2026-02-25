@@ -80,6 +80,13 @@ def _load_event_rows(payload: dict[str, Any], event_csv: Path | None) -> list[di
     return [dict(row) for row in raw_rows if isinstance(row, dict)]
 
 
+def _load_payload_results_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_rows = payload.get("results") or []
+    if not isinstance(raw_rows, list):
+        return []
+    return [dict(row) for row in raw_rows if isinstance(row, dict)]
+
+
 def _build_cumulative_realized_points(payload: dict[str, Any]) -> list[tuple[float, float]]:
     replay = payload.get("replay")
     if not isinstance(replay, list):
@@ -467,7 +474,9 @@ def render_pdf(
     write_line(f"Rejected signals: {rejected_signals}")
     write_line("")
 
-    winrate_summary = _aggregate_winrate_from_rows(strategy_rows)
+    # Keep PDF summary winrate source aligned with nightly summary line (payload.results).
+    winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows
+    winrate_summary = _aggregate_winrate_from_rows(winrate_source_rows)
     closed_summary_samples = _safe_int(winrate_summary.get("closed_samples"))
     mtm_summary_samples = _safe_int(winrate_summary.get("mtm_samples"))
     closed_summary_wins = _safe_int(winrate_summary.get("closed_wins"))

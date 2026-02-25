@@ -51,6 +51,8 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Main window coverage",
         "Main history limited",
         "Main window note",
+        "def _load_payload_results_rows",
+        "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
     ]
     for token in required_tokens:
         assert token in content
