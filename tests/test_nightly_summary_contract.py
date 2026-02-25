@@ -54,9 +54,11 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Rolling execution rate",
         "Rolling empty windows",
         "Rolling coverage label",
+        "Rolling reject top",
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
         "def _extract_rolling_summary",
+        "def _format_rolling_reject_top",
     ]
     for token in required_tokens:
         assert token in content

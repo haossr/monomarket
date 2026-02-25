@@ -215,6 +215,38 @@ def _extract_rolling_summary(rolling_payload: dict[str, Any] | None) -> dict[str
     return summary
 
 
+def _format_rolling_reject_top(rolling_summary: dict[str, Any], *, top_k: int = 2) -> str:
+    raw = rolling_summary.get("risk_rejection_reasons")
+    if not isinstance(raw, dict):
+        return "none"
+
+    pairs: list[tuple[str, float]] = []
+    for key, value in raw.items():
+        reason = str(key).strip()
+        if not reason:
+            continue
+        count = _safe_float(value)
+        if count <= 0:
+            continue
+        pairs.append((reason, count))
+
+    if not pairs:
+        return "none"
+
+    pairs.sort(key=lambda item: item[1], reverse=True)
+    total = sum(item[1] for item in pairs)
+    top_items = pairs[: max(0, top_k)]
+    if not top_items:
+        return "none"
+
+    chunks: list[str] = []
+    for reason, count in top_items:
+        share = (count / total * 100.0) if total > 0 else 0.0
+        chunks.append(f"{reason}: {int(round(count))} ({share:.2f}%)")
+
+    return "; ".join(chunks)
+
+
 def _aggregate_winrate_from_rows(strategy_rows: list[dict[str, Any]]) -> dict[str, float | int]:
     closed_wins = 0
     closed_losses = 0
@@ -532,11 +564,13 @@ def render_pdf(
         rolling_positive_window_rate = _safe_float(rolling_summary.get("positive_window_rate"))
         rolling_empty_windows = _safe_int(rolling_summary.get("empty_window_count"))
         rolling_coverage_label = str(rolling_summary.get("coverage_label", "unknown"))
+        rolling_reject_top = _format_rolling_reject_top(rolling_summary, top_k=2)
         write_line(f"Rolling runs:            {rolling_runs}")
         write_line(f"Rolling execution rate:  {rolling_exec_rate * 100.0:.2f}%")
         write_line("Rolling positive windows: " f"{rolling_positive_window_rate * 100.0:.2f}%")
         write_line(f"Rolling empty windows:   {rolling_empty_windows}")
         write_line(f"Rolling coverage label:  {rolling_coverage_label}")
+        write_wrapped(f"Rolling reject top:      {rolling_reject_top}")
     write_line("")
 
     write_line("Strategy Metrics", bold=True, size=12, leading=18)

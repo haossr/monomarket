@@ -238,7 +238,7 @@ uv run --with reportlab python scripts/backtest_pdf_report.py \
 
 > 若环境已安装 reportlab，也可直接 `python scripts/backtest_pdf_report.py ...`。
 >
-> PDF 会展示收益图表，同时在 Sample Coverage 区块展示总览胜率（Closed/MTM winrate summary，来源与 nightly summary 一致：`latest.json.results`）与主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）；并在 Rolling Summary 区块展示 rolling execution rate / empty windows / coverage label。
+> PDF 会展示收益图表，同时在 Sample Coverage 区块展示总览胜率（Closed/MTM winrate summary，来源与 nightly summary 一致：`latest.json.results`）与主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）；并在 Rolling Summary 区块展示 rolling execution rate / empty windows / coverage label 与 rolling reject top 摘要。
 
 ## 12) Nightly 一键产出（回测 + PDF）
 
