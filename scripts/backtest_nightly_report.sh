@@ -14,6 +14,8 @@ ROLLING_WINDOW_HOURS="24"
 ROLLING_STEP_HOURS="12"
 ROLLING_REJECT_TOP_K="2"
 NIGHTLY_SUMMARY_CHECKSUM="1"
+FROM_TS=""
+TO_TS=""
 
 usage() {
   cat <<'USAGE'
@@ -29,6 +31,8 @@ Options:
   --rolling-window-hours <float>  Rolling window size in hours (default: 24)
   --rolling-step-hours <float>    Rolling step size in hours (default: 12)
   --rolling-reject-top-k <int>    Number of top rolling reject reasons in summary (default: 2; 0=disabled)
+  --from-ts <ISO8601>             Optional fixed backtest window start (requires --to-ts)
+  --to-ts <ISO8601>               Optional fixed backtest window end (requires --from-ts)
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
 USAGE
@@ -72,6 +76,14 @@ while [[ $# -gt 0 ]]; do
       ROLLING_REJECT_TOP_K="$2"
       shift 2
       ;;
+    --from-ts)
+      FROM_TS="$2"
+      shift 2
+      ;;
+    --to-ts)
+      TO_TS="$2"
+      shift 2
+      ;;
     --no-checksum)
       NIGHTLY_SUMMARY_CHECKSUM="0"
       shift 1
@@ -87,6 +99,13 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "$FROM_TS" || -n "$TO_TS" ]]; then
+  if [[ -z "$FROM_TS" || -z "$TO_TS" ]]; then
+    echo "[nightly] --from-ts and --to-ts must be provided together" >&2
+    exit 1
+  fi
+fi
 
 if [[ -x ".venv/bin/python" ]]; then
   # shellcheck disable=SC1091
@@ -117,29 +136,39 @@ ROLLING_JSON="${NIGHTLY_DIR}/rolling-summary.json"
 
 mkdir -p "$NIGHTLY_DIR"
 
+CYCLE_WINDOW_ARGS=()
+if [[ -n "$FROM_TS" && -n "$TO_TS" ]]; then
+  CYCLE_WINDOW_ARGS=(--from-ts "$FROM_TS" --to-ts "$TO_TS")
+fi
+
 echo "[nightly] running cycle"
 bash scripts/backtest_cycle.sh \
   --lookback-hours "$LOOKBACK_HOURS" \
   --market-limit "$MARKET_LIMIT" \
   --ingest-limit "$INGEST_LIMIT" \
   --config "$CONFIG_PATH" \
-  --output-dir "$RUN_DIR"
+  --output-dir "$RUN_DIR" \
+  "${CYCLE_WINDOW_ARGS[@]}"
 
-ROLLING_FROM_TO="$($PYTHON_BIN - "$LOOKBACK_HOURS" <<'PY'
+ROLLING_FROM_TO="$($PYTHON_BIN - "$RUN_DIR/latest.json" <<'PY'
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import json
 import sys
+from pathlib import Path
 
-lookback_hours = float(sys.argv[1])
-now = datetime.now(UTC).replace(microsecond=0)
-from_ts = now - timedelta(hours=lookback_hours)
-print(from_ts.isoformat().replace("+00:00", "Z"))
-print(now.isoformat().replace("+00:00", "Z"))
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(str(payload.get("from_ts", "")))
+print(str(payload.get("to_ts", "")))
 PY
 )"
 ROLLING_FROM_TS="$(echo "$ROLLING_FROM_TO" | sed -n '1p')"
 ROLLING_TO_TS="$(echo "$ROLLING_FROM_TO" | sed -n '2p')"
+
+if [[ -z "$ROLLING_FROM_TS" || -z "$ROLLING_TO_TS" ]]; then
+  echo "[nightly] failed to derive rolling window from $RUN_DIR/latest.json" >&2
+  exit 1
+fi
 
 echo "[nightly] rolling backtest window=${ROLLING_FROM_TS} -> ${ROLLING_TO_TS}"
 monomarket backtest-rolling \

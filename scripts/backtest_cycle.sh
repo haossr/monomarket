@@ -10,6 +10,8 @@ INGEST_LIMIT="300"
 CONFIG_PATH="configs/config.yaml"
 OUTPUT_DIR=""
 STRATEGIES="s1,s2,s4,s8"
+FROM_TS=""
+TO_TS=""
 
 usage() {
   cat <<'USAGE'
@@ -20,6 +22,8 @@ Run one reusable backtest cycle:
 
 Options:
   --lookback-hours <float>   Lookback window in hours (default: 24)
+  --from-ts <ISO8601>        Optional fixed backtest window start (requires --to-ts)
+  --to-ts <ISO8601>          Optional fixed backtest window end (requires --from-ts)
   --market-limit <int>       Market limit for generate-signals (default: 2000)
   --ingest-limit <int>       Ingest limit for gamma source (default: 300)
   --config <path>            Config path (default: configs/config.yaml)
@@ -32,6 +36,14 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --lookback-hours)
       LOOKBACK_HOURS="$2"
+      shift 2
+      ;;
+    --from-ts)
+      FROM_TS="$2"
+      shift 2
+      ;;
+    --to-ts)
+      TO_TS="$2"
       shift 2
       ;;
     --market-limit)
@@ -61,6 +73,13 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "$FROM_TS" || -n "$TO_TS" ]]; then
+  if [[ -z "$FROM_TS" || -z "$TO_TS" ]]; then
+    echo "[backtest-cycle] --from-ts and --to-ts must be provided together" >&2
+    exit 1
+  fi
+fi
 
 if [[ -x ".venv/bin/python" ]]; then
   # shellcheck disable=SC1091
@@ -152,10 +171,13 @@ monomarket generate-signals \
   --market-limit "$MARKET_LIMIT" \
   --config "$CONFIG_PATH"
 
-FROM_TO="$(_compute_window)"
-LOOKBACK_FROM_TS="$(echo "$FROM_TO" | sed -n '1p')"
-FROM_TS="$LOOKBACK_FROM_TS"
-TO_TS="$(_now_iso)"
+if [[ -z "$FROM_TS" || -z "$TO_TS" ]]; then
+  FROM_TO="$(_compute_window)"
+  LOOKBACK_FROM_TS="$(echo "$FROM_TO" | sed -n '1p')"
+  FROM_TS="$LOOKBACK_FROM_TS"
+  TO_TS="$(_now_iso)"
+fi
+
 if [[ "$TO_TS" == "$FROM_TS" ]]; then
   TO_TS="$(_add_seconds_iso "$FROM_TS" 60)"
 fi

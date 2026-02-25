@@ -1179,4 +1179,6 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     content = BASH_SCRIPT_PATH.read_text()
     assert "0=disabled" in content
     assert "--no-checksum" in content
+    assert "--from-ts" in content
+    assert "--to-ts" in content
     assert '--rolling-json "$ROLLING_JSON"' in content

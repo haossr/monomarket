@@ -252,6 +252,8 @@ bash scripts/backtest_nightly_report.sh \
   --rolling-reject-top-k 2 \
   --config configs/soak.paper.yaml
 # 默认启用 summary.json checksum；如需关闭可加 --no-checksum
+# 固定窗口重放（避免 pre/post 时间漂移）可加：
+#   --from-ts 2025-08-27T00:00:00Z --to-ts 2026-02-25T12:00:00Z
 ```
 
 夜间目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
