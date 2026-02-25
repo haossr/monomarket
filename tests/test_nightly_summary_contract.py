@@ -73,7 +73,7 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
         "def _extract_rolling_summary",
-        "def _normalize_rolling_reject_reason",
+        "from monomarket.backtest.reject_reason import format_reject_top",
         "def _format_rolling_reject_top",
     ]
     for token in required_tokens:

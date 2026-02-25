@@ -11,50 +11,9 @@ from monomarket.backtest import (
     NIGHTLY_SUMMARY_SIDECAR_CHECKSUM_ALGO,
     compute_nightly_summary_sidecar_checksum,
 )
+from monomarket.backtest.reject_reason import format_reject_top
 
 ROLLING_REJECT_TOP_DELIMITER = ";"
-
-
-def _normalize_reject_reason(reason: str) -> str:
-    text = reason.strip()
-    if text.startswith("strategy notional limit exceeded:"):
-        return "strategy notional limit exceeded"
-    if text.startswith("circuit breaker open:"):
-        return "circuit breaker open"
-    return text
-
-
-def _format_reject_top(
-    raw_reasons: dict[str, Any],
-    *,
-    k_norm: int,
-    normalize: bool,
-) -> tuple[str, list[tuple[str, int]]]:
-    if k_norm <= 0:
-        return "disabled", []
-
-    reason_items: list[tuple[str, int]] = []
-    for key, value in raw_reasons.items():
-        reason_raw = str(key).strip() or "unknown"
-        reason = _normalize_reject_reason(reason_raw) if normalize else reason_raw
-        count = int(_f(value))
-        if count <= 0:
-            continue
-        reason_items.append((reason, count))
-
-    if not reason_items:
-        return "none", []
-
-    if normalize:
-        merged: dict[str, int] = {}
-        for reason, count in reason_items:
-            merged[reason] = merged.get(reason, 0) + count
-        reason_items = list(merged.items())
-
-    reason_items.sort(key=lambda x: (-x[1], x[0]))
-    top_pairs = reason_items[:k_norm]
-    top_text = ROLLING_REJECT_TOP_DELIMITER.join(f"{reason}:{count}" for reason, count in top_pairs)
-    return top_text, top_pairs
 
 
 def _f(raw: object) -> float:
@@ -308,11 +267,15 @@ def build_summary_bundle(
             (
                 rolling_reject_top,
                 rolling_reject_top_pairs,
-            ) = _format_reject_top(raw_reasons, k_norm=k_norm, normalize=False)
+            ) = format_reject_top(
+                raw_reasons, top_k=k_norm, delimiter=ROLLING_REJECT_TOP_DELIMITER, normalize=False
+            )
             (
                 rolling_reject_top_normalized,
                 rolling_reject_top_pairs_normalized,
-            ) = _format_reject_top(raw_reasons, k_norm=k_norm, normalize=True)
+            ) = format_reject_top(
+                raw_reasons, top_k=k_norm, delimiter=ROLLING_REJECT_TOP_DELIMITER, normalize=True
+            )
 
     line = (
         f"Nightly {nightly_date} | window={payload.get('from_ts', '')} -> {payload.get('to_ts', '')} "
