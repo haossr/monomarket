@@ -219,6 +219,21 @@ class BacktestEngine:
                 requested_qty=requested_qty,
             )
 
+            if executed_qty > 1e-12:
+                capped_qty = self._cap_qty_to_strategy_headroom(
+                    qty=executed_qty,
+                    price=fill_price,
+                    strategy=strategy,
+                    positions=positions,
+                )
+                if capped_qty < executed_qty:
+                    executed_qty = capped_qty
+                    fill_ratio = (
+                        max(0.0, min(1.0, executed_qty / requested_qty))
+                        if requested_qty > 1e-12
+                        else 0.0
+                    )
+
             # Risk checks should use executable size when available;
             # otherwise fallback to requested size so no-liquidity paths keep clear reasons.
             risk_qty = executed_qty if executed_qty > 1e-12 else requested_qty
@@ -746,6 +761,28 @@ class BacktestEngine:
                 continue
             total += abs(pos.net_qty * pos.avg_price)
         return total
+
+    def _cap_qty_to_strategy_headroom(
+        self,
+        *,
+        qty: float,
+        price: float,
+        strategy: str,
+        positions: dict[tuple[str, str, str], _Position],
+    ) -> float:
+        if qty <= 1e-12 or price <= 1e-12 or self.risk.max_strategy_notional <= 0:
+            return qty
+
+        strategy_notional = self._strategy_notional(positions, strategy)
+        headroom = self.risk.max_strategy_notional - strategy_notional
+        if headroom <= 1e-12:
+            return qty
+
+        max_qty = headroom / price
+        if max_qty <= 1e-12 or max_qty >= qty:
+            return qty
+
+        return max_qty
 
     def _risk_check(
         self,
