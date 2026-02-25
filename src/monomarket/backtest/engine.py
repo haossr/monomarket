@@ -250,7 +250,10 @@ class BacktestEngine:
 
             if not risk_decision.ok:
                 rejection_count += 1
-                rejection_streak_by_strategy[strategy] += 1
+                if self._breaker_counts_rejection_reason(risk_decision.reason):
+                    rejection_streak_by_strategy[strategy] += 1
+                else:
+                    rejection_streak_by_strategy[strategy] = 0
                 strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
                     positions,
                     strategy,
@@ -302,7 +305,9 @@ class BacktestEngine:
 
             if executed_qty <= 1e-12:
                 rejection_count += 1
-                rejection_streak_by_strategy[strategy] += 1
+                # Liquidity misses are execution outcomes; keep breaker focused on
+                # consecutive risk-check failures.
+                rejection_streak_by_strategy[strategy] = 0
                 strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
                     positions,
                     strategy,
@@ -733,6 +738,15 @@ class BacktestEngine:
             if dd > max_dd:
                 max_dd = dd
         return max_dd
+
+    @staticmethod
+    def _breaker_counts_rejection_reason(reason: str) -> bool:
+        text = reason.strip().lower()
+        if text.startswith("strategy notional limit exceeded"):
+            return False
+        if text.startswith("event notional limit exceeded"):
+            return False
+        return True
 
     def _strategy_notional(
         self,

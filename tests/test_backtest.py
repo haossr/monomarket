@@ -576,6 +576,221 @@ def test_backtest_circuit_breaker_counts_consecutive_rejections(tmp_path: Path) 
     assert all("circuit breaker open" not in reason for reason in reasons)
 
 
+def test_backtest_circuit_breaker_ignores_notional_rejections(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    snapshot_ts = "2026-02-20T00:00:00+00:00"
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="m1",
+                canonical_id="c1",
+                source="gamma",
+                event_id="e1",
+                question="Q1",
+                status="open",
+                neg_risk=False,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.40,
+                no_price=0.60,
+                mid_price=0.40,
+            )
+        ],
+        snapshot_at=snapshot_ts,
+    )
+
+    # Two consecutive notional-limit rejections should not arm breaker.
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=10.0,
+                rationale="notional-reject-1",
+            )
+        ],
+        created_at="2026-02-20T00:10:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=10.0,
+                rationale="notional-reject-2",
+            )
+        ],
+        created_at="2026-02-20T00:20:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=2.5,
+                rationale="should-exec-no-breaker",
+            )
+        ],
+        created_at="2026-02-20T00:30:00+00:00",
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+        risk=BacktestRiskConfig(
+            max_daily_loss=1000.0,
+            max_strategy_notional=1000.0,
+            max_event_notional=2.5,
+            circuit_breaker_rejections=2,
+        ),
+    ).run(["s1"], from_ts=snapshot_ts, to_ts="2026-02-20T01:00:00+00:00")
+
+    assert report.total_signals == 3
+    assert report.executed_signals == 1
+    assert report.rejected_signals == 2
+    reasons = [row.risk_reason for row in report.replay]
+    assert reasons.count("event notional limit exceeded: 4.00 > 2.50") == 2
+    assert all("circuit breaker open" not in reason for reason in reasons)
+    assert report.replay[-1].risk_allowed is True
+
+
+def test_backtest_circuit_breaker_ignores_no_liquidity_rejections(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="m1",
+                canonical_id="c1",
+                source="gamma",
+                event_id="e1",
+                question="Q1",
+                status="open",
+                neg_risk=False,
+                liquidity=0,
+                volume=100,
+                yes_price=0.40,
+                no_price=0.60,
+                mid_price=0.40,
+            )
+        ],
+        snapshot_at="2026-02-20T00:00:00+00:00",
+    )
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="m1",
+                canonical_id="c1",
+                source="gamma",
+                event_id="e1",
+                question="Q1",
+                status="open",
+                neg_risk=False,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.40,
+                no_price=0.60,
+                mid_price=0.40,
+            )
+        ],
+        snapshot_at="2026-02-20T00:30:00+00:00",
+    )
+
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=2.5,
+                rationale="no-liq-1",
+            )
+        ],
+        created_at="2026-02-20T00:10:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=2.5,
+                rationale="no-liq-2",
+            )
+        ],
+        created_at="2026-02-20T00:20:00+00:00",
+    )
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=2.5,
+                rationale="should-execute-no-breaker",
+            )
+        ],
+        created_at="2026-02-20T00:30:00+00:00",
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(
+            slippage_bps=0.0,
+            fee_bps=0.0,
+            enable_partial_fill=True,
+            liquidity_full_fill=1000.0,
+            min_fill_ratio=0.0,
+        ),
+        risk=BacktestRiskConfig(
+            max_daily_loss=1000.0,
+            max_strategy_notional=1000.0,
+            max_event_notional=1000.0,
+            circuit_breaker_rejections=1,
+        ),
+    ).run(["s1"], from_ts="2026-02-20T00:00:00+00:00", to_ts="2026-02-20T01:00:00+00:00")
+
+    assert report.total_signals == 3
+    assert report.executed_signals == 1
+    assert report.rejected_signals == 2
+    reasons = [row.risk_reason for row in report.replay]
+    assert reasons.count("no executable liquidity") == 2
+    assert all("circuit breaker open" not in reason for reason in reasons)
+    assert report.replay[-1].risk_allowed is True
+
+
 def test_backtest_circuit_breaker_is_strategy_local(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
