@@ -254,8 +254,8 @@ bash scripts/backtest_nightly_report.sh \
 
 夜间目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 - `report.pdf`
-- `summary.txt`（含总览 `closed_winrate/mtm_winrate` + sample 数、rolling `pos_win_rate/empty_windows` 与 canonical 别名 `positive_window_rate/empty_window_count`，以及 `range_h/coverage/overlap` 与 canonical 别名 `range_hours/coverage_ratio/overlap_ratio`、`coverage_label`、`rolling_reject_top_k`、主要拒单原因摘要）
-- `summary.json`（结构化 sidecar，便于机器解析；含 `best` 对象、`best_version`、`schema_note_version`、`schema_note`、`winrate` 汇总对象、rolling 指标与 `checksum_algo/checksum_sha256`；当 `executed_signals=0` 时 `best.available=false` 且 `best_strategy=n/a`）
+- `summary.txt`（含总览 `closed_winrate/mtm_winrate` + sample 数、主窗口样本覆盖 `main_coverage/history_limited/window_note`、rolling `pos_win_rate/empty_windows` 与 canonical 别名 `positive_window_rate/empty_window_count`，以及 `range_h/coverage/overlap` 与 canonical 别名 `range_hours/coverage_ratio/overlap_ratio`、`coverage_label`、`rolling_reject_top_k`、主要拒单原因摘要）
+- `summary.json`（结构化 sidecar，便于机器解析；含 `best` 对象、`best_version`、`schema_note_version`、`schema_note`、`winrate` 汇总对象、`window_coverage` 覆盖注记对象、rolling 指标与 `checksum_algo/checksum_sha256`；当 `executed_signals=0` 时 `best.available=false` 且 `best_strategy=n/a`）
 - `rolling-summary.json`（滚动窗口多样本回测汇总）
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 

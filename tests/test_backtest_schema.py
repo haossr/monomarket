@@ -253,6 +253,15 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             "mtm_wins": 3,
             "mtm_losses": 2,
         },
+        "window_coverage": {
+            "window_hours": 24.0,
+            "covered_hours": 12.0,
+            "coverage_ratio": 0.5,
+            "history_limited": True,
+            "note": "history_limited",
+            "first_replay_ts": "2026-02-24T12:00:00Z",
+            "effective_from_ts": "2026-02-24T12:00:00Z",
+        },
         "best": {
             "available": True,
             "strategy": "s1",
@@ -371,6 +380,24 @@ def test_validate_nightly_summary_sidecar_reject_bad_winrate_field_type() -> Non
     winrate = payload["winrate"]
     assert isinstance(winrate, dict)
     winrate["closed_winrate"] = "bad"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_window_coverage_type() -> None:
+    payload = _nightly_sidecar_payload()
+    payload["window_coverage"] = "bad"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_window_coverage_field_type() -> None:
+    payload = _nightly_sidecar_payload()
+    window_coverage = payload["window_coverage"]
+    assert isinstance(window_coverage, dict)
+    window_coverage["history_limited"] = "bad"
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

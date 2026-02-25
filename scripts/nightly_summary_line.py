@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +118,87 @@ def _format_winrate(rate: float, sample_count: int) -> str:
     return f"{rate:.2%}"
 
 
+def _parse_iso_ts(raw: object) -> datetime | None:
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _compute_window_coverage(payload: dict[str, Any]) -> dict[str, Any]:
+    from_ts_raw = payload.get("from_ts")
+    to_ts_raw = payload.get("to_ts")
+    from_ts = _parse_iso_ts(from_ts_raw)
+    to_ts = _parse_iso_ts(to_ts_raw)
+
+    replay = payload.get("replay")
+    replay_rows = replay if isinstance(replay, list) else []
+
+    first_replay_dt: datetime | None = None
+    for row in replay_rows:
+        if not isinstance(row, dict):
+            continue
+        ts = _parse_iso_ts(row.get("ts"))
+        if ts is None:
+            continue
+        if first_replay_dt is None or ts < first_replay_dt:
+            first_replay_dt = ts
+
+    if from_ts is None or to_ts is None:
+        return {
+            "window_hours": 0.0,
+            "covered_hours": 0.0,
+            "coverage_ratio": 0.0,
+            "history_limited": False,
+            "note": "window_parse_error",
+            "first_replay_ts": (
+                first_replay_dt.isoformat().replace("+00:00", "Z")
+                if first_replay_dt is not None
+                else ""
+            ),
+            "effective_from_ts": "",
+        }
+
+    window_hours = max(0.0, (to_ts - from_ts).total_seconds() / 3600.0)
+    effective_from_dt = from_ts
+    history_limited = False
+    note = "full_history"
+
+    if first_replay_dt is not None and first_replay_dt > from_ts:
+        effective_from_dt = first_replay_dt
+        history_limited = True
+        note = "history_limited"
+    elif not replay_rows:
+        note = "no_replay_rows"
+
+    covered_hours = max(0.0, (to_ts - effective_from_dt).total_seconds() / 3600.0)
+    coverage_ratio = (covered_hours / window_hours) if window_hours > 0 else 0.0
+
+    return {
+        "window_hours": window_hours,
+        "covered_hours": covered_hours,
+        "coverage_ratio": max(0.0, min(1.0, coverage_ratio)),
+        "history_limited": history_limited,
+        "note": note,
+        "first_replay_ts": (
+            first_replay_dt.isoformat().replace("+00:00", "Z")
+            if first_replay_dt is not None
+            else ""
+        ),
+        "effective_from_ts": effective_from_dt.isoformat().replace("+00:00", "Z"),
+    }
+
+
 def build_summary_bundle(
     *,
     payload: dict[str, Any],
@@ -134,6 +216,11 @@ def build_summary_bundle(
     closed_sample_count = int(winrate_info.get("closed_sample_count", 0))
     mtm_winrate = float(winrate_info.get("mtm_winrate", 0.0))
     mtm_sample_count = int(winrate_info.get("mtm_sample_count", 0))
+
+    window_coverage = _compute_window_coverage(payload)
+    window_coverage_ratio = float(window_coverage.get("coverage_ratio", 0.0))
+    window_note = str(window_coverage.get("note", ""))
+    window_history_limited = bool(window_coverage.get("history_limited", False))
 
     rolling_runs = 0
     rolling_exec_rate = 0.0
@@ -188,6 +275,9 @@ def build_summary_bundle(
         f"closed_samples={closed_sample_count} "
         f"mtm_winrate={_format_winrate(mtm_winrate, mtm_sample_count)} "
         f"mtm_samples={mtm_sample_count} "
+        f"main_coverage={window_coverage_ratio:.2%} "
+        f"history_limited={str(window_history_limited).lower()} "
+        f"window_note={window_note} "
         f"| {best_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
@@ -227,6 +317,15 @@ def build_summary_bundle(
             "mtm_sample_count": mtm_sample_count,
             "mtm_wins": int(winrate_info.get("mtm_wins", 0)),
             "mtm_losses": int(winrate_info.get("mtm_losses", 0)),
+        },
+        "window_coverage": {
+            "window_hours": float(window_coverage.get("window_hours", 0.0)),
+            "covered_hours": float(window_coverage.get("covered_hours", 0.0)),
+            "coverage_ratio": window_coverage_ratio,
+            "history_limited": window_history_limited,
+            "note": window_note,
+            "first_replay_ts": str(window_coverage.get("first_replay_ts", "")),
+            "effective_from_ts": str(window_coverage.get("effective_from_ts", "")),
         },
         "best": {
             "available": bool(best_info.get("available", False)),

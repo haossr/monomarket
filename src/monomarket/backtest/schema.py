@@ -404,6 +404,22 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
             if not isinstance(raw, int | float):
                 raise ValueError(f"nightly sidecar winrate.{key} must be numeric")
 
+    window_coverage = payload.get("window_coverage")
+    if window_coverage is not None:
+        if not isinstance(window_coverage, Mapping):
+            raise ValueError("nightly sidecar window_coverage must be an object")
+        for key in ("window_hours", "covered_hours", "coverage_ratio"):
+            raw = window_coverage.get(key)
+            if not isinstance(raw, int | float):
+                raise ValueError(f"nightly sidecar window_coverage.{key} must be numeric")
+        history_limited = window_coverage.get("history_limited")
+        if not isinstance(history_limited, bool):
+            raise ValueError("nightly sidecar window_coverage.history_limited must be a bool")
+        for key in ("note", "first_replay_ts", "effective_from_ts"):
+            raw = window_coverage.get(key)
+            if not isinstance(raw, str):
+                raise ValueError(f"nightly sidecar window_coverage.{key} must be a string")
+
     best = payload.get("best")
     if isinstance(best, Mapping):
         best_available = best.get("available")

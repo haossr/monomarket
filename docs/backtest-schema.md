@@ -27,6 +27,7 @@
   - `best` 当前为结构化对象（`available/strategy/pnl/text`），并带 `best_version`、`schema_note_version` 与 `schema_note`
   - 当 `signals.executed=0` 时，`best.available=false` 且 `best.text=best_strategy=n/a`（避免“全0最佳策略”误导）
   - 新增 `winrate` 汇总对象：`closed_winrate/closed_sample_count/closed_wins/closed_losses/mtm_winrate/mtm_sample_count/mtm_wins/mtm_losses`
+  - 新增 `window_coverage` 对象：`window_hours/covered_hours/coverage_ratio/history_limited/note/first_replay_ts/effective_from_ts`
   - 校验器仍兼容历史字符串格式 `best`
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`
