@@ -317,6 +317,8 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             "signal_generation": {
                 "new_signals_total": 82,
                 "new_signals_in_window": 0,
+                "generated_share_of_total": 0.0,
+                "generated_low_influence": True,
                 "historical_replay_only": True,
             },
         },

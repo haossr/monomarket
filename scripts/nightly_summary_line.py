@@ -316,6 +316,8 @@ def build_summary_bundle(
     reject_strategy_info = _reject_by_strategy(payload, top_k=3)
     reject_strategy_top = str(reject_strategy_info.get("top", "none"))
 
+    total_signals = int(_f(payload.get("total_signals")))
+
     cycle_fixed_window_mode = False
     cycle_new_signals_total = 0
     cycle_new_signals_in_window = 0
@@ -329,6 +331,11 @@ def build_summary_bundle(
             cycle_historical_replay_only = bool(
                 signal_generation.get("historical_replay_only", False)
             )
+
+    generated_share_of_total = (
+        (cycle_new_signals_in_window / total_signals) if total_signals > 0 else 0.0
+    )
+    generated_low_influence = cycle_fixed_window_mode and generated_share_of_total < 0.05
 
     rolling_runs = 0
     rolling_exec_rate = 0.0
@@ -390,6 +397,8 @@ def build_summary_bundle(
         f"fixed_window={str(cycle_fixed_window_mode).lower()} "
         f"generated_signals={cycle_new_signals_total} "
         f"generated_in_window={cycle_new_signals_in_window} "
+        f"generated_share={generated_share_of_total:.2%} "
+        f"generated_low_influence={str(generated_low_influence).lower()} "
         f"historical_replay_only={str(cycle_historical_replay_only).lower()} "
         f"| {best_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
@@ -496,6 +505,8 @@ def build_summary_bundle(
             "signal_generation": {
                 "new_signals_total": cycle_new_signals_total,
                 "new_signals_in_window": cycle_new_signals_in_window,
+                "generated_share_of_total": generated_share_of_total,
+                "generated_low_influence": generated_low_influence,
                 "historical_replay_only": cycle_historical_replay_only,
             },
         },

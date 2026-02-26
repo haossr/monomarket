@@ -34,8 +34,13 @@
   - 新增 `window_coverage` 对象：`window_hours/covered_hours/coverage_ratio/history_limited/note/first_replay_ts/effective_from_ts`
     - 当 `note=no_replay_rows` 时，`covered_hours=0` 且 `coverage_ratio=0`
   - 新增 `cycle_meta` 对象：`fixed_window_mode/signal_generation`
-    - `signal_generation` 字段：`new_signals_total/new_signals_in_window/historical_replay_only`
-    - 用于解释 fixed-window 回测是否“仅回放历史信号”（`historical_replay_only=true`）
+    - `signal_generation` 字段：
+      - `new_signals_total`
+      - `new_signals_in_window`
+      - `generated_share_of_total`
+      - `generated_low_influence`
+      - `historical_replay_only`
+    - 用于解释 fixed-window 回测是否“仅回放历史信号”（`historical_replay_only=true`）以及本轮新生成信号对总样本的影响占比（`generated_share_of_total`）
   - 校验器仍兼容历史字符串格式 `best`
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`
