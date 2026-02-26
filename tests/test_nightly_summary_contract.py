@@ -1299,4 +1299,5 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "--from-ts" in content
     assert "--to-ts" in content
     assert "--clear-signals-window" in content
+    assert "--require-interpretable" in content
     assert '--rolling-json "$ROLLING_JSON"' in content

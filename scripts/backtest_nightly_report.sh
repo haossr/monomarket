@@ -17,6 +17,7 @@ NIGHTLY_SUMMARY_CHECKSUM="1"
 FROM_TS=""
 TO_TS=""
 CLEAR_SIGNALS_WINDOW="0"
+REQUIRE_INTERPRETABLE="0"
 
 usage() {
   cat <<'USAGE'
@@ -36,6 +37,7 @@ Options:
   --to-ts <ISO8601>               Optional fixed backtest window end (requires --from-ts)
   --clear-signals-window          Delete existing signals in [from_ts,to_ts] before generate-signals
                                   (safety: fixed-window mode only)
+  --require-interpretable         Fail if summary marks experiment_interpretable=false
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
 USAGE
@@ -89,6 +91,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --clear-signals-window)
       CLEAR_SIGNALS_WINDOW="1"
+      shift 1
+      ;;
+    --require-interpretable)
+      REQUIRE_INTERPRETABLE="1"
       shift 1
       ;;
     --no-checksum)
@@ -233,6 +239,31 @@ fi
   --nightly-date "$NIGHTLY_DATE" \
   --rolling-reject-top-k "$ROLLING_REJECT_TOP_K" \
   "${SUMMARY_CHECKSUM_ARGS[@]}"
+
+if [[ "$REQUIRE_INTERPRETABLE" == "1" ]]; then
+  "$PYTHON_BIN" - "$SUMMARY_JSON" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+cycle_meta = payload.get("cycle_meta")
+signal_generation = cycle_meta.get("signal_generation") if isinstance(cycle_meta, dict) else None
+if not isinstance(signal_generation, dict):
+    raise SystemExit("[nightly] require-interpretable failed: missing cycle_meta.signal_generation")
+
+ok = bool(signal_generation.get("experiment_interpretable", False))
+reason = str(signal_generation.get("experiment_reason", "unknown"))
+if not ok:
+    raise SystemExit(
+        "[nightly] require-interpretable failed: "
+        f"experiment_interpretable=false (reason={reason})"
+    )
+print(f"[nightly] require-interpretable passed (reason={reason})")
+PY
+fi
 
 echo "[nightly] done"
 echo "- run_dir: $RUN_DIR"
