@@ -256,6 +256,8 @@ bash scripts/backtest_nightly_report.sh \
 #   --from-ts 2025-08-27T00:00:00Z --to-ts 2026-02-25T12:00:00Z
 # 可选：清空窗口内旧信号后再生成（实验模式，建议仅在隔离 DB 使用）：
 #   --clear-signals-window
+# 可选：按 market_snapshots 重建窗口信号（需要 clear-signals-window）：
+#   --rebuild-signals-window --rebuild-step-hours 12
 # 可选：强制要求实验可解释（experiment_interpretable=true），否则脚本失败：
 #   --require-interpretable
 ```

@@ -324,6 +324,9 @@ def build_summary_bundle(
     cycle_historical_replay_only = False
     cycle_clear_signals_window = False
     cycle_cleared_signals_in_window = 0
+    cycle_rebuild_signals_window = False
+    cycle_rebuild_step_hours = 0.0
+    cycle_rebuild_sampled_steps = 0
     cycle_new_signals_first_ts = ""
     cycle_new_signals_last_ts = ""
     if isinstance(cycle_meta_payload, dict):
@@ -340,6 +343,13 @@ def build_summary_bundle(
             )
             cycle_cleared_signals_in_window = int(
                 _f(signal_generation.get("cleared_signals_in_window"))
+            )
+            cycle_rebuild_signals_window = bool(
+                signal_generation.get("rebuild_signals_window", False)
+            )
+            cycle_rebuild_step_hours = float(_f(signal_generation.get("rebuild_step_hours")))
+            cycle_rebuild_sampled_steps = int(
+                _f(signal_generation.get("rebuild_sampled_steps"))
             )
             cycle_new_signals_first_ts = str(signal_generation.get("new_signals_first_ts") or "")
             cycle_new_signals_last_ts = str(signal_generation.get("new_signals_last_ts") or "")
@@ -444,6 +454,9 @@ def build_summary_bundle(
         f"generated_in_window={cycle_new_signals_in_window} "
         f"clear_signals_window={str(cycle_clear_signals_window).lower()} "
         f"cleared_signals_in_window={cycle_cleared_signals_in_window} "
+        f"rebuild_signals_window={str(cycle_rebuild_signals_window).lower()} "
+        f"rebuild_step_h={cycle_rebuild_step_hours:.2f} "
+        f"rebuild_sampled_steps={cycle_rebuild_sampled_steps} "
         f"generated_share={generated_share_of_total:.2%} "
         f"generated_span_h={generated_span_hours:.2f} "
         f"generated_window_coverage={generated_window_coverage_ratio:.2%} "
@@ -561,6 +574,9 @@ def build_summary_bundle(
                 "new_signals_last_ts": cycle_new_signals_last_ts,
                 "clear_signals_window": cycle_clear_signals_window,
                 "cleared_signals_in_window": cycle_cleared_signals_in_window,
+                "rebuild_signals_window": cycle_rebuild_signals_window,
+                "rebuild_step_hours": cycle_rebuild_step_hours,
+                "rebuild_sampled_steps": cycle_rebuild_sampled_steps,
                 "generated_share_of_total": generated_share_of_total,
                 "generated_span_hours": generated_span_hours,
                 "generated_window_coverage_ratio": generated_window_coverage_ratio,

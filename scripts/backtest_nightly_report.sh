@@ -17,6 +17,8 @@ NIGHTLY_SUMMARY_CHECKSUM="1"
 FROM_TS=""
 TO_TS=""
 CLEAR_SIGNALS_WINDOW="0"
+REBUILD_SIGNALS_WINDOW="0"
+REBUILD_STEP_HOURS="12"
 REQUIRE_INTERPRETABLE="0"
 
 usage() {
@@ -37,6 +39,9 @@ Options:
   --to-ts <ISO8601>               Optional fixed backtest window end (requires --from-ts)
   --clear-signals-window          Delete existing signals in [from_ts,to_ts] before generate-signals
                                   (safety: fixed-window mode only)
+  --rebuild-signals-window        Rebuild signals across window from market_snapshots
+                                  (requires --clear-signals-window)
+  --rebuild-step-hours <f>        Step hours for rebuild-signals-window (default: 12)
   --require-interpretable         Fail if summary marks experiment_interpretable=false
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
@@ -93,6 +98,14 @@ while [[ $# -gt 0 ]]; do
       CLEAR_SIGNALS_WINDOW="1"
       shift 1
       ;;
+    --rebuild-signals-window)
+      REBUILD_SIGNALS_WINDOW="1"
+      shift 1
+      ;;
+    --rebuild-step-hours)
+      REBUILD_STEP_HOURS="$2"
+      shift 2
+      ;;
     --require-interpretable)
       REQUIRE_INTERPRETABLE="1"
       shift 1
@@ -122,6 +135,11 @@ fi
 
 if [[ "$CLEAR_SIGNALS_WINDOW" == "1" && ( -z "$FROM_TS" || -z "$TO_TS" ) ]]; then
   echo "[nightly] --clear-signals-window requires --from-ts and --to-ts" >&2
+  exit 1
+fi
+
+if [[ "$REBUILD_SIGNALS_WINDOW" == "1" && "$CLEAR_SIGNALS_WINDOW" != "1" ]]; then
+  echo "[nightly] --rebuild-signals-window requires --clear-signals-window" >&2
   exit 1
 fi
 
@@ -164,6 +182,11 @@ if [[ "$CLEAR_SIGNALS_WINDOW" == "1" ]]; then
   CYCLE_CLEAR_ARGS=(--clear-signals-window)
 fi
 
+CYCLE_REBUILD_ARGS=()
+if [[ "$REBUILD_SIGNALS_WINDOW" == "1" ]]; then
+  CYCLE_REBUILD_ARGS=(--rebuild-signals-window --rebuild-step-hours "$REBUILD_STEP_HOURS")
+fi
+
 echo "[nightly] running cycle"
 bash scripts/backtest_cycle.sh \
   --lookback-hours "$LOOKBACK_HOURS" \
@@ -172,7 +195,8 @@ bash scripts/backtest_cycle.sh \
   --config "$CONFIG_PATH" \
   --output-dir "$RUN_DIR" \
   ${CYCLE_WINDOW_ARGS[@]-} \
-  ${CYCLE_CLEAR_ARGS[@]-}
+  ${CYCLE_CLEAR_ARGS[@]-} \
+  ${CYCLE_REBUILD_ARGS[@]-}
 
 ROLLING_FROM_TO="$($PYTHON_BIN - "$RUN_DIR/latest.json" <<'PY'
 from __future__ import annotations

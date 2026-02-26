@@ -321,6 +321,9 @@ def _nightly_sidecar_payload() -> dict[str, object]:
                 "new_signals_last_ts": "",
                 "clear_signals_window": False,
                 "cleared_signals_in_window": 0,
+                "rebuild_signals_window": False,
+                "rebuild_step_hours": 12.0,
+                "rebuild_sampled_steps": 0,
                 "generated_share_of_total": 0.0,
                 "generated_span_hours": 0.0,
                 "generated_window_coverage_ratio": 0.0,
@@ -571,6 +574,18 @@ def test_validate_nightly_summary_sidecar_reject_bad_cycle_meta_reason() -> None
     signal_generation = cycle_meta["signal_generation"]
     assert isinstance(signal_generation, dict)
     signal_generation["experiment_reason"] = 1
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_cycle_meta_rebuild_fields() -> None:
+    payload = _nightly_sidecar_payload()
+    cycle_meta = payload["cycle_meta"]
+    assert isinstance(cycle_meta, dict)
+    signal_generation = cycle_meta["signal_generation"]
+    assert isinstance(signal_generation, dict)
+    signal_generation["rebuild_signals_window"] = "bad"
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

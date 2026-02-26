@@ -41,6 +41,9 @@
       - `new_signals_last_ts`
       - `clear_signals_window`
       - `cleared_signals_in_window`
+      - `rebuild_signals_window`
+      - `rebuild_step_hours`
+      - `rebuild_sampled_steps`
       - `generated_share_of_total`
       - `generated_span_hours`
       - `generated_window_coverage_ratio`

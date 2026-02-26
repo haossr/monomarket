@@ -13,6 +13,8 @@ STRATEGIES="s1,s2,s4,s8"
 FROM_TS=""
 TO_TS=""
 CLEAR_SIGNALS_WINDOW="0"
+REBUILD_SIGNALS_WINDOW="0"
+REBUILD_STEP_HOURS="12"
 
 usage() {
   cat <<'USAGE'
@@ -31,6 +33,9 @@ Options:
   --output-dir <path>        Output run directory (default: artifacts/backtest/runs/<timestamp>)
   --clear-signals-window     Delete existing signals in [from_ts,to_ts] before generate-signals
                              (safety: fixed-window mode only)
+  --rebuild-signals-window   Rebuild signals across fixed window from market_snapshots
+                             (requires --clear-signals-window; experimental)
+  --rebuild-step-hours <f>   Step hours for rebuild-signals-window sampling (default: 12)
   -h, --help                 Show help
 USAGE
 }
@@ -69,6 +74,14 @@ while [[ $# -gt 0 ]]; do
       CLEAR_SIGNALS_WINDOW="1"
       shift 1
       ;;
+    --rebuild-signals-window)
+      REBUILD_SIGNALS_WINDOW="1"
+      shift 1
+      ;;
+    --rebuild-step-hours)
+      REBUILD_STEP_HOURS="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -92,6 +105,16 @@ fi
 
 if [[ "$CLEAR_SIGNALS_WINDOW" == "1" && "$FIXED_WINDOW_MODE" != "true" ]]; then
   echo "[backtest-cycle] --clear-signals-window requires fixed window (--from-ts/--to-ts)" >&2
+  exit 1
+fi
+
+if [[ "$REBUILD_SIGNALS_WINDOW" == "1" && "$FIXED_WINDOW_MODE" != "true" ]]; then
+  echo "[backtest-cycle] --rebuild-signals-window requires fixed window (--from-ts/--to-ts)" >&2
+  exit 1
+fi
+
+if [[ "$REBUILD_SIGNALS_WINDOW" == "1" && "$CLEAR_SIGNALS_WINDOW" != "1" ]]; then
+  echo "[backtest-cycle] --rebuild-signals-window requires --clear-signals-window" >&2
   exit 1
 fi
 
@@ -249,6 +272,223 @@ print(count)
 PY
 }
 
+_rebuild_signals_from_snapshots() {
+  "$PYTHON_BIN" - "$CONFIG_PATH" "$1" "$2" "$3" "$4" "$5" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from datetime import UTC, datetime, timedelta
+
+from monomarket.config import load_settings
+from monomarket.db import Storage
+from monomarket.models import MarketView, Signal
+from monomarket.signals.strategies.s1_cross_venue import S1CrossVenueScanner
+from monomarket.signals.strategies.s2_negrisk_rebalance import S2NegRiskRebalance
+from monomarket.signals.strategies.s4_low_prob_yes import S4LowProbYesBasket
+from monomarket.signals.strategies.s8_no_carry_tailhedge import S8NoCarryTailHedge
+
+config_path, from_ts, to_ts, strategies_csv, market_limit_raw, step_hours_raw = sys.argv[1:]
+settings = load_settings(config_path)
+storage = Storage(settings.app.db_path)
+strategies = [s.strip().lower() for s in strategies_csv.split(",") if s.strip()]
+market_limit = max(1, int(float(market_limit_raw)))
+step_hours = max(0.25, float(step_hours_raw))
+
+
+def _parse_iso(ts: str) -> datetime:
+    txt = ts.strip()
+    if txt.endswith("Z"):
+        txt = txt[:-1] + "+00:00"
+    dt = datetime.fromisoformat(txt)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+registry = {
+    "s1": S1CrossVenueScanner(),
+    "s2": S2NegRiskRebalance(),
+    "s4": S4LowProbYesBasket(),
+    "s8": S8NoCarryTailHedge(),
+}
+
+from_dt = _parse_iso(from_ts)
+to_dt = _parse_iso(to_ts)
+step_delta = timedelta(hours=step_hours)
+
+with storage.conn() as conn:
+    ts_rows = conn.execute(
+        """
+        SELECT DISTINCT captured_at
+        FROM market_snapshots
+        WHERE datetime(captured_at) >= datetime(?) AND datetime(captured_at) <= datetime(?)
+        ORDER BY captured_at ASC
+        """,
+        (from_dt.isoformat(), to_dt.isoformat()),
+    ).fetchall()
+
+timestamps = [_parse_iso(str(row["captured_at"])) for row in ts_rows if row["captured_at"]]
+sampled: list[datetime] = []
+last_keep: datetime | None = None
+for ts in timestamps:
+    if last_keep is None or ts - last_keep >= step_delta:
+        sampled.append(ts)
+        last_keep = ts
+
+if sampled and sampled[-1] < to_dt:
+    sampled.append(to_dt)
+elif not sampled:
+    sampled = [to_dt]
+
+with storage.conn() as conn:
+    meta_rows = conn.execute(
+        """
+        SELECT market_id, canonical_id, event_id, question, neg_risk
+        FROM markets
+        """
+    ).fetchall()
+meta = {
+    str(r["market_id"]): {
+        "canonical_id": str(r["canonical_id"] or r["market_id"]),
+        "event_id": str(r["event_id"] or ""),
+        "question": str(r["question"] or r["market_id"]),
+        "neg_risk": bool(r["neg_risk"]),
+    }
+    for r in meta_rows
+}
+
+inserted_total = 0
+generated_total = 0
+first_ts = ""
+last_ts = ""
+
+for ts in sampled:
+    ts_iso = _iso(ts)
+    with storage.conn() as conn:
+        snap_rows = conn.execute(
+            """
+            SELECT source, market_id, event_id, yes_price, no_price, mid_price, liquidity, volume
+            FROM market_snapshots
+            WHERE datetime(captured_at) = datetime(?)
+            ORDER BY liquidity DESC, market_id ASC
+            LIMIT ?
+            """,
+            (ts_iso, market_limit),
+        ).fetchall()
+
+    views: list[MarketView] = []
+    for row in snap_rows:
+        market_id = str(row["market_id"])
+        meta_row = meta.get(market_id)
+        if not meta_row:
+            continue
+        yes_price = row["yes_price"]
+        no_price = row["no_price"]
+        mid_price = row["mid_price"]
+        if mid_price is None:
+            mid_price = yes_price if yes_price is not None else None
+        views.append(
+            MarketView(
+                source=str(row["source"] or "gamma"),
+                market_id=market_id,
+                canonical_id=meta_row["canonical_id"],
+                event_id=str(row["event_id"] or meta_row["event_id"]),
+                question=meta_row["question"],
+                status="open",
+                neg_risk=bool(meta_row["neg_risk"]),
+                liquidity=float(row["liquidity"] or 0.0),
+                volume=float(row["volume"] or 0.0),
+                yes_price=yes_price,
+                no_price=no_price,
+                best_bid=None,
+                best_ask=None,
+                mid_price=mid_price,
+            )
+        )
+
+    generated: list[Signal] = []
+    for strategy_name in strategies:
+        impl = registry.get(strategy_name)
+        if impl is None:
+            continue
+        cfg = settings.strategies.get(strategy_name, {})
+        generated.extend(impl.generate(views, cfg))
+
+    dedup: dict[tuple[str, str, str, str], Signal] = {}
+    for signal in generated:
+        key = (
+            signal.strategy.lower(),
+            signal.market_id,
+            signal.event_id,
+            signal.side.lower(),
+        )
+        prev = dedup.get(key)
+        if prev is None or signal.score > prev.score:
+            dedup[key] = signal
+
+    dedup_signals = list(dedup.values())
+    generated_total += len(dedup_signals)
+
+    placeholders = ",".join("?" for _ in strategies)
+    with storage.conn() as conn:
+        rows = conn.execute(
+            "SELECT strategy, market_id, event_id, side FROM signals "
+            f"WHERE created_at = ? AND strategy IN ({placeholders})",
+            [ts_iso, *strategies],
+        ).fetchall()
+    existing = {
+        (str(r["strategy"]).lower(), str(r["market_id"]), str(r["event_id"]), str(r["side"]).lower())
+        for r in rows
+    }
+
+    to_insert: list[Signal] = []
+    for signal in dedup_signals:
+        key = (
+            signal.strategy.lower(),
+            signal.market_id,
+            signal.event_id,
+            signal.side.lower(),
+        )
+        if key in existing:
+            continue
+        payload = dict(signal.payload or {})
+        payload["rebuilt_from_snapshots"] = True
+        payload["rebuilt_ts"] = ts_iso
+        to_insert.append(
+            Signal(
+                strategy=signal.strategy,
+                market_id=signal.market_id,
+                event_id=signal.event_id,
+                side=signal.side,
+                score=signal.score,
+                confidence=signal.confidence,
+                target_price=signal.target_price,
+                size_hint=signal.size_hint,
+                rationale=signal.rationale,
+                payload=payload,
+            )
+        )
+
+    inserted_now = storage.insert_signals(to_insert, created_at=ts_iso)
+    inserted_total += inserted_now
+    if inserted_now > 0:
+        if not first_ts:
+            first_ts = ts_iso
+        last_ts = ts_iso
+
+print(generated_total)
+print(inserted_total)
+print(first_ts)
+print(last_ts)
+print(len(sampled))
+PY
+}
+
 export ENABLE_LIVE_TRADING=false
 export MONOMARKET_MODE=paper
 
@@ -268,12 +508,6 @@ fi
 
 RUN_START_TS="$(_now_iso)"
 
-echo "[backtest-cycle] generate signals: $STRATEGIES"
-monomarket generate-signals \
-  --strategies "$STRATEGIES" \
-  --market-limit "$MARKET_LIMIT" \
-  --config "$CONFIG_PATH"
-
 if [[ -z "$FROM_TS" || -z "$TO_TS" ]]; then
   FROM_TO="$(_compute_window)"
   LOOKBACK_FROM_TS="$(echo "$FROM_TO" | sed -n '1p')"
@@ -287,11 +521,37 @@ fi
 
 echo "[backtest-cycle] window=${FROM_TS} -> ${TO_TS} (requested_lookback_hours=${LOOKBACK_HOURS})"
 
-OVERLAP_STATS="$(_signal_generation_overlap_stats "$RUN_START_TS" "$FROM_TS" "$TO_TS")"
-NEW_SIGNALS_TOTAL="$(echo "$OVERLAP_STATS" | sed -n '1p')"
-NEW_SIGNALS_IN_WINDOW="$(echo "$OVERLAP_STATS" | sed -n '2p')"
-NEW_SIGNALS_FIRST_TS="$(echo "$OVERLAP_STATS" | sed -n '3p')"
-NEW_SIGNALS_LAST_TS="$(echo "$OVERLAP_STATS" | sed -n '4p')"
+NEW_SIGNALS_TOTAL="0"
+NEW_SIGNALS_IN_WINDOW="0"
+NEW_SIGNALS_FIRST_TS=""
+NEW_SIGNALS_LAST_TS=""
+REBUILD_SAMPLED_STEPS="0"
+
+if [[ "$REBUILD_SIGNALS_WINDOW" == "1" ]]; then
+  echo "[backtest-cycle] rebuild signals from snapshots: $STRATEGIES (step_h=${REBUILD_STEP_HOURS})"
+  REBUILD_STATS="$(_rebuild_signals_from_snapshots "$FROM_TS" "$TO_TS" "$STRATEGIES" "$MARKET_LIMIT" "$REBUILD_STEP_HOURS")"
+  REBUILD_GENERATED_TOTAL="$(echo "$REBUILD_STATS" | sed -n '1p')"
+  REBUILD_INSERTED_TOTAL="$(echo "$REBUILD_STATS" | sed -n '2p')"
+  NEW_SIGNALS_FIRST_TS="$(echo "$REBUILD_STATS" | sed -n '3p')"
+  NEW_SIGNALS_LAST_TS="$(echo "$REBUILD_STATS" | sed -n '4p')"
+  REBUILD_SAMPLED_STEPS="$(echo "$REBUILD_STATS" | sed -n '5p')"
+
+  NEW_SIGNALS_TOTAL="$REBUILD_INSERTED_TOTAL"
+  NEW_SIGNALS_IN_WINDOW="$REBUILD_INSERTED_TOTAL"
+  echo "[backtest-cycle] rebuilt_signals generated=${REBUILD_GENERATED_TOTAL} inserted=${REBUILD_INSERTED_TOTAL} sampled_steps=${REBUILD_SAMPLED_STEPS}"
+else
+  echo "[backtest-cycle] generate signals: $STRATEGIES"
+  monomarket generate-signals \
+    --strategies "$STRATEGIES" \
+    --market-limit "$MARKET_LIMIT" \
+    --config "$CONFIG_PATH"
+
+  OVERLAP_STATS="$(_signal_generation_overlap_stats "$RUN_START_TS" "$FROM_TS" "$TO_TS")"
+  NEW_SIGNALS_TOTAL="$(echo "$OVERLAP_STATS" | sed -n '1p')"
+  NEW_SIGNALS_IN_WINDOW="$(echo "$OVERLAP_STATS" | sed -n '2p')"
+  NEW_SIGNALS_FIRST_TS="$(echo "$OVERLAP_STATS" | sed -n '3p')"
+  NEW_SIGNALS_LAST_TS="$(echo "$OVERLAP_STATS" | sed -n '4p')"
+fi
 
 echo "[backtest-cycle] signal_generation new_total=${NEW_SIGNALS_TOTAL} new_in_window=${NEW_SIGNALS_IN_WINDOW} first_ts=${NEW_SIGNALS_FIRST_TS:-n/a} last_ts=${NEW_SIGNALS_LAST_TS:-n/a}"
 if [[ "$NEW_SIGNALS_TOTAL" -gt 0 && "$NEW_SIGNALS_IN_WINDOW" -eq 0 ]]; then
@@ -371,7 +631,7 @@ for row in rows:
 out_md.write_text("\n".join(lines) + "\n")
 PY
 
-"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" <<'PY'
+"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" "$REBUILD_SIGNALS_WINDOW" "$REBUILD_STEP_HOURS" "$REBUILD_SAMPLED_STEPS" <<'PY'
 from __future__ import annotations
 
 import json
@@ -390,6 +650,9 @@ new_signals_last_ts = str(sys.argv[8] or "")
 fixed_window_mode = str(sys.argv[9]).strip().lower() == "true"
 clear_signals_window = str(sys.argv[10]).strip() == "1"
 cleared_signals_in_window = int(float(sys.argv[11]))
+rebuild_signals_window = str(sys.argv[12]).strip() == "1"
+rebuild_step_hours = float(sys.argv[13])
+rebuild_sampled_steps = int(float(sys.argv[14]))
 
 pointer = {
     "updated_at": datetime.now(UTC).isoformat(),
@@ -415,6 +678,9 @@ cycle_meta = {
         "historical_replay_only": new_signals_total > 0 and new_signals_in_window == 0,
         "clear_signals_window": clear_signals_window,
         "cleared_signals_in_window": cleared_signals_in_window,
+        "rebuild_signals_window": rebuild_signals_window,
+        "rebuild_step_hours": rebuild_step_hours,
+        "rebuild_sampled_steps": rebuild_sampled_steps,
     },
 }
 (run_dir / "cycle-meta.json").write_text(json.dumps(cycle_meta, ensure_ascii=False, indent=2) + "\n")

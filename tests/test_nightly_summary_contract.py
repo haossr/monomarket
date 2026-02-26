@@ -48,6 +48,9 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "generated_in_window=",
         "clear_signals_window=",
         "cleared_signals_in_window=",
+        "rebuild_signals_window=",
+        "rebuild_step_h=",
+        "rebuild_sampled_steps=",
         "generated_share=",
         "generated_span_h=",
         "generated_window_coverage=",
@@ -447,11 +450,14 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
             "new_signals_last_ts": "",
             "clear_signals_window": False,
             "cleared_signals_in_window": 0,
+            "rebuild_signals_window": False,
+            "rebuild_step_hours": 12.0,
+            "rebuild_sampled_steps": 0,
             "generated_share_of_total": 0.0,
             "generated_span_hours": 0.0,
             "generated_window_coverage_ratio": 0.0,
             "generated_low_influence": True,
-            "generated_low_temporal_coverage": True,
+            "generated_low_temporal_coverage": False,
             "historical_replay_only": True,
             "experiment_interpretable": False,
             "experiment_reason": "historical_replay_only",
@@ -492,6 +498,9 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert "generated_in_window=0" in line
     assert "clear_signals_window=false" in line
     assert "cleared_signals_in_window=0" in line
+    assert "rebuild_signals_window=false" in line
+    assert "rebuild_step_h=12.00" in line
+    assert "rebuild_sampled_steps=0" in line
     assert "generated_share=0.00%" in line
     assert "generated_span_h=0.00" in line
     assert "generated_window_coverage=0.00%" in line
@@ -514,6 +523,9 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert signal_generation["new_signals_last_ts"] == ""
     assert signal_generation["clear_signals_window"] is False
     assert int(signal_generation["cleared_signals_in_window"]) == 0
+    assert signal_generation["rebuild_signals_window"] is False
+    assert abs(float(signal_generation["rebuild_step_hours"]) - 12.0) < 1e-9
+    assert int(signal_generation["rebuild_sampled_steps"]) == 0
     assert abs(float(signal_generation["generated_share_of_total"])) < 1e-9
     assert abs(float(signal_generation["generated_span_hours"])) < 1e-9
     assert abs(float(signal_generation["generated_window_coverage_ratio"])) < 1e-9
@@ -1315,7 +1327,10 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "--from-ts" in content
     assert "--to-ts" in content
     assert "--clear-signals-window" in content
+    assert "--rebuild-signals-window" in content
+    assert "--rebuild-step-hours" in content
     assert "--require-interpretable" in content
     assert "${CYCLE_WINDOW_ARGS[@]-}" in content
     assert "${CYCLE_CLEAR_ARGS[@]-}" in content
+    assert "${CYCLE_REBUILD_ARGS[@]-}" in content
     assert '--rolling-json "$ROLLING_JSON"' in content
