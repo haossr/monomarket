@@ -324,6 +324,8 @@ def build_summary_bundle(
     cycle_historical_replay_only = False
     cycle_clear_signals_window = False
     cycle_cleared_signals_in_window = 0
+    cycle_new_signals_first_ts = ""
+    cycle_new_signals_last_ts = ""
     if isinstance(cycle_meta_payload, dict):
         cycle_fixed_window_mode = bool(cycle_meta_payload.get("fixed_window_mode", False))
         signal_generation = cycle_meta_payload.get("signal_generation")
@@ -339,18 +341,44 @@ def build_summary_bundle(
             cycle_cleared_signals_in_window = int(
                 _f(signal_generation.get("cleared_signals_in_window"))
             )
+            cycle_new_signals_first_ts = str(signal_generation.get("new_signals_first_ts") or "")
+            cycle_new_signals_last_ts = str(signal_generation.get("new_signals_last_ts") or "")
 
     generated_share_of_total = (
         (cycle_new_signals_in_window / total_signals) if total_signals > 0 else 0.0
     )
     generated_low_influence = cycle_fixed_window_mode and generated_share_of_total < 0.05
-    experiment_interpretable = (not cycle_historical_replay_only) and (not generated_low_influence)
+
+    window_hours = float(_f(window_coverage.get("window_hours")))
+    generated_span_hours = 0.0
+    first_dt = _parse_iso_ts(cycle_new_signals_first_ts)
+    last_dt = _parse_iso_ts(cycle_new_signals_last_ts)
+    if first_dt is not None and last_dt is not None and last_dt >= first_dt:
+        generated_span_hours = max(0.0, (last_dt - first_dt).total_seconds() / 3600.0)
+    generated_window_coverage_ratio = (
+        (generated_span_hours / window_hours)
+        if window_hours > 1e-12 and cycle_new_signals_in_window > 0
+        else 0.0
+    )
+    generated_low_temporal_coverage = (
+        cycle_fixed_window_mode
+        and cycle_new_signals_in_window > 0
+        and generated_window_coverage_ratio < 0.20
+    )
+
+    experiment_interpretable = (
+        (not cycle_historical_replay_only)
+        and (not generated_low_influence)
+        and (not generated_low_temporal_coverage)
+    )
     if not cycle_fixed_window_mode:
         experiment_reason = "non_fixed_window"
     elif cycle_historical_replay_only:
         experiment_reason = "historical_replay_only"
     elif generated_low_influence:
         experiment_reason = "low_generated_share"
+    elif generated_low_temporal_coverage:
+        experiment_reason = "low_generated_temporal_coverage"
     else:
         experiment_reason = "sufficient_generated_share"
 
@@ -417,7 +445,10 @@ def build_summary_bundle(
         f"clear_signals_window={str(cycle_clear_signals_window).lower()} "
         f"cleared_signals_in_window={cycle_cleared_signals_in_window} "
         f"generated_share={generated_share_of_total:.2%} "
+        f"generated_span_h={generated_span_hours:.2f} "
+        f"generated_window_coverage={generated_window_coverage_ratio:.2%} "
         f"generated_low_influence={str(generated_low_influence).lower()} "
+        f"generated_low_temporal_coverage={str(generated_low_temporal_coverage).lower()} "
         f"historical_replay_only={str(cycle_historical_replay_only).lower()} "
         f"experiment_interpretable={str(experiment_interpretable).lower()} "
         f"experiment_reason={experiment_reason} "
@@ -441,7 +472,7 @@ def build_summary_bundle(
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
         "schema_note_version": "1.0",
-        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (including experiment_interpretable/reason) for machine parsing",
+        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (share + temporal coverage + experiment_interpretable/reason) for machine parsing",
         "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
@@ -526,10 +557,15 @@ def build_summary_bundle(
             "signal_generation": {
                 "new_signals_total": cycle_new_signals_total,
                 "new_signals_in_window": cycle_new_signals_in_window,
+                "new_signals_first_ts": cycle_new_signals_first_ts,
+                "new_signals_last_ts": cycle_new_signals_last_ts,
                 "clear_signals_window": cycle_clear_signals_window,
                 "cleared_signals_in_window": cycle_cleared_signals_in_window,
                 "generated_share_of_total": generated_share_of_total,
+                "generated_span_hours": generated_span_hours,
+                "generated_window_coverage_ratio": generated_window_coverage_ratio,
                 "generated_low_influence": generated_low_influence,
+                "generated_low_temporal_coverage": generated_low_temporal_coverage,
                 "historical_replay_only": cycle_historical_replay_only,
                 "experiment_interpretable": experiment_interpretable,
                 "experiment_reason": experiment_reason,

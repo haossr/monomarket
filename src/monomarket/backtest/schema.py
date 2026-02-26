@@ -590,6 +590,17 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
             raise ValueError(
                 "nightly sidecar cycle_meta.signal_generation.new_signals_in_window must be numeric"
             )
+        new_first_ts = signal_generation.get("new_signals_first_ts")
+        if not isinstance(new_first_ts, str):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.new_signals_first_ts must be a string"
+            )
+        new_last_ts = signal_generation.get("new_signals_last_ts")
+        if not isinstance(new_last_ts, str):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.new_signals_last_ts must be a string"
+            )
+
         clear_signals_window = signal_generation.get("clear_signals_window")
         if not isinstance(clear_signals_window, bool):
             raise ValueError(
@@ -608,10 +619,28 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                 "nightly sidecar cycle_meta.signal_generation.generated_share_of_total must be numeric"
             )
 
+        generated_span_hours = signal_generation.get("generated_span_hours")
+        if not isinstance(generated_span_hours, int | float):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.generated_span_hours must be numeric"
+            )
+
+        generated_window_coverage_ratio = signal_generation.get("generated_window_coverage_ratio")
+        if not isinstance(generated_window_coverage_ratio, int | float):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.generated_window_coverage_ratio must be numeric"
+            )
+
         generated_low_influence = signal_generation.get("generated_low_influence")
         if not isinstance(generated_low_influence, bool):
             raise ValueError(
                 "nightly sidecar cycle_meta.signal_generation.generated_low_influence must be a boolean"
+            )
+
+        generated_low_temporal_coverage = signal_generation.get("generated_low_temporal_coverage")
+        if not isinstance(generated_low_temporal_coverage, bool):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.generated_low_temporal_coverage must be a boolean"
             )
 
         historical_replay_only = signal_generation.get("historical_replay_only")

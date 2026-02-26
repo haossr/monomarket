@@ -37,10 +37,15 @@
     - `signal_generation` 字段：
       - `new_signals_total`
       - `new_signals_in_window`
+      - `new_signals_first_ts`
+      - `new_signals_last_ts`
       - `clear_signals_window`
       - `cleared_signals_in_window`
       - `generated_share_of_total`
+      - `generated_span_hours`
+      - `generated_window_coverage_ratio`
       - `generated_low_influence`
+      - `generated_low_temporal_coverage`
       - `historical_replay_only`
       - `experiment_interpretable`
       - `experiment_reason`

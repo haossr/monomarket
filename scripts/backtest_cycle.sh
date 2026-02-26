@@ -195,7 +195,7 @@ with storage.conn() as conn:
         [run_start_ts, *params_tail],
     ).fetchone()
     row_in_window = conn.execute(
-        "SELECT COUNT(*) AS c FROM signals "
+        "SELECT COUNT(*) AS c, MIN(created_at) AS first_ts, MAX(created_at) AS last_ts FROM signals "
         "WHERE datetime(created_at) >= datetime(?) "
         "AND datetime(created_at) >= datetime(?) "
         "AND datetime(created_at) <= datetime(?)" + where_strat,
@@ -204,8 +204,12 @@ with storage.conn() as conn:
 
 new_count = int(row_new["c"]) if row_new else 0
 in_window_count = int(row_in_window["c"]) if row_in_window else 0
+first_ts = str(row_in_window["first_ts"] or "") if row_in_window else ""
+last_ts = str(row_in_window["last_ts"] or "") if row_in_window else ""
 print(new_count)
 print(in_window_count)
+print(first_ts)
+print(last_ts)
 PY
 }
 
@@ -286,8 +290,10 @@ echo "[backtest-cycle] window=${FROM_TS} -> ${TO_TS} (requested_lookback_hours=$
 OVERLAP_STATS="$(_signal_generation_overlap_stats "$RUN_START_TS" "$FROM_TS" "$TO_TS")"
 NEW_SIGNALS_TOTAL="$(echo "$OVERLAP_STATS" | sed -n '1p')"
 NEW_SIGNALS_IN_WINDOW="$(echo "$OVERLAP_STATS" | sed -n '2p')"
+NEW_SIGNALS_FIRST_TS="$(echo "$OVERLAP_STATS" | sed -n '3p')"
+NEW_SIGNALS_LAST_TS="$(echo "$OVERLAP_STATS" | sed -n '4p')"
 
-echo "[backtest-cycle] signal_generation new_total=${NEW_SIGNALS_TOTAL} new_in_window=${NEW_SIGNALS_IN_WINDOW}"
+echo "[backtest-cycle] signal_generation new_total=${NEW_SIGNALS_TOTAL} new_in_window=${NEW_SIGNALS_IN_WINDOW} first_ts=${NEW_SIGNALS_FIRST_TS:-n/a} last_ts=${NEW_SIGNALS_LAST_TS:-n/a}"
 if [[ "$NEW_SIGNALS_TOTAL" -gt 0 && "$NEW_SIGNALS_IN_WINDOW" -eq 0 ]]; then
   echo "[backtest-cycle] warning: generated signals are outside replay window; fixed-window runs may be replaying historical signals only" >&2
 fi
@@ -365,7 +371,7 @@ for row in rows:
 out_md.write_text("\n".join(lines) + "\n")
 PY
 
-"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" <<'PY'
+"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" <<'PY'
 from __future__ import annotations
 
 import json
@@ -379,9 +385,11 @@ to_ts = sys.argv[3]
 run_start_ts = sys.argv[4]
 new_signals_total = int(float(sys.argv[5]))
 new_signals_in_window = int(float(sys.argv[6]))
-fixed_window_mode = str(sys.argv[7]).strip().lower() == "true"
-clear_signals_window = str(sys.argv[8]).strip() == "1"
-cleared_signals_in_window = int(float(sys.argv[9]))
+new_signals_first_ts = str(sys.argv[7] or "")
+new_signals_last_ts = str(sys.argv[8] or "")
+fixed_window_mode = str(sys.argv[9]).strip().lower() == "true"
+clear_signals_window = str(sys.argv[10]).strip() == "1"
+cleared_signals_in_window = int(float(sys.argv[11]))
 
 pointer = {
     "updated_at": datetime.now(UTC).isoformat(),
@@ -402,6 +410,8 @@ cycle_meta = {
     "signal_generation": {
         "new_signals_total": new_signals_total,
         "new_signals_in_window": new_signals_in_window,
+        "new_signals_first_ts": new_signals_first_ts,
+        "new_signals_last_ts": new_signals_last_ts,
         "historical_replay_only": new_signals_total > 0 and new_signals_in_window == 0,
         "clear_signals_window": clear_signals_window,
         "cleared_signals_in_window": cleared_signals_in_window,

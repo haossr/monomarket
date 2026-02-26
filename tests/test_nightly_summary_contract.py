@@ -49,7 +49,10 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "clear_signals_window=",
         "cleared_signals_in_window=",
         "generated_share=",
+        "generated_span_h=",
+        "generated_window_coverage=",
         "generated_low_influence=",
+        "generated_low_temporal_coverage=",
         "historical_replay_only=",
         "experiment_interpretable=",
         "experiment_reason=",
@@ -440,10 +443,15 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
         "signal_generation": {
             "new_signals_total": 82,
             "new_signals_in_window": 0,
+            "new_signals_first_ts": "",
+            "new_signals_last_ts": "",
             "clear_signals_window": False,
             "cleared_signals_in_window": 0,
             "generated_share_of_total": 0.0,
+            "generated_span_hours": 0.0,
+            "generated_window_coverage_ratio": 0.0,
             "generated_low_influence": True,
+            "generated_low_temporal_coverage": True,
             "historical_replay_only": True,
             "experiment_interpretable": False,
             "experiment_reason": "historical_replay_only",
@@ -485,7 +493,10 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert "clear_signals_window=false" in line
     assert "cleared_signals_in_window=0" in line
     assert "generated_share=0.00%" in line
+    assert "generated_span_h=0.00" in line
+    assert "generated_window_coverage=0.00%" in line
     assert "generated_low_influence=true" in line
+    assert "generated_low_temporal_coverage=false" in line
     assert "historical_replay_only=true" in line
     assert "experiment_interpretable=false" in line
     assert "experiment_reason=historical_replay_only" in line
@@ -499,10 +510,15 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert isinstance(signal_generation, dict)
     assert int(signal_generation["new_signals_total"]) == 82
     assert int(signal_generation["new_signals_in_window"]) == 0
+    assert signal_generation["new_signals_first_ts"] == ""
+    assert signal_generation["new_signals_last_ts"] == ""
     assert signal_generation["clear_signals_window"] is False
     assert int(signal_generation["cleared_signals_in_window"]) == 0
     assert abs(float(signal_generation["generated_share_of_total"])) < 1e-9
+    assert abs(float(signal_generation["generated_span_hours"])) < 1e-9
+    assert abs(float(signal_generation["generated_window_coverage_ratio"])) < 1e-9
     assert signal_generation["generated_low_influence"] is True
+    assert signal_generation["generated_low_temporal_coverage"] is False
     assert signal_generation["historical_replay_only"] is True
     assert signal_generation["experiment_interpretable"] is False
     assert signal_generation["experiment_reason"] == "historical_replay_only"
