@@ -63,7 +63,7 @@ strategies:
     min_liquidity: 90.0
     max_order_notional: 8.0
     max_candidates: 20
-    exclude_event_ids: ["22862"]
+    exclude_event_ids: ["22862", "27829"]
   s8:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.10
