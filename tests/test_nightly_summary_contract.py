@@ -49,6 +49,8 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "generated_share=",
         "generated_low_influence=",
         "historical_replay_only=",
+        "experiment_interpretable=",
+        "experiment_reason=",
         "positive_window_rate=",
         "empty_window_count=",
         "range_hours=",
@@ -439,6 +441,8 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
             "generated_share_of_total": 0.0,
             "generated_low_influence": True,
             "historical_replay_only": True,
+            "experiment_interpretable": False,
+            "experiment_reason": "historical_replay_only",
         },
     }
     cycle_meta_json.write_text(json.dumps(cycle_meta_payload))
@@ -477,6 +481,8 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert "generated_share=0.00%" in line
     assert "generated_low_influence=true" in line
     assert "historical_replay_only=true" in line
+    assert "experiment_interpretable=false" in line
+    assert "experiment_reason=historical_replay_only" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -490,6 +496,8 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert abs(float(signal_generation["generated_share_of_total"])) < 1e-9
     assert signal_generation["generated_low_influence"] is True
     assert signal_generation["historical_replay_only"] is True
+    assert signal_generation["experiment_interpretable"] is False
+    assert signal_generation["experiment_reason"] == "historical_replay_only"
 
 
 def test_nightly_window_coverage_history_limited_runtime(tmp_path: Path) -> None:

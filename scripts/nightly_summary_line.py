@@ -336,6 +336,15 @@ def build_summary_bundle(
         (cycle_new_signals_in_window / total_signals) if total_signals > 0 else 0.0
     )
     generated_low_influence = cycle_fixed_window_mode and generated_share_of_total < 0.05
+    experiment_interpretable = (not cycle_historical_replay_only) and (not generated_low_influence)
+    if not cycle_fixed_window_mode:
+        experiment_reason = "non_fixed_window"
+    elif cycle_historical_replay_only:
+        experiment_reason = "historical_replay_only"
+    elif generated_low_influence:
+        experiment_reason = "low_generated_share"
+    else:
+        experiment_reason = "sufficient_generated_share"
 
     rolling_runs = 0
     rolling_exec_rate = 0.0
@@ -400,6 +409,8 @@ def build_summary_bundle(
         f"generated_share={generated_share_of_total:.2%} "
         f"generated_low_influence={str(generated_low_influence).lower()} "
         f"historical_replay_only={str(cycle_historical_replay_only).lower()} "
+        f"experiment_interpretable={str(experiment_interpretable).lower()} "
+        f"experiment_reason={experiment_reason} "
         f"| {best_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
@@ -420,7 +431,7 @@ def build_summary_bundle(
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
         "schema_note_version": "1.0",
-        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation for machine parsing",
+        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (including experiment_interpretable/reason) for machine parsing",
         "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
@@ -508,6 +519,8 @@ def build_summary_bundle(
                 "generated_share_of_total": generated_share_of_total,
                 "generated_low_influence": generated_low_influence,
                 "historical_replay_only": cycle_historical_replay_only,
+                "experiment_interpretable": experiment_interpretable,
+                "experiment_reason": experiment_reason,
             },
         },
         "paths": {

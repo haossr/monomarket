@@ -608,6 +608,18 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                 "nightly sidecar cycle_meta.signal_generation.historical_replay_only must be a boolean"
             )
 
+        experiment_interpretable = signal_generation.get("experiment_interpretable")
+        if not isinstance(experiment_interpretable, bool):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.experiment_interpretable must be a boolean"
+            )
+
+        experiment_reason = signal_generation.get("experiment_reason")
+        if not isinstance(experiment_reason, str):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.experiment_reason must be a string"
+            )
+
     paths = payload.get("paths")
     if not isinstance(paths, Mapping):
         raise ValueError("nightly sidecar paths must be an object")

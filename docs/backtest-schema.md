@@ -40,7 +40,10 @@
       - `generated_share_of_total`
       - `generated_low_influence`
       - `historical_replay_only`
+      - `experiment_interpretable`
+      - `experiment_reason`
     - 用于解释 fixed-window 回测是否“仅回放历史信号”（`historical_replay_only=true`）以及本轮新生成信号对总样本的影响占比（`generated_share_of_total`）
+    - 实验解读建议：仅当 `experiment_interpretable=true` 时再解读参数优劣；否则优先提高样本注入占比
   - 校验器仍兼容历史字符串格式 `best`
 - 对 CSV 采用“已知字段优先 + 忽略未知列”
 - 参考测试样本：`tests/fixtures/backtest/artifact_v1.json`、`artifact_v2.json`

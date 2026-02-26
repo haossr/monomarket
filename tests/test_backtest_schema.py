@@ -320,6 +320,8 @@ def _nightly_sidecar_payload() -> dict[str, object]:
                 "generated_share_of_total": 0.0,
                 "generated_low_influence": True,
                 "historical_replay_only": True,
+                "experiment_interpretable": False,
+                "experiment_reason": "historical_replay_only",
             },
         },
         "paths": {
@@ -550,6 +552,18 @@ def test_validate_nightly_summary_sidecar_reject_bad_cycle_meta_signal_generatio
     signal_generation = cycle_meta["signal_generation"]
     assert isinstance(signal_generation, dict)
     signal_generation["historical_replay_only"] = "bad"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_cycle_meta_reason() -> None:
+    payload = _nightly_sidecar_payload()
+    cycle_meta = payload["cycle_meta"]
+    assert isinstance(cycle_meta, dict)
+    signal_generation = cycle_meta["signal_generation"]
+    assert isinstance(signal_generation, dict)
+    signal_generation["experiment_reason"] = 1
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)
