@@ -16,6 +16,7 @@ ROLLING_REJECT_TOP_K="2"
 NIGHTLY_SUMMARY_CHECKSUM="1"
 FROM_TS=""
 TO_TS=""
+CLEAR_SIGNALS_WINDOW="0"
 
 usage() {
   cat <<'USAGE'
@@ -33,6 +34,8 @@ Options:
   --rolling-reject-top-k <int>    Number of top rolling reject reasons in summary (default: 2; 0=disabled)
   --from-ts <ISO8601>             Optional fixed backtest window start (requires --to-ts)
   --to-ts <ISO8601>               Optional fixed backtest window end (requires --from-ts)
+  --clear-signals-window          Delete existing signals in [from_ts,to_ts] before generate-signals
+                                  (safety: fixed-window mode only)
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
 USAGE
@@ -84,6 +87,10 @@ while [[ $# -gt 0 ]]; do
       TO_TS="$2"
       shift 2
       ;;
+    --clear-signals-window)
+      CLEAR_SIGNALS_WINDOW="1"
+      shift 1
+      ;;
     --no-checksum)
       NIGHTLY_SUMMARY_CHECKSUM="0"
       shift 1
@@ -105,6 +112,11 @@ if [[ -n "$FROM_TS" || -n "$TO_TS" ]]; then
     echo "[nightly] --from-ts and --to-ts must be provided together" >&2
     exit 1
   fi
+fi
+
+if [[ "$CLEAR_SIGNALS_WINDOW" == "1" && ( -z "$FROM_TS" || -z "$TO_TS" ) ]]; then
+  echo "[nightly] --clear-signals-window requires --from-ts and --to-ts" >&2
+  exit 1
 fi
 
 if [[ -x ".venv/bin/python" ]]; then
@@ -141,6 +153,11 @@ if [[ -n "$FROM_TS" && -n "$TO_TS" ]]; then
   CYCLE_WINDOW_ARGS=(--from-ts "$FROM_TS" --to-ts "$TO_TS")
 fi
 
+CYCLE_CLEAR_ARGS=()
+if [[ "$CLEAR_SIGNALS_WINDOW" == "1" ]]; then
+  CYCLE_CLEAR_ARGS=(--clear-signals-window)
+fi
+
 echo "[nightly] running cycle"
 bash scripts/backtest_cycle.sh \
   --lookback-hours "$LOOKBACK_HOURS" \
@@ -148,7 +165,8 @@ bash scripts/backtest_cycle.sh \
   --ingest-limit "$INGEST_LIMIT" \
   --config "$CONFIG_PATH" \
   --output-dir "$RUN_DIR" \
-  "${CYCLE_WINDOW_ARGS[@]}"
+  "${CYCLE_WINDOW_ARGS[@]}" \
+  "${CYCLE_CLEAR_ARGS[@]}"
 
 ROLLING_FROM_TO="$($PYTHON_BIN - "$RUN_DIR/latest.json" <<'PY'
 from __future__ import annotations

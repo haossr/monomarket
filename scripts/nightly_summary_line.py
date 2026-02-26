@@ -322,6 +322,8 @@ def build_summary_bundle(
     cycle_new_signals_total = 0
     cycle_new_signals_in_window = 0
     cycle_historical_replay_only = False
+    cycle_clear_signals_window = False
+    cycle_cleared_signals_in_window = 0
     if isinstance(cycle_meta_payload, dict):
         cycle_fixed_window_mode = bool(cycle_meta_payload.get("fixed_window_mode", False))
         signal_generation = cycle_meta_payload.get("signal_generation")
@@ -330,6 +332,12 @@ def build_summary_bundle(
             cycle_new_signals_in_window = int(_f(signal_generation.get("new_signals_in_window")))
             cycle_historical_replay_only = bool(
                 signal_generation.get("historical_replay_only", False)
+            )
+            cycle_clear_signals_window = bool(
+                signal_generation.get("clear_signals_window", False)
+            )
+            cycle_cleared_signals_in_window = int(
+                _f(signal_generation.get("cleared_signals_in_window"))
             )
 
     generated_share_of_total = (
@@ -406,6 +414,8 @@ def build_summary_bundle(
         f"fixed_window={str(cycle_fixed_window_mode).lower()} "
         f"generated_signals={cycle_new_signals_total} "
         f"generated_in_window={cycle_new_signals_in_window} "
+        f"clear_signals_window={str(cycle_clear_signals_window).lower()} "
+        f"cleared_signals_in_window={cycle_cleared_signals_in_window} "
         f"generated_share={generated_share_of_total:.2%} "
         f"generated_low_influence={str(generated_low_influence).lower()} "
         f"historical_replay_only={str(cycle_historical_replay_only).lower()} "
@@ -516,6 +526,8 @@ def build_summary_bundle(
             "signal_generation": {
                 "new_signals_total": cycle_new_signals_total,
                 "new_signals_in_window": cycle_new_signals_in_window,
+                "clear_signals_window": cycle_clear_signals_window,
+                "cleared_signals_in_window": cycle_cleared_signals_in_window,
                 "generated_share_of_total": generated_share_of_total,
                 "generated_low_influence": generated_low_influence,
                 "historical_replay_only": cycle_historical_replay_only,

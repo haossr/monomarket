@@ -12,6 +12,7 @@ OUTPUT_DIR=""
 STRATEGIES="s1,s2,s4,s8"
 FROM_TS=""
 TO_TS=""
+CLEAR_SIGNALS_WINDOW="0"
 
 usage() {
   cat <<'USAGE'
@@ -28,6 +29,8 @@ Options:
   --ingest-limit <int>       Ingest limit for gamma source (default: 300)
   --config <path>            Config path (default: configs/config.yaml)
   --output-dir <path>        Output run directory (default: artifacts/backtest/runs/<timestamp>)
+  --clear-signals-window     Delete existing signals in [from_ts,to_ts] before generate-signals
+                             (safety: fixed-window mode only)
   -h, --help                 Show help
 USAGE
 }
@@ -62,6 +65,10 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_DIR="$2"
       shift 2
       ;;
+    --clear-signals-window)
+      CLEAR_SIGNALS_WINDOW="1"
+      shift 1
+      ;;
     -h|--help)
       usage
       exit 0
@@ -81,6 +88,11 @@ if [[ -n "$FROM_TS" || -n "$TO_TS" ]]; then
     exit 1
   fi
   FIXED_WINDOW_MODE="true"
+fi
+
+if [[ "$CLEAR_SIGNALS_WINDOW" == "1" && "$FIXED_WINDOW_MODE" != "true" ]]; then
+  echo "[backtest-cycle] --clear-signals-window requires fixed window (--from-ts/--to-ts)" >&2
+  exit 1
 fi
 
 if [[ -x ".venv/bin/python" ]]; then
@@ -197,6 +209,42 @@ print(in_window_count)
 PY
 }
 
+_clear_signals_in_window() {
+  "$PYTHON_BIN" - "$CONFIG_PATH" "$1" "$2" "$STRATEGIES" <<'PY'
+from __future__ import annotations
+
+import sys
+
+from monomarket.config import load_settings
+from monomarket.db import Storage
+
+config_path, from_ts, to_ts, strategies_csv = sys.argv[1:]
+settings = load_settings(config_path)
+storage = Storage(settings.app.db_path)
+strategies = [s.strip() for s in strategies_csv.split(",") if s.strip()]
+
+where_strat = ""
+params_tail: list[str] = []
+if strategies:
+    where_strat = " AND strategy IN (" + ",".join(["?"] * len(strategies)) + ")"
+    params_tail = strategies
+
+with storage.conn() as conn:
+    row = conn.execute(
+        "SELECT COUNT(*) AS c FROM signals WHERE datetime(created_at) >= datetime(?) AND datetime(created_at) <= datetime(?)"
+        + where_strat,
+        [from_ts, to_ts, *params_tail],
+    ).fetchone()
+    count = int(row["c"]) if row else 0
+    conn.execute(
+        "DELETE FROM signals WHERE datetime(created_at) >= datetime(?) AND datetime(created_at) <= datetime(?)"
+        + where_strat,
+        [from_ts, to_ts, *params_tail],
+    )
+print(count)
+PY
+}
+
 export ENABLE_LIVE_TRADING=false
 export MONOMARKET_MODE=paper
 
@@ -207,6 +255,12 @@ monomarket init-db --config "$CONFIG_PATH"
 
 echo "[backtest-cycle] ingest gamma incremental"
 monomarket ingest --source gamma --limit "$INGEST_LIMIT" --incremental --config "$CONFIG_PATH"
+
+CLEARED_SIGNALS_IN_WINDOW="0"
+if [[ "$CLEAR_SIGNALS_WINDOW" == "1" ]]; then
+  CLEARED_SIGNALS_IN_WINDOW="$(_clear_signals_in_window "$FROM_TS" "$TO_TS")"
+  echo "[backtest-cycle] cleared_signals_in_window=${CLEARED_SIGNALS_IN_WINDOW}"
+fi
 
 RUN_START_TS="$(_now_iso)"
 
@@ -311,7 +365,7 @@ for row in rows:
 out_md.write_text("\n".join(lines) + "\n")
 PY
 
-"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$FIXED_WINDOW_MODE" <<'PY'
+"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" <<'PY'
 from __future__ import annotations
 
 import json
@@ -326,6 +380,8 @@ run_start_ts = sys.argv[4]
 new_signals_total = int(float(sys.argv[5]))
 new_signals_in_window = int(float(sys.argv[6]))
 fixed_window_mode = str(sys.argv[7]).strip().lower() == "true"
+clear_signals_window = str(sys.argv[8]).strip() == "1"
+cleared_signals_in_window = int(float(sys.argv[9]))
 
 pointer = {
     "updated_at": datetime.now(UTC).isoformat(),
@@ -347,6 +403,8 @@ cycle_meta = {
         "new_signals_total": new_signals_total,
         "new_signals_in_window": new_signals_in_window,
         "historical_replay_only": new_signals_total > 0 and new_signals_in_window == 0,
+        "clear_signals_window": clear_signals_window,
+        "cleared_signals_in_window": cleared_signals_in_window,
     },
 }
 (run_dir / "cycle-meta.json").write_text(json.dumps(cycle_meta, ensure_ascii=False, indent=2) + "\n")

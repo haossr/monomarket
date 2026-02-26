@@ -590,6 +590,18 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
             raise ValueError(
                 "nightly sidecar cycle_meta.signal_generation.new_signals_in_window must be numeric"
             )
+        clear_signals_window = signal_generation.get("clear_signals_window")
+        if not isinstance(clear_signals_window, bool):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.clear_signals_window must be a boolean"
+            )
+
+        cleared_signals_in_window = signal_generation.get("cleared_signals_in_window")
+        if not isinstance(cleared_signals_in_window, int | float):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.cleared_signals_in_window must be numeric"
+            )
+
         generated_share_of_total = signal_generation.get("generated_share_of_total")
         if not isinstance(generated_share_of_total, int | float):
             raise ValueError(

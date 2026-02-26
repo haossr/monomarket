@@ -46,6 +46,8 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "fixed_window=",
         "generated_signals=",
         "generated_in_window=",
+        "clear_signals_window=",
+        "cleared_signals_in_window=",
         "generated_share=",
         "generated_low_influence=",
         "historical_replay_only=",
@@ -438,6 +440,8 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
         "signal_generation": {
             "new_signals_total": 82,
             "new_signals_in_window": 0,
+            "clear_signals_window": False,
+            "cleared_signals_in_window": 0,
             "generated_share_of_total": 0.0,
             "generated_low_influence": True,
             "historical_replay_only": True,
@@ -478,6 +482,8 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert "fixed_window=true" in line
     assert "generated_signals=82" in line
     assert "generated_in_window=0" in line
+    assert "clear_signals_window=false" in line
+    assert "cleared_signals_in_window=0" in line
     assert "generated_share=0.00%" in line
     assert "generated_low_influence=true" in line
     assert "historical_replay_only=true" in line
@@ -493,6 +499,8 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert isinstance(signal_generation, dict)
     assert int(signal_generation["new_signals_total"]) == 82
     assert int(signal_generation["new_signals_in_window"]) == 0
+    assert signal_generation["clear_signals_window"] is False
+    assert int(signal_generation["cleared_signals_in_window"]) == 0
     assert abs(float(signal_generation["generated_share_of_total"])) < 1e-9
     assert signal_generation["generated_low_influence"] is True
     assert signal_generation["historical_replay_only"] is True
@@ -1290,4 +1298,5 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "--no-checksum" in content
     assert "--from-ts" in content
     assert "--to-ts" in content
+    assert "--clear-signals-window" in content
     assert '--rolling-json "$ROLLING_JSON"' in content

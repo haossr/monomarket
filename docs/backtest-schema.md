@@ -37,6 +37,8 @@
     - `signal_generation` 字段：
       - `new_signals_total`
       - `new_signals_in_window`
+      - `clear_signals_window`
+      - `cleared_signals_in_window`
       - `generated_share_of_total`
       - `generated_low_influence`
       - `historical_replay_only`
