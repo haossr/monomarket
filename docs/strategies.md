@@ -20,6 +20,7 @@
 - 风险暴露主开关：
   - `max_order_notional`：单标的单笔上限
   - `max_candidates`：单轮最多入篮标的数量（默认 40）
+  - `exclude_event_ids`：按 event_id 排除已知高风险事件（默认空）
 
 ## S8 高胜率 No Carry + 尾部对冲
 

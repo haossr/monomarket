@@ -4,12 +4,13 @@ from monomarket.models import MarketView
 from monomarket.signals.strategies.s4_low_prob_yes import S4LowProbYesBasket
 
 
-def _market(i: int, yes: float = 0.08) -> MarketView:
+def _market(i: int, yes: float = 0.08, event_id: str | None = None) -> MarketView:
+    eid = event_id or f"e{i}"
     return MarketView(
         source="gamma",
         market_id=f"m{i}",
         canonical_id=f"c{i}",
-        event_id=f"e{i}",
+        event_id=eid,
         question=f"Q{i}",
         status="open",
         neg_risk=False,
@@ -42,3 +43,24 @@ def test_s4_respects_max_candidates_override() -> None:
     )
 
     assert len(signals) == 24
+
+
+def test_s4_exclude_event_ids_filters_candidates() -> None:
+    strategy = S4LowProbYesBasket()
+    markets = [
+        _market(1, event_id="22862"),
+        _market(2, event_id="27829"),
+        _market(3, event_id="ok-event"),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "yes_price_min": 0.01,
+            "yes_price_max": 0.15,
+            "exclude_event_ids": ["22862", "27829"],
+        },
+    )
+
+    assert len(signals) == 1
+    assert {s.event_id for s in signals} == {"ok-event"}

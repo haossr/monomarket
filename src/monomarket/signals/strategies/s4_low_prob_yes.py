@@ -26,6 +26,16 @@ class S4LowProbYesBasket(Strategy):
         max_signals_per_event = max(1, int(float(cfg.get("max_signals_per_event", 3))))
         event_notional_cap = float(cfg.get("event_notional_cap", 30.0))
         inventory_decay = max(0.0, min(0.95, float(cfg.get("inventory_decay", 0.18))))
+        exclude_event_ids_raw = cfg.get("exclude_event_ids", [])
+        exclude_event_ids: set[str] = set()
+        if isinstance(exclude_event_ids_raw, str):
+            exclude_event_ids = {
+                item.strip() for item in exclude_event_ids_raw.split(",") if item.strip()
+            }
+        elif isinstance(exclude_event_ids_raw, list):
+            exclude_event_ids = {
+                str(item).strip() for item in exclude_event_ids_raw if str(item).strip()
+            }
 
         candidates = [
             m
@@ -37,6 +47,7 @@ class S4LowProbYesBasket(Strategy):
             and float(m.no_price) >= min_no_price
             and (p_max - float(m.yes_price)) >= min_edge_buffer
             and float(m.liquidity) >= min_liquidity
+            and str(m.event_id) not in exclude_event_ids
         ]
         candidates.sort(key=lambda m: (float(m.yes_price or 1.0), -m.liquidity))
 

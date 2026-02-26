@@ -55,9 +55,11 @@ strategies:
     min_no_price: 0.82
     min_liquidity: 80.0
     max_order_notional: 20.0
+    max_candidates: 40
     max_signals_per_event: 3
     event_notional_cap: 30.0
     inventory_decay: 0.18
+    exclude_event_ids: []
     max_candidates: 24
   s8:
     yes_price_max_for_no: 0.25
