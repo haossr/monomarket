@@ -17,6 +17,9 @@
 - 选择 yes 价格在 `[yes_price_min, yes_price_max]`
 - 根据价格与流动性分层（A/B/C）
 - 每个标的给出分层挂单（ladder_prices）与仓位参数
+- 风险暴露主开关：
+  - `max_order_notional`：单标的单笔上限
+  - `max_candidates`：单轮最多入篮标的数量（默认 40）
 
 ## S8 高胜率 No Carry + 尾部对冲
 

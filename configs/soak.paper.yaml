@@ -35,6 +35,7 @@ strategies:
     yes_price_min: 0.01
     yes_price_max: 0.15
     max_order_notional: 20.0
+    max_candidates: 24
   s8:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.10

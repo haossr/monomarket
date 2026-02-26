@@ -18,6 +18,7 @@ class S4LowProbYesBasket(Strategy):
         p_min = float(cfg.get("yes_price_min", 0.01))
         p_max = float(cfg.get("yes_price_max", 0.15))
         max_order_notional = float(cfg.get("max_order_notional", 20.0))
+        max_candidates = max(1, int(cfg.get("max_candidates", 40)))
 
         candidates = [
             m
@@ -30,7 +31,7 @@ class S4LowProbYesBasket(Strategy):
         candidates.sort(key=lambda m: (float(m.yes_price or 1.0), -m.liquidity))
 
         signals: list[Signal] = []
-        for idx, m in enumerate(candidates[:40], start=1):
+        for idx, m in enumerate(candidates[:max_candidates], start=1):
             tier = "A" if idx <= 10 else "B" if idx <= 25 else "C"
             tier_mult = {"A": 1.2, "B": 1.0, "C": 0.7}[tier]
             base_qty = max(2.0, m.liquidity * 0.01)
