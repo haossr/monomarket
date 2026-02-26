@@ -59,7 +59,7 @@ strategies:
     min_no_price: 0.83
     min_liquidity: 90.0
     max_order_notional: 8.0
-    max_candidates: 24
+    max_candidates: 20
   s8:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.10
