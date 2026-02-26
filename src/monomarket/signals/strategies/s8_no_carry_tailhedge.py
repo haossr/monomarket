@@ -22,6 +22,16 @@ class S8NoCarryTailHedge(Strategy):
         yes_cap = float(cfg.get("yes_price_max_for_no", 0.25))
         hedge_ratio = float(cfg.get("hedge_budget_ratio", 0.15))
         max_order_notional = float(cfg.get("max_order_notional", 25.0))
+        edge_gate_min_bps = float(cfg.get("edge_gate_min_bps", 0.0))
+        edge_gate_budget_penalty_bps = max(
+            0.0,
+            float(cfg.get("edge_gate_budget_penalty_bps", 0.0)),
+        )
+        edge_gate_budget_cap_notional = float(
+            cfg.get("edge_gate_budget_cap_notional", max_order_notional)
+        )
+        if edge_gate_budget_cap_notional <= 0:
+            edge_gate_budget_cap_notional = max(0.0, max_order_notional)
 
         mains = [
             m
@@ -46,18 +56,31 @@ class S8NoCarryTailHedge(Strategy):
 
         signals: list[Signal] = []
         for m in mains[:30]:
-            no_px = float(m.no_price or 1.0 - float(m.yes_price or 0.0))
+            yes_px = float(m.yes_price or 0.0)
+            no_px = float(m.no_price or 1.0 - yes_px)
             base_qty = max(3.0, m.liquidity * 0.012)
             if max_order_notional > 0 and no_px > 0:
                 base_qty = min(base_qty, max_order_notional / no_px)
 
-            hedge_budget = base_qty * no_px * hedge_ratio
+            order_notional = base_qty * no_px
+            edge_hint_bps = max(0.0, (1.0 - yes_px) * 1000.0)
+            budget_utilization = (
+                min(1.0, order_notional / edge_gate_budget_cap_notional)
+                if edge_gate_budget_cap_notional > 0
+                else 0.0
+            )
+            budget_penalty_bps = budget_utilization * edge_gate_budget_penalty_bps
+            effective_edge_bps = edge_hint_bps - budget_penalty_bps
+            if effective_edge_bps < edge_gate_min_bps:
+                continue
+
+            hedge_budget = order_notional * hedge_ratio
             hedge = tails[0] if tails else None
             hedge_qty = 0.0
             if hedge and hedge.yes_price and hedge.yes_price > 0:
                 hedge_qty = hedge_budget / float(hedge.yes_price)
 
-            score = (1.0 - float(m.yes_price or 0.0)) * (1 + m.liquidity / 2500)
+            score = (1.0 - yes_px) * (1 + m.liquidity / 2500)
             signals.append(
                 Signal(
                     strategy=self.name,
@@ -65,11 +88,11 @@ class S8NoCarryTailHedge(Strategy):
                     event_id=m.event_id,
                     side="buy",
                     score=score,
-                    confidence=min(0.97, 0.6 + (1 - float(m.yes_price or 0.0)) * 0.4),
+                    confidence=min(0.97, 0.6 + (1 - yes_px) * 0.4),
                     target_price=min(0.99, no_px),
                     size_hint=base_qty,
                     rationale=(
-                        f"高胜率NO carry: yes={float(m.yes_price or 0):.3f}, no={no_px:.3f}; "
+                        f"高胜率NO carry: yes={yes_px:.3f}, no={no_px:.3f}; "
                         f"tail hedge ratio={hedge_ratio:.2f}"
                     ),
                     payload={
@@ -90,6 +113,14 @@ class S8NoCarryTailHedge(Strategy):
                             else None
                         ),
                         "hedge_budget_ratio": hedge_ratio,
+                        "edge_hint_bps": edge_hint_bps,
+                        "edge_gate_local": {
+                            "min_edge_bps": edge_gate_min_bps,
+                            "budget_cap_notional": edge_gate_budget_cap_notional,
+                            "budget_utilization": budget_utilization,
+                            "budget_penalty_bps": budget_penalty_bps,
+                            "effective_edge_bps": effective_edge_bps,
+                        },
                     },
                 )
             )

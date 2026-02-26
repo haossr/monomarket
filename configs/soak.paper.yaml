@@ -52,6 +52,9 @@ strategies:
   s2:
     prob_sum_tolerance: 0.04
     max_order_notional: 12.0
+    edge_gate_min_bps: 500.0
+    edge_gate_budget_cap_notional: 2.0
+    edge_gate_budget_penalty_bps: 200.0
   s4:
     yes_price_min: 0.01
     yes_price_max: 0.10
@@ -64,3 +67,6 @@ strategies:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.10
     max_order_notional: 10.0
+    edge_gate_min_bps: 700.0
+    edge_gate_budget_cap_notional: 10.0
+    edge_gate_budget_penalty_bps: 80.0
