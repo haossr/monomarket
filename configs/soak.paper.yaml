@@ -28,7 +28,7 @@ data:
 strategies:
   s1:
     min_spread: 0.03
-    max_order_notional: 12.0
+    max_order_notional: 8.0
   s2:
     prob_sum_tolerance: 0.04
   s4:
