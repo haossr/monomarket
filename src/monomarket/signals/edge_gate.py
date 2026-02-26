@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from monomarket.config import EdgeGateSettings
 from monomarket.models import Signal
@@ -52,7 +53,10 @@ class EdgeGate:
         if "edge_hint_bps" in payload:
             return max(0.0, self._f(payload.get("edge_hint_bps"), 0.0))
         target = max(1e-6, self._f(signal.target_price, 0.0))
-        return max(0.0, self._f(signal.score, 0.0) * 100.0 + self._f(signal.confidence, 0.0) * 10.0 / target)
+        return max(
+            0.0,
+            self._f(signal.score, 0.0) * 100.0 + self._f(signal.confidence, 0.0) * 10.0 / target,
+        )
 
     def evaluate(self, signal: Signal, *, market_liquidity: float | None) -> EdgeGateDecision:
         strategy = str(signal.strategy or "").strip().lower()
@@ -62,9 +66,20 @@ class EdgeGate:
         min_edge_bps = self._f(strategy_cfg.get("min_edge_bps"), self.settings.min_edge_bps)
         fee_bps = self._f(strategy_cfg.get("fee_bps"), self.settings.fee_bps)
         slippage_bps = self._f(strategy_cfg.get("slippage_bps"), self.settings.slippage_bps)
-        latency_penalty_bps = self._f(strategy_cfg.get("latency_penalty_bps"), self.settings.latency_penalty_bps)
-        liq_ref = max(1e-9, self._f(strategy_cfg.get("liquidity_reference"), self.settings.liquidity_reference))
-        liq_penalty_max = max(0.0, self._f(strategy_cfg.get("liquidity_penalty_max_bps"), self.settings.liquidity_penalty_max_bps))
+        latency_penalty_bps = self._f(
+            strategy_cfg.get("latency_penalty_bps"), self.settings.latency_penalty_bps
+        )
+        liq_ref = max(
+            1e-9,
+            self._f(strategy_cfg.get("liquidity_reference"), self.settings.liquidity_reference),
+        )
+        liq_penalty_max = max(
+            0.0,
+            self._f(
+                strategy_cfg.get("liquidity_penalty_max_bps"),
+                self.settings.liquidity_penalty_max_bps,
+            ),
+        )
 
         gross = self._gross_edge_bps(signal)
         transaction_cost = max(0.0, fee_bps) + max(0.0, slippage_bps)

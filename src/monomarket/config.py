@@ -182,7 +182,9 @@ def load_settings(config_path: str | None = None) -> Settings:
             fee_bps=_as_float(edge_gate_raw.get("fee_bps"), 0.0),
             slippage_bps=_as_float(edge_gate_raw.get("slippage_bps"), 5.0),
             latency_penalty_bps=_as_float(edge_gate_raw.get("latency_penalty_bps"), 0.0),
-            liquidity_reference=max(1.0, _as_float(edge_gate_raw.get("liquidity_reference"), 1000.0)),
+            liquidity_reference=max(
+                1.0, _as_float(edge_gate_raw.get("liquidity_reference"), 1000.0)
+            ),
             liquidity_penalty_max_bps=max(
                 0.0,
                 _as_float(edge_gate_raw.get("liquidity_penalty_max_bps"), 0.0),

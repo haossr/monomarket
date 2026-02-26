@@ -41,7 +41,9 @@ class S1CrossVenueScanner(Strategy):
         tradable = [
             m
             for m in markets
-            if m.status == "open" and m.mid_price is not None and float(m.liquidity) >= min_liquidity
+            if m.status == "open"
+            and m.mid_price is not None
+            and float(m.liquidity) >= min_liquidity
         ]
 
         by_canonical: dict[str, list[MarketView]] = defaultdict(list)
@@ -52,7 +54,7 @@ class S1CrossVenueScanner(Strategy):
 
         candidates: list[Signal] = []
 
-        for canonical_id, rows in by_canonical.items():
+        for _canonical_id, rows in by_canonical.items():
             if len(rows) < 2:
                 continue
             low = min(rows, key=lambda x: float(x.mid_price or 0.0))

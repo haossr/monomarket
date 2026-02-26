@@ -16,6 +16,21 @@ from monomarket.signals.strategies import (
 )
 
 
+def _to_int(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
 class SignalEngine:
     def __init__(self, storage: Storage, settings: Settings):
         self.storage = storage
@@ -63,25 +78,25 @@ class SignalEngine:
             fail_edges: list[float] = []
 
             for signal in raw_signals:
-                stats["raw"] = int(stats["raw"]) + 1
+                stats["raw"] = _to_int(stats.get("raw")) + 1
                 decision = edge_gate.evaluate(
                     signal,
                     market_liquidity=liquidity_by_market.get(signal.market_id),
                 )
                 if decision.passed:
-                    stats["pass"] = int(stats["pass"]) + 1
+                    stats["pass"] = _to_int(stats.get("pass")) + 1
                     pass_edges.append(float(decision.estimated_edge_bps))
                     out.append(edge_gate.attach(signal, decision))
                 else:
-                    stats["fail"] = int(stats["fail"]) + 1
+                    stats["fail"] = _to_int(stats.get("fail")) + 1
                     fail_edges.append(float(decision.estimated_edge_bps))
                     fail_reasons = stats.get("fail_reasons")
                     if isinstance(fail_reasons, dict):
                         key = str(decision.reason)
-                        fail_reasons[key] = int(fail_reasons.get(key, 0)) + 1
+                        fail_reasons[key] = _to_int(fail_reasons.get(key, 0)) + 1
 
-            raw_count = int(stats["raw"])
-            pass_count = int(stats["pass"])
+            raw_count = _to_int(stats.get("raw"))
+            pass_count = _to_int(stats.get("pass"))
             stats["pass_rate"] = (pass_count / raw_count) if raw_count > 0 else 0.0
             stats["avg_estimated_edge_bps_pass"] = (
                 (sum(pass_edges) / len(pass_edges)) if pass_edges else 0.0
@@ -93,9 +108,9 @@ class SignalEngine:
         out.sort(key=lambda x: x.score, reverse=True)
         self.storage.insert_signals(out)
 
-        total_raw = sum(int(v.get("raw", 0)) for v in per_strategy.values())
-        total_pass = sum(int(v.get("pass", 0)) for v in per_strategy.values())
-        total_fail = sum(int(v.get("fail", 0)) for v in per_strategy.values())
+        total_raw = sum(_to_int(v.get("raw", 0)) for v in per_strategy.values())
+        total_pass = sum(_to_int(v.get("pass", 0)) for v in per_strategy.values())
+        total_fail = sum(_to_int(v.get("fail", 0)) for v in per_strategy.values())
         pass_rate = (total_pass / total_raw) if total_raw > 0 else 0.0
 
         stats_payload: dict[str, object] = {

@@ -1026,7 +1026,9 @@ def backtest_rolling(
             if not replay_row.risk_allowed:
                 reason = replay_row.risk_reason.strip() or "unknown"
                 window_risk_reasons[reason] = window_risk_reasons.get(reason, 0) + 1
-                risk_rejection_reasons_total[reason] = risk_rejection_reasons_total.get(reason, 0) + 1
+                risk_rejection_reasons_total[reason] = (
+                    risk_rejection_reasons_total.get(reason, 0) + 1
+                )
 
             if replay_row.risk_allowed and float(replay_row.executed_qty) > 1e-12:
                 event_id = replay_row.event_id.strip()

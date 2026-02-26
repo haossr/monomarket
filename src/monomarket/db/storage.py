@@ -966,7 +966,8 @@ class Storage:
                     json.dumps(diagnostics, ensure_ascii=False),
                 ),
             )
-            return int(cur.lastrowid)
+            row_id = cur.lastrowid
+            return int(row_id) if row_id is not None else 0
 
     def latest_signal_generation_run(self, since_ts: str | None = None) -> dict[str, Any] | None:
         with self.conn() as conn:
