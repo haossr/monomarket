@@ -171,8 +171,8 @@ bash scripts/backtest_cycle.sh \
   --ingest-limit "$INGEST_LIMIT" \
   --config "$CONFIG_PATH" \
   --output-dir "$RUN_DIR" \
-  "${CYCLE_WINDOW_ARGS[@]}" \
-  "${CYCLE_CLEAR_ARGS[@]}"
+  ${CYCLE_WINDOW_ARGS[@]-} \
+  ${CYCLE_CLEAR_ARGS[@]-}
 
 ROLLING_FROM_TO="$($PYTHON_BIN - "$RUN_DIR/latest.json" <<'PY'
 from __future__ import annotations
