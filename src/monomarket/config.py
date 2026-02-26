@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -47,12 +47,25 @@ class DataSettings:
 
 
 @dataclass(slots=True)
+class EdgeGateSettings:
+    enabled: bool = True
+    min_edge_bps: float = 0.0
+    fee_bps: float = 0.0
+    slippage_bps: float = 5.0
+    latency_penalty_bps: float = 0.0
+    liquidity_reference: float = 1000.0
+    liquidity_penalty_max_bps: float = 0.0
+    per_strategy: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class Settings:
     app: AppSettings
     trading: TradingSettings
     risk: RiskSettings
     data: DataSettings
     strategies: dict[str, dict[str, Any]]
+    edge_gate: EdgeGateSettings = field(default_factory=EdgeGateSettings)
 
 
 def _as_bool(value: Any, default: bool) -> bool:
@@ -113,6 +126,7 @@ def load_settings(config_path: str | None = None) -> Settings:
     trading_raw = raw.get("trading", {})
     risk_raw = raw.get("risk", {})
     data_raw = raw.get("data", {})
+    edge_gate_raw = raw.get("edge_gate", {})
 
     trading = TradingSettings(
         mode=str(trading_raw.get("mode", "paper")).lower(),
@@ -162,4 +176,21 @@ def load_settings(config_path: str | None = None) -> Settings:
             breaker_cooldown_sec=max(1, _as_int(data_raw.get("breaker_cooldown_sec"), 90)),
         ),
         strategies=raw.get("strategies", {}),
+        edge_gate=EdgeGateSettings(
+            enabled=_as_bool(edge_gate_raw.get("enabled"), True),
+            min_edge_bps=_as_float(edge_gate_raw.get("min_edge_bps"), 0.0),
+            fee_bps=_as_float(edge_gate_raw.get("fee_bps"), 0.0),
+            slippage_bps=_as_float(edge_gate_raw.get("slippage_bps"), 5.0),
+            latency_penalty_bps=_as_float(edge_gate_raw.get("latency_penalty_bps"), 0.0),
+            liquidity_reference=max(1.0, _as_float(edge_gate_raw.get("liquidity_reference"), 1000.0)),
+            liquidity_penalty_max_bps=max(
+                0.0,
+                _as_float(edge_gate_raw.get("liquidity_penalty_max_bps"), 0.0),
+            ),
+            per_strategy=(
+                edge_gate_raw.get("per_strategy", {})
+                if isinstance(edge_gate_raw.get("per_strategy", {}), dict)
+                else {}
+            ),
+        ),
     )

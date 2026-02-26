@@ -289,6 +289,7 @@ def render_pdf(
     strategy_rows: list[dict[str, Any]],
     event_rows: list[dict[str, Any]],
     rolling_payload: dict[str, Any] | None,
+    cycle_meta_payload: dict[str, Any] | None,
     output_path: Path,
     title: str,
 ) -> None:
@@ -518,7 +519,7 @@ def render_pdf(
     first_replay_ts = str(main_cov.get("first_replay_ts", ""))
     effective_from_ts = str(main_cov.get("effective_from_ts", ""))
 
-    write_line("Sample Coverage", bold=True, size=12, leading=18)
+    write_line("Sample Coverage / 样本覆盖", bold=True, size=12, leading=18)
     write_line(
         "Closed winrate summary: "
         f"{_format_rate_with_samples(closed_summary_rate, closed_summary_samples)} "
@@ -550,7 +551,7 @@ def render_pdf(
     write_line("")
 
     rolling_summary = _extract_rolling_summary(rolling_payload)
-    write_line("Rolling Summary", bold=True, size=12, leading=18)
+    write_line("Rolling Summary / 滚动摘要", bold=True, size=12, leading=18)
     if rolling_summary is None:
         write_line("(Rolling summary unavailable)")
     else:
@@ -559,6 +560,11 @@ def render_pdf(
         rolling_positive_window_rate = _safe_float(rolling_summary.get("positive_window_rate"))
         rolling_empty_windows = _safe_int(rolling_summary.get("empty_window_count"))
         rolling_coverage_label = str(rolling_summary.get("coverage_label", "unknown"))
+        rolling_unique_events = _safe_int(rolling_summary.get("unique_event_count"))
+        rolling_unique_markets = _safe_int(rolling_summary.get("unique_market_count"))
+        rolling_avg_window_events = _safe_float(rolling_summary.get("unique_event_count_avg"))
+        rolling_avg_window_markets = _safe_float(rolling_summary.get("unique_market_count_avg"))
+        rolling_executed_notional = _safe_float(rolling_summary.get("executed_notional_sum"))
         rolling_reject_top = _format_rolling_reject_top(
             rolling_summary, top_k=PDF_ROLLING_REJECT_TOP_K
         )
@@ -567,7 +573,53 @@ def render_pdf(
         write_line("Rolling positive windows: " f"{rolling_positive_window_rate * 100.0:.2f}%")
         write_line(f"Rolling empty windows:   {rolling_empty_windows}")
         write_line(f"Rolling coverage label:  {rolling_coverage_label}")
+        write_line(f"Rolling unique events(唯一事件数):   {rolling_unique_events}")
+        write_line(f"Rolling unique markets(唯一市场数):  {rolling_unique_markets}")
+        write_line(f"Avg window events(窗口均值事件):     {rolling_avg_window_events:.2f}")
+        write_line(f"Avg window markets(窗口均值市场):    {rolling_avg_window_markets:.2f}")
+        write_line(f"Executed notional sum:   {rolling_executed_notional:.2f}")
         write_wrapped(f"Rolling reject top:      {rolling_reject_top}")
+
+        windows = rolling_payload.get("windows") if isinstance(rolling_payload, dict) else None
+        if isinstance(windows, list) and windows:
+            write_line("Rolling involvement panel (window -> events/markets)")
+            for idx, row in enumerate(windows[:8], start=1):
+                if not isinstance(row, dict):
+                    continue
+                write_line(
+                    f" - w{idx}: events={_safe_int(row.get('unique_event_count'))} "
+                    f"markets={_safe_int(row.get('unique_market_count'))}"
+                )
+    write_line("")
+
+    write_line("Edge Gate / 边际门控", bold=True, size=12, leading=18)
+    edge_gate_summary: dict[str, Any] | None = None
+    if isinstance(cycle_meta_payload, dict):
+        signal_generation = cycle_meta_payload.get("signal_generation")
+        if isinstance(signal_generation, dict):
+            maybe_edge = signal_generation.get("edge_gate")
+            if isinstance(maybe_edge, dict):
+                edge_gate_summary = maybe_edge
+
+    if edge_gate_summary is None:
+        write_line("(Edge gate diagnostics unavailable)")
+    else:
+        edge_raw = _safe_int(edge_gate_summary.get("total_raw"))
+        edge_pass = _safe_int(edge_gate_summary.get("total_pass"))
+        edge_fail = _safe_int(edge_gate_summary.get("total_fail"))
+        edge_rate = _safe_float(edge_gate_summary.get("pass_rate"))
+        write_line(f"Edge raw/pass/fail:      {edge_raw}/{edge_pass}/{edge_fail}")
+        write_line(f"Edge pass rate(通过率):   {edge_rate * 100.0:.2f}%")
+        by_strategy = edge_gate_summary.get("by_strategy")
+        if isinstance(by_strategy, dict):
+            for strategy, diag in sorted(by_strategy.items()):
+                if not isinstance(diag, dict):
+                    continue
+                write_line(
+                    f" - {strategy}: pass_rate={_safe_float(diag.get('pass_rate')) * 100.0:.2f}% "
+                    f"raw={_safe_int(diag.get('raw'))} pass={_safe_int(diag.get('pass'))} fail={_safe_int(diag.get('fail'))}"
+                )
+
     write_line("")
 
     write_line("Strategy Metrics", bold=True, size=12, leading=18)
@@ -645,6 +697,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strategy-csv", help="Optional strategy attribution CSV")
     parser.add_argument("--event-csv", help="Optional event attribution CSV")
     parser.add_argument("--rolling-json", help="Optional rolling summary JSON")
+    parser.add_argument("--cycle-meta-json", help="Optional cycle-meta JSON")
     parser.add_argument("--output", required=True, help="Output PDF path")
     parser.add_argument("--title", default="Monomarket Backtest Report", help="PDF title")
     return parser.parse_args()
@@ -656,6 +709,7 @@ def main() -> None:
     strategy_csv = Path(args.strategy_csv) if args.strategy_csv else None
     event_csv = Path(args.event_csv) if args.event_csv else None
     rolling_json = Path(args.rolling_json) if args.rolling_json else None
+    cycle_meta_json = Path(args.cycle_meta_json) if args.cycle_meta_json else None
     output = Path(args.output)
 
     payload = _load_payload(backtest_json)
@@ -665,11 +719,16 @@ def main() -> None:
     if rolling_json and rolling_json.exists():
         rolling_payload = _load_payload(rolling_json)
 
+    cycle_meta_payload: dict[str, Any] | None = None
+    if cycle_meta_json and cycle_meta_json.exists():
+        cycle_meta_payload = _load_payload(cycle_meta_json)
+
     render_pdf(
         payload=payload,
         strategy_rows=strategy_rows,
         event_rows=event_rows,
         rolling_payload=rolling_payload,
+        cycle_meta_payload=cycle_meta_payload,
         output_path=output,
         title=args.title,
     )

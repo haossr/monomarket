@@ -236,6 +236,24 @@ print(last_ts)
 PY
 }
 
+_latest_signal_generation_run_json() {
+  "$PYTHON_BIN" - "$CONFIG_PATH" "$1" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+
+from monomarket.config import load_settings
+from monomarket.db import Storage
+
+config_path, since_ts = sys.argv[1:]
+settings = load_settings(config_path)
+storage = Storage(settings.app.db_path)
+row = storage.latest_signal_generation_run(since_ts=since_ts)
+print(json.dumps(row or {}, ensure_ascii=False))
+PY
+}
+
 _clear_signals_in_window() {
   "$PYTHON_BIN" - "$CONFIG_PATH" "$1" "$2" "$STRATEGIES" <<'PY'
 from __future__ import annotations
@@ -526,6 +544,7 @@ NEW_SIGNALS_IN_WINDOW="0"
 NEW_SIGNALS_FIRST_TS=""
 NEW_SIGNALS_LAST_TS=""
 REBUILD_SAMPLED_STEPS="0"
+EDGE_GATE_RUN_JSON="{}"
 
 if [[ "$REBUILD_SIGNALS_WINDOW" == "1" ]]; then
   echo "[backtest-cycle] rebuild signals from snapshots: $STRATEGIES (step_h=${REBUILD_STEP_HOURS})"
@@ -551,9 +570,28 @@ else
   NEW_SIGNALS_IN_WINDOW="$(echo "$OVERLAP_STATS" | sed -n '2p')"
   NEW_SIGNALS_FIRST_TS="$(echo "$OVERLAP_STATS" | sed -n '3p')"
   NEW_SIGNALS_LAST_TS="$(echo "$OVERLAP_STATS" | sed -n '4p')"
+  EDGE_GATE_RUN_JSON="$(_latest_signal_generation_run_json "$RUN_START_TS")"
 fi
 
 echo "[backtest-cycle] signal_generation new_total=${NEW_SIGNALS_TOTAL} new_in_window=${NEW_SIGNALS_IN_WINDOW} first_ts=${NEW_SIGNALS_FIRST_TS:-n/a} last_ts=${NEW_SIGNALS_LAST_TS:-n/a}"
+if [[ "$EDGE_GATE_RUN_JSON" != "{}" ]]; then
+  EDGE_GATE_LINE="$($PYTHON_BIN - "$EDGE_GATE_RUN_JSON" <<'PY'
+from __future__ import annotations
+import json, sys
+obj = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
+diag = obj.get("diagnostics", {}).get("edge_gate", {}) if isinstance(obj, dict) else {}
+if isinstance(diag, dict):
+    print(
+        "[backtest-cycle] edge_gate "
+        f"raw={int(float(diag.get('total_raw', 0)))} "
+        f"pass={int(float(diag.get('total_pass', 0)))} "
+        f"fail={int(float(diag.get('total_fail', 0)))} "
+        f"pass_rate={float(diag.get('pass_rate', 0.0) or 0.0):.2%}"
+    )
+PY
+)"
+  echo "$EDGE_GATE_LINE"
+fi
 if [[ "$NEW_SIGNALS_TOTAL" -gt 0 && "$NEW_SIGNALS_IN_WINDOW" -eq 0 ]]; then
   echo "[backtest-cycle] warning: generated signals are outside replay window; fixed-window runs may be replaying historical signals only" >&2
 fi
@@ -631,7 +669,7 @@ for row in rows:
 out_md.write_text("\n".join(lines) + "\n")
 PY
 
-"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" "$REBUILD_SIGNALS_WINDOW" "$REBUILD_STEP_HOURS" "$REBUILD_SAMPLED_STEPS" <<'PY'
+"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" "$REBUILD_SIGNALS_WINDOW" "$REBUILD_STEP_HOURS" "$REBUILD_SAMPLED_STEPS" "$EDGE_GATE_RUN_JSON" <<'PY'
 from __future__ import annotations
 
 import json
@@ -653,6 +691,22 @@ cleared_signals_in_window = int(float(sys.argv[11]))
 rebuild_signals_window = str(sys.argv[12]).strip() == "1"
 rebuild_step_hours = float(sys.argv[13])
 rebuild_sampled_steps = int(float(sys.argv[14]))
+edge_gate_run_raw = str(sys.argv[15] or "{}")
+
+edge_gate_run: dict[str, object] = {}
+try:
+    parsed = json.loads(edge_gate_run_raw)
+    if isinstance(parsed, dict):
+        edge_gate_run = parsed
+except json.JSONDecodeError:
+    edge_gate_run = {}
+
+edge_gate_diag = {}
+raw_diag = edge_gate_run.get("diagnostics") if isinstance(edge_gate_run, dict) else None
+if isinstance(raw_diag, dict):
+    eg = raw_diag.get("edge_gate")
+    if isinstance(eg, dict):
+        edge_gate_diag = eg
 
 pointer = {
     "updated_at": datetime.now(UTC).isoformat(),
@@ -681,6 +735,7 @@ cycle_meta = {
         "rebuild_signals_window": rebuild_signals_window,
         "rebuild_step_hours": rebuild_step_hours,
         "rebuild_sampled_steps": rebuild_sampled_steps,
+        "edge_gate": edge_gate_diag,
     },
 }
 (run_dir / "cycle-meta.json").write_text(json.dumps(cycle_meta, ensure_ascii=False, indent=2) + "\n")

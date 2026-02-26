@@ -128,6 +128,20 @@ CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
 CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at);
 
+CREATE TABLE IF NOT EXISTS signal_generation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    strategies_csv TEXT NOT NULL,
+    market_limit INTEGER NOT NULL,
+    total_raw INTEGER NOT NULL DEFAULT 0,
+    total_pass INTEGER NOT NULL DEFAULT 0,
+    total_fail INTEGER NOT NULL DEFAULT 0,
+    diagnostics_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_signal_generation_runs_finished_at
+    ON signal_generation_runs(finished_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS switches (
     name TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -919,6 +933,89 @@ class Storage:
                 ],
             )
         return len(signals)
+
+    def insert_signal_generation_run(
+        self,
+        *,
+        started_at: str,
+        finished_at: str,
+        strategies: list[str],
+        market_limit: int,
+        total_raw: int,
+        total_pass: int,
+        total_fail: int,
+        diagnostics: dict[str, Any],
+    ) -> int:
+        with self.conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO signal_generation_runs(
+                    started_at, finished_at, strategies_csv, market_limit,
+                    total_raw, total_pass, total_fail, diagnostics_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    started_at,
+                    finished_at,
+                    ",".join(str(s).strip().lower() for s in strategies if str(s).strip()),
+                    int(market_limit),
+                    int(total_raw),
+                    int(total_pass),
+                    int(total_fail),
+                    json.dumps(diagnostics, ensure_ascii=False),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def latest_signal_generation_run(self, since_ts: str | None = None) -> dict[str, Any] | None:
+        with self.conn() as conn:
+            row = None
+            if since_ts:
+                row = conn.execute(
+                    """
+                    SELECT id, started_at, finished_at, strategies_csv, market_limit,
+                           total_raw, total_pass, total_fail, diagnostics_json
+                    FROM signal_generation_runs
+                    WHERE datetime(finished_at) >= datetime(?)
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (since_ts,),
+                ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    """
+                    SELECT id, started_at, finished_at, strategies_csv, market_limit,
+                           total_raw, total_pass, total_fail, diagnostics_json
+                    FROM signal_generation_runs
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
+
+        if row is None:
+            return None
+
+        diagnostics: dict[str, Any] = {}
+        raw_diag = row["diagnostics_json"]
+        if raw_diag:
+            try:
+                diagnostics = json.loads(str(raw_diag))
+            except json.JSONDecodeError:
+                diagnostics = {}
+
+        return {
+            "id": int(row["id"]),
+            "started_at": str(row["started_at"]),
+            "finished_at": str(row["finished_at"]),
+            "strategies": [x for x in str(row["strategies_csv"] or "").split(",") if x],
+            "market_limit": int(row["market_limit"]),
+            "total_raw": int(row["total_raw"]),
+            "total_pass": int(row["total_pass"]),
+            "total_fail": int(row["total_fail"]),
+            "diagnostics": diagnostics,
+        }
 
     def list_signals(
         self,

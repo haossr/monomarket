@@ -25,18 +25,44 @@ data:
   breaker_failure_threshold: 3
   breaker_cooldown_sec: 90
 
+edge_gate:
+  enabled: true
+  min_edge_bps: 0.0
+  fee_bps: 0.0
+  slippage_bps: 5.0
+  latency_penalty_bps: 0.0
+  liquidity_reference: 1000.0
+  liquidity_penalty_max_bps: 0.0
+  per_strategy: {}
+
 strategies:
   s1:
     min_spread: 0.03
+    min_event_spread: 0.05
+    min_liquidity: 80.0
     max_order_notional: 25.0
+    max_signals_per_event: 3
+    event_notional_cap: 30.0
+    inventory_decay: 0.20
+    enable_cross_market_arb: true
   s2:
     prob_sum_tolerance: 0.04
+    max_order_notional: 15.0
   s4:
     yes_price_min: 0.01
     yes_price_max: 0.15
+    min_edge_buffer: 0.015
+    min_no_price: 0.82
+    min_liquidity: 80.0
     max_order_notional: 20.0
-    max_candidates: 40
+    max_signals_per_event: 3
+    event_notional_cap: 30.0
+    inventory_decay: 0.18
+    max_candidates: 24
   s8:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.15
     max_order_notional: 25.0
+    max_signals_per_event: 2
+    event_notional_cap: 30.0
+    inventory_decay: 0.15

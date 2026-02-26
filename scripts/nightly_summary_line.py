@@ -329,6 +329,12 @@ def build_summary_bundle(
     cycle_rebuild_sampled_steps = 0
     cycle_new_signals_first_ts = ""
     cycle_new_signals_last_ts = ""
+    edge_gate_total_raw = 0
+    edge_gate_total_pass = 0
+    edge_gate_total_fail = 0
+    edge_gate_pass_rate = 0.0
+    edge_gate_by_strategy_top = "none"
+    edge_gate_by_strategy_rows: list[dict[str, object]] = []
     if isinstance(cycle_meta_payload, dict):
         cycle_fixed_window_mode = bool(cycle_meta_payload.get("fixed_window_mode", False))
         signal_generation = cycle_meta_payload.get("signal_generation")
@@ -353,6 +359,42 @@ def build_summary_bundle(
             )
             cycle_new_signals_first_ts = str(signal_generation.get("new_signals_first_ts") or "")
             cycle_new_signals_last_ts = str(signal_generation.get("new_signals_last_ts") or "")
+            edge_gate = signal_generation.get("edge_gate")
+            if isinstance(edge_gate, dict):
+                edge_gate_total_raw = int(_f(edge_gate.get("total_raw")))
+                edge_gate_total_pass = int(_f(edge_gate.get("total_pass")))
+                edge_gate_total_fail = int(_f(edge_gate.get("total_fail")))
+                edge_gate_pass_rate = _f(edge_gate.get("pass_rate"))
+                by_strategy = edge_gate.get("by_strategy")
+                if isinstance(by_strategy, dict):
+                    rows: list[tuple[str, float, int, int, int]] = []
+                    for strategy, diag in by_strategy.items():
+                        if not isinstance(diag, dict):
+                            continue
+                        raw = int(_f(diag.get("raw")))
+                        passed = int(_f(diag.get("pass")))
+                        failed = int(_f(diag.get("fail")))
+                        pass_rate = _f(diag.get("pass_rate")) if raw > 0 else 0.0
+                        rows.append((str(strategy), pass_rate, raw, passed, failed))
+                    rows.sort(key=lambda x: (-x[1], x[0]))
+                    edge_gate_by_strategy_rows = [
+                        {
+                            "strategy": strategy,
+                            "pass_rate": pass_rate,
+                            "raw": raw,
+                            "pass": passed,
+                            "fail": failed,
+                        }
+                        for strategy, pass_rate, raw, passed, failed in rows
+                    ]
+                    edge_gate_by_strategy_top = (
+                        ";".join(
+                            f"{r['strategy']}:{float(r['pass_rate']) * 100.0:.1f}%"
+                            for r in edge_gate_by_strategy_rows[:4]
+                        )
+                        if edge_gate_by_strategy_rows
+                        else "none"
+                    )
 
     generated_share_of_total = (
         (cycle_new_signals_in_window / total_signals) if total_signals > 0 else 0.0
@@ -400,6 +442,12 @@ def build_summary_bundle(
     rolling_coverage_label = "unknown"
     rolling_positive_window_rate = 0.0
     rolling_empty_window_count = 0
+    rolling_unique_event_count = 0
+    rolling_unique_market_count = 0
+    rolling_unique_event_count_avg = 0.0
+    rolling_unique_market_count_avg = 0.0
+    rolling_executed_notional_sum = 0.0
+    rolling_executed_notional_avg = 0.0
 
     k_norm = max(0, int(rolling_reject_top_k))
     rolling_reject_top = "disabled" if k_norm <= 0 else "none"
@@ -419,6 +467,12 @@ def build_summary_bundle(
         rolling_overlap_ratio = _f(rolling_summary.get("overlap_ratio"))
         rolling_positive_window_rate = _f(rolling_summary.get("positive_window_rate"))
         rolling_empty_window_count = int(_f(rolling_summary.get("empty_window_count")))
+        rolling_unique_event_count = int(_f(rolling_summary.get("unique_event_count")))
+        rolling_unique_market_count = int(_f(rolling_summary.get("unique_market_count")))
+        rolling_unique_event_count_avg = _f(rolling_summary.get("unique_event_count_avg"))
+        rolling_unique_market_count_avg = _f(rolling_summary.get("unique_market_count_avg"))
+        rolling_executed_notional_sum = _f(rolling_summary.get("executed_notional_sum"))
+        rolling_executed_notional_avg = _f(rolling_summary.get("executed_notional_avg"))
         coverage_label_raw = rolling_summary.get("coverage_label")
         if isinstance(coverage_label_raw, str) and coverage_label_raw.strip():
             rolling_coverage_label = coverage_label_raw.strip()
@@ -465,6 +519,11 @@ def build_summary_bundle(
         f"historical_replay_only={str(cycle_historical_replay_only).lower()} "
         f"experiment_interpretable={str(experiment_interpretable).lower()} "
         f"experiment_reason={experiment_reason} "
+        f"edge_gate_raw={edge_gate_total_raw} "
+        f"edge_gate_pass={edge_gate_total_pass} "
+        f"edge_gate_fail={edge_gate_total_fail} "
+        f"edge_gate_pass_rate={edge_gate_pass_rate:.2%} "
+        f"edge_gate_top={edge_gate_by_strategy_top} "
         f"| {best_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
@@ -474,6 +533,12 @@ def build_summary_bundle(
         f"overlap={rolling_overlap_ratio:.2%} "
         f"range_hours={rolling_range_hours:.2f} coverage_ratio={rolling_coverage_ratio:.2%} "
         f"overlap_ratio={rolling_overlap_ratio:.2%} coverage_label={rolling_coverage_label} "
+        f"rolling_unique_events={rolling_unique_event_count} "
+        f"rolling_unique_markets={rolling_unique_market_count} "
+        f"rolling_avg_window_events={rolling_unique_event_count_avg:.2f} "
+        f"rolling_avg_window_markets={rolling_unique_market_count_avg:.2f} "
+        f"rolling_executed_notional={rolling_executed_notional_sum:.2f} "
+        f"rolling_executed_notional_avg={rolling_executed_notional_avg:.2f} "
         f"rolling_reject_top_k={k_norm} "
         f"rolling_reject_top_delim={ROLLING_REJECT_TOP_DELIMITER} "
         f"rolling_reject_top={rolling_reject_top} "
@@ -537,6 +602,12 @@ def build_summary_bundle(
             "coverage_ratio": rolling_coverage_ratio,
             "overlap_ratio": rolling_overlap_ratio,
             "coverage_label": rolling_coverage_label,
+            "unique_event_count": rolling_unique_event_count,
+            "unique_market_count": rolling_unique_market_count,
+            "unique_event_count_avg": rolling_unique_event_count_avg,
+            "unique_market_count_avg": rolling_unique_market_count_avg,
+            "executed_notional_sum": rolling_executed_notional_sum,
+            "executed_notional_avg": rolling_executed_notional_avg,
             "reject_top_k": k_norm,
             "reject_top_delimiter": ROLLING_REJECT_TOP_DELIMITER,
             "reject_top": rolling_reject_top,
@@ -585,7 +656,31 @@ def build_summary_bundle(
                 "historical_replay_only": cycle_historical_replay_only,
                 "experiment_interpretable": experiment_interpretable,
                 "experiment_reason": experiment_reason,
+                "edge_gate": {
+                    "total_raw": edge_gate_total_raw,
+                    "total_pass": edge_gate_total_pass,
+                    "total_fail": edge_gate_total_fail,
+                    "pass_rate": edge_gate_pass_rate,
+                    "top": edge_gate_by_strategy_top,
+                    "rows": edge_gate_by_strategy_rows,
+                },
             },
+        },
+        "involvement": {
+            "unique_event_count": rolling_unique_event_count,
+            "unique_market_count": rolling_unique_market_count,
+            "avg_window_unique_event_count": rolling_unique_event_count_avg,
+            "avg_window_unique_market_count": rolling_unique_market_count_avg,
+            "executed_notional_sum": rolling_executed_notional_sum,
+            "executed_notional_avg": rolling_executed_notional_avg,
+        },
+        "edge_gate": {
+            "total_raw": edge_gate_total_raw,
+            "total_pass": edge_gate_total_pass,
+            "total_fail": edge_gate_total_fail,
+            "pass_rate": edge_gate_pass_rate,
+            "top": edge_gate_by_strategy_top,
+            "rows": edge_gate_by_strategy_rows,
         },
         "paths": {
             "pdf": str(pdf_path.resolve()),

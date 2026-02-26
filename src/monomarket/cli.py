@@ -649,6 +649,39 @@ def generate_signals(
     for k, v in sorted(by_strategy.items()):
         console.print(f"- {k}: {v}")
 
+    edge_gate = engine.last_generation_stats.get("edge_gate", {})
+    if isinstance(edge_gate, dict):
+        total_raw = int(float(edge_gate.get("total_raw", 0)))
+        total_pass = int(float(edge_gate.get("total_pass", 0)))
+        total_fail = int(float(edge_gate.get("total_fail", 0)))
+        pass_rate = float(edge_gate.get("pass_rate", 0.0) or 0.0)
+        console.print(
+            "edge_gate "
+            f"raw={total_raw} pass={total_pass} fail={total_fail} pass_rate={pass_rate:.2%}"
+        )
+
+        by_strategy_diag = edge_gate.get("by_strategy", {})
+        if isinstance(by_strategy_diag, dict) and by_strategy_diag:
+            tb = Table(title="Edge gate diagnostics")
+            tb.add_column("strategy")
+            tb.add_column("raw")
+            tb.add_column("pass")
+            tb.add_column("fail")
+            tb.add_column("pass_rate")
+            tb.add_column("avg_est_edge_pass(bps)")
+            for strategy, diag in sorted(by_strategy_diag.items()):
+                if not isinstance(diag, dict):
+                    continue
+                tb.add_row(
+                    str(strategy),
+                    str(int(float(diag.get("raw", 0)))),
+                    str(int(float(diag.get("pass", 0)))),
+                    str(int(float(diag.get("fail", 0)))),
+                    f"{float(diag.get('pass_rate', 0.0) or 0.0):.2%}",
+                    f"{float(diag.get('avg_estimated_edge_bps_pass', 0.0) or 0.0):.1f}",
+                )
+            console.print(tb)
+
 
 @app.command("list-signals")
 def list_signals(
@@ -960,10 +993,14 @@ def backtest_rolling(
         risk=risk_cfg,
     )
 
-    run_rows: list[tuple[str, str, int, int, int, float, float, dict[str, int]]] = []
+    run_rows: list[
+        tuple[str, str, int, int, int, float, float, dict[str, int], int, int, float]
+    ] = []
     run_intervals: list[tuple[datetime, datetime]] = []
     strategy_agg: dict[str, dict[str, float]] = {}
     risk_rejection_reasons_total: dict[str, int] = {}
+    involved_events_total: set[str] = set()
+    involved_markets_total: set[str] = set()
     total_signals = 0
     executed_signals = 0
     rejected_signals = 0
@@ -982,12 +1019,27 @@ def backtest_rolling(
         )
 
         window_risk_reasons: dict[str, int] = {}
+        window_involved_events: set[str] = set()
+        window_involved_markets: set[str] = set()
+        window_executed_notional = 0.0
         for replay_row in report.replay:
-            if replay_row.risk_allowed:
-                continue
-            reason = replay_row.risk_reason.strip() or "unknown"
-            window_risk_reasons[reason] = window_risk_reasons.get(reason, 0) + 1
-            risk_rejection_reasons_total[reason] = risk_rejection_reasons_total.get(reason, 0) + 1
+            if not replay_row.risk_allowed:
+                reason = replay_row.risk_reason.strip() or "unknown"
+                window_risk_reasons[reason] = window_risk_reasons.get(reason, 0) + 1
+                risk_rejection_reasons_total[reason] = risk_rejection_reasons_total.get(reason, 0) + 1
+
+            if replay_row.risk_allowed and float(replay_row.executed_qty) > 1e-12:
+                event_id = replay_row.event_id.strip()
+                market_id = replay_row.market_id.strip()
+                window_executed_notional += abs(
+                    float(replay_row.executed_qty) * float(replay_row.fill_price)
+                )
+                if event_id:
+                    window_involved_events.add(event_id)
+                    involved_events_total.add(event_id)
+                if market_id:
+                    window_involved_markets.add(market_id)
+                    involved_markets_total.add(market_id)
 
         run_rows.append(
             (
@@ -999,6 +1051,9 @@ def backtest_rolling(
                 exec_rate,
                 pnl_total,
                 window_risk_reasons,
+                len(window_involved_events),
+                len(window_involved_markets),
+                window_executed_notional,
             )
         )
         run_intervals.append((cursor, win_end))
@@ -1033,6 +1088,12 @@ def backtest_rolling(
     positive_window_rate = (positive_window_count / runs) if runs > 0 else 0.0
     pnl_sum = sum(row[6] for row in run_rows)
     pnl_avg = (pnl_sum / runs) if runs > 0 else 0.0
+    unique_event_count = len(involved_events_total)
+    unique_market_count = len(involved_markets_total)
+    unique_event_count_avg = (sum(row[8] for row in run_rows) / runs) if runs > 0 else 0.0
+    unique_market_count_avg = (sum(row[9] for row in run_rows) / runs) if runs > 0 else 0.0
+    executed_notional_sum = sum(row[10] for row in run_rows)
+    executed_notional_avg = (executed_notional_sum / runs) if runs > 0 else 0.0
 
     total_range_seconds = max(0.0, (to_dt - from_dt).total_seconds())
     total_range_hours = total_range_seconds / 3600.0
@@ -1083,7 +1144,12 @@ def backtest_rolling(
         f"coverage_ratio={coverage_ratio:.2%} "
         f"overlap_ratio={overlap_ratio:.2%} "
         f"coverage_label={coverage_label} "
-        f"overlap_mode={overlap_mode}"
+        f"overlap_mode={overlap_mode} "
+        f"unique_events={unique_event_count} "
+        f"unique_markets={unique_market_count} "
+        f"avg_window_events={unique_event_count_avg:.2f} "
+        f"avg_window_markets={unique_market_count_avg:.2f} "
+        f"executed_notional_sum={executed_notional_sum:.2f}"
     )
 
     tb = Table(title=f"Backtest rolling windows ({runs})")
@@ -1095,6 +1161,9 @@ def backtest_rolling(
     tb.add_column("rejected")
     tb.add_column("exec_rate")
     tb.add_column("pnl_total")
+    tb.add_column("events")
+    tb.add_column("markets")
+    tb.add_column("exec_notional")
     tb.add_column("top_reject_reason")
     for idx, run_row in enumerate(run_rows, start=1):
         (
@@ -1106,6 +1175,9 @@ def backtest_rolling(
             run_execution_rate,
             run_pnl_total,
             run_risk_reasons,
+            run_unique_events,
+            run_unique_markets,
+            run_executed_notional,
         ) = run_row
         top_reject_reason = ""
         if run_risk_reasons:
@@ -1122,6 +1194,9 @@ def backtest_rolling(
             str(run_rejected_signals),
             f"{run_execution_rate:.2%}",
             f"{run_pnl_total:.4f}",
+            str(run_unique_events),
+            str(run_unique_markets),
+            f"{run_executed_notional:.2f}",
             top_reject_reason,
         )
     console.print(tb)
@@ -1209,6 +1284,9 @@ def backtest_rolling(
                     reason: count
                     for reason, count in sorted(x[7].items(), key=lambda item: (item[0]))
                 },
+                "unique_event_count": x[8],
+                "unique_market_count": x[9],
+                "executed_notional": x[10],
             }
             for x in run_rows
         ]
@@ -1250,6 +1328,12 @@ def backtest_rolling(
                 "positive_window_rate": positive_window_rate,
                 "pnl_sum": pnl_sum,
                 "pnl_avg": pnl_avg,
+                "unique_event_count": unique_event_count,
+                "unique_market_count": unique_market_count,
+                "unique_event_count_avg": unique_event_count_avg,
+                "unique_market_count_avg": unique_market_count_avg,
+                "executed_notional_sum": executed_notional_sum,
+                "executed_notional_avg": executed_notional_avg,
                 "range_hours": total_range_hours,
                 "sampled_hours": sampled_hours,
                 "covered_hours": covered_hours,

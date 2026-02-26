@@ -235,6 +235,7 @@ if command -v uv >/dev/null 2>&1; then
     --strategy-csv "$RUN_DIR/strategy.csv" \
     --event-csv "$RUN_DIR/event.csv" \
     --rolling-json "$ROLLING_JSON" \
+    --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
     --output "$PDF_PATH" \
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 else
@@ -244,6 +245,7 @@ else
     --strategy-csv "$RUN_DIR/strategy.csv" \
     --event-csv "$RUN_DIR/event.csv" \
     --rolling-json "$ROLLING_JSON" \
+    --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
     --output "$PDF_PATH" \
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 fi
