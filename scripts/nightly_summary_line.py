@@ -112,6 +112,20 @@ def _rolling_negative_strategy_summary(
     }
 
 
+def _strategy_has_activity(row: dict[str, Any]) -> bool:
+    numeric_keys = (
+        "trades",
+        "trade_count",
+        "closed_sample_count",
+        "mtm_sample_count",
+        "wins",
+        "losses",
+        "mtm_wins",
+        "mtm_losses",
+    )
+    return any(int(_f(row.get(key))) > 0 for key in numeric_keys)
+
+
 def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
     executed_signals = int(_f(payload.get("executed_signals")))
     if executed_signals <= 0:
@@ -127,7 +141,9 @@ def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(rows, list) and rows:
         candidates = [r for r in rows if isinstance(r, dict)]
         if candidates:
-            best = max(candidates, key=lambda r: _f(r.get("pnl")))
+            active_candidates = [r for r in candidates if _strategy_has_activity(r)]
+            best_pool = active_candidates if active_candidates else candidates
+            best = max(best_pool, key=lambda r: _f(r.get("pnl")))
 
     if not isinstance(best, dict):
         return {

@@ -254,6 +254,78 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert float(rolling_negative_active_obj["worst_avg_pnl"]) == 0.0
 
 
+def test_nightly_best_strategy_prefers_active_strategies(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T02:00:00Z",
+        "total_signals": 4,
+        "executed_signals": 4,
+        "rejected_signals": 0,
+        "results": [
+            {"strategy": "s1", "pnl": 0.0, "trades": 0},
+            {"strategy": "s2", "pnl": 0.0, "trades": 0},
+            {"strategy": "s8", "pnl": -0.25, "trades": 4, "mtm_wins": 0, "mtm_losses": 4},
+        ],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 2,
+            "execution_rate": 1.0,
+            "positive_window_rate": 0.0,
+            "empty_window_count": 0,
+            "range_hours": 24,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.5,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "best_strategy=s8 pnl=-0.2500" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    best_obj = sidecar["best"]
+    assert isinstance(best_obj, dict)
+    assert str(best_obj["strategy"]) == "s8"
+    assert abs(float(best_obj["pnl"]) - (-0.25)) < 1e-9
+
+
 def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> None:
     backtest_json = tmp_path / "latest.json"
     rolling_json = tmp_path / "rolling.json"
