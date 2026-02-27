@@ -34,6 +34,8 @@ class S1CrossVenueScanner(Strategy):
         min_liquidity = float(cfg.get("min_liquidity", 80.0))
         max_order_notional = float(cfg.get("max_order_notional", 25.0))
         max_signals_per_event = max(1, int(float(cfg.get("max_signals_per_event", 3))))
+        if max_order_notional <= 0:
+            return []
         event_notional_cap = float(cfg.get("event_notional_cap", 24.0))
         inventory_decay = max(0.0, min(0.95, float(cfg.get("inventory_decay", 0.20))))
         enable_cross_market_arb = _as_bool(cfg.get("enable_cross_market_arb"), True)

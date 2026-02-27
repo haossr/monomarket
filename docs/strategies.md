@@ -4,6 +4,7 @@
 
 - 输入：同 canonical/event 的多来源市场（gamma/data/clob）
 - 输出：机会排名（spread、流动性、置信度）
+- `max_order_notional <= 0` 时视为禁用（返回空信号），避免异常大仓位
 - 当前执行：先输出 scanner + ranking；payload 提示半自动双腿执行
 
 ## S2 NegRisk 重平衡
