@@ -24,6 +24,38 @@ def _f(raw: object) -> float:
         return 0.0
 
 
+def _negative_strategy_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    rows = payload.get("results")
+    negatives: list[tuple[str, float]] = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pnl = _f(row.get("pnl"))
+            if pnl < 0:
+                negatives.append((str(row.get("strategy", "")), pnl))
+
+    if not negatives:
+        return {
+            "count": 0,
+            "worst_strategy": "",
+            "worst_pnl": 0.0,
+            "text": "negative_strategies=0 worst_negative_strategy=n/a worst_negative_pnl=0.0000",
+        }
+
+    worst_strategy, worst_pnl = min(negatives, key=lambda x: x[1])
+    return {
+        "count": len(negatives),
+        "worst_strategy": worst_strategy,
+        "worst_pnl": worst_pnl,
+        "text": (
+            f"negative_strategies={len(negatives)} "
+            f"worst_negative_strategy={worst_strategy} "
+            f"worst_negative_pnl={worst_pnl:.4f}"
+        ),
+    }
+
+
 def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
     executed_signals = int(_f(payload.get("executed_signals")))
     if executed_signals <= 0:
@@ -302,6 +334,11 @@ def build_summary_bundle(
 ) -> tuple[str, dict[str, Any]]:
     best_info = _best_strategy(payload)
     best_text = str(best_info.get("text") or "best_strategy=n/a")
+    negative_info = _negative_strategy_summary(payload)
+    negative_text = str(
+        negative_info.get("text")
+        or "negative_strategies=0 worst_negative_strategy=n/a worst_negative_pnl=0.0000"
+    )
 
     winrate_info = _aggregate_winrate(payload)
     closed_winrate = float(winrate_info.get("closed_winrate", 0.0))
@@ -461,6 +498,7 @@ def build_summary_bundle(
     rolling_reject_top_pairs: list[tuple[str, int]] = []
     rolling_reject_top_normalized = "disabled" if k_norm <= 0 else "none"
     rolling_reject_top_pairs_normalized: list[tuple[str, int]] = []
+    rolling_reject_top_effective = "disabled" if k_norm <= 0 else "none"
 
     rolling_summary = None
     if isinstance(rolling_payload, dict):
@@ -498,6 +536,11 @@ def build_summary_bundle(
             ) = format_reject_top(
                 raw_reasons, top_k=k_norm, delimiter=ROLLING_REJECT_TOP_DELIMITER, normalize=True
             )
+            rolling_reject_top_effective = (
+                rolling_reject_top_normalized
+                if rolling_reject_top_normalized not in {"none", "disabled"}
+                else rolling_reject_top
+            )
 
     line = (
         f"Nightly {nightly_date} | window={payload.get('from_ts', '')} -> {payload.get('to_ts', '')} "
@@ -533,6 +576,7 @@ def build_summary_bundle(
         f"edge_gate_pass_rate={edge_gate_pass_rate:.2%} "
         f"edge_gate_top={edge_gate_by_strategy_top} "
         f"| {best_text} "
+        f"| {negative_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
         f"positive_window_rate={rolling_positive_window_rate:.2%} "
@@ -551,6 +595,7 @@ def build_summary_bundle(
         f"rolling_reject_top_delim={ROLLING_REJECT_TOP_DELIMITER} "
         f"rolling_reject_top={rolling_reject_top} "
         f"rolling_reject_top_normalized={rolling_reject_top_normalized} "
+        f"rolling_reject_top_effective={rolling_reject_top_effective} "
         f"reject_strategy_top={reject_strategy_top} "
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
@@ -596,6 +641,12 @@ def build_summary_bundle(
             "text": best_text,
         },
         "best_text": best_text,
+        "negative_strategies": {
+            "count": int(_f(negative_info.get("count"))),
+            "worst_strategy": str(negative_info.get("worst_strategy", "")),
+            "worst_pnl": float(_f(negative_info.get("worst_pnl"))),
+            "text": negative_text,
+        },
         "rolling": {
             "runs": rolling_runs,
             "execution_rate": rolling_exec_rate,
@@ -623,6 +674,7 @@ def build_summary_bundle(
                 {"reason": reason, "count": count} for reason, count in rolling_reject_top_pairs
             ],
             "reject_top_normalized": rolling_reject_top_normalized,
+            "reject_top_effective": rolling_reject_top_effective,
             "reject_top_pairs_normalized": [
                 {"reason": reason, "count": count}
                 for reason, count in rolling_reject_top_pairs_normalized

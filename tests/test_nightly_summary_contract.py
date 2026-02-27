@@ -60,6 +60,9 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "historical_replay_only=",
         "experiment_interpretable=",
         "experiment_reason=",
+        "negative_strategies=",
+        "worst_negative_strategy=",
+        "worst_negative_pnl=",
         "positive_window_rate=",
         "empty_window_count=",
         "range_hours=",
@@ -67,6 +70,7 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "overlap_ratio=",
         "rolling_reject_top_k=",
         "rolling_reject_top_normalized=",
+        "rolling_reject_top_effective=",
     ]
     for token in required_tokens:
         assert token in content
@@ -203,6 +207,8 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
 
     line = summary_txt.read_text().strip()
     assert "best_strategy=n/a" in line
+    assert "negative_strategies=0" in line
+    assert "worst_negative_strategy=n/a" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -215,6 +221,86 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert float(best_obj["pnl"]) == 0.0
     assert str(best_obj["text"]) == "best_strategy=n/a"
     assert str(sidecar["best_text"]) == "best_strategy=n/a"
+
+    negative_obj = sidecar["negative_strategies"]
+    assert isinstance(negative_obj, dict)
+    assert int(negative_obj["count"]) == 0
+    assert str(negative_obj["worst_strategy"]) == ""
+    assert float(negative_obj["worst_pnl"]) == 0.0
+
+
+def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T02:00:00Z",
+        "total_signals": 10,
+        "executed_signals": 10,
+        "rejected_signals": 0,
+        "results": [
+            {"strategy": "s1", "pnl": -1.25, "mtm_wins": 0, "mtm_losses": 1},
+            {"strategy": "s8", "pnl": 0.75, "mtm_wins": 1, "mtm_losses": 0},
+        ],
+        "replay": [{"ts": "2026-02-24T00:00:00Z", "realized_change": 0.0}],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 1.0,
+            "positive_window_rate": 1.0,
+            "empty_window_count": 0,
+            "range_hours": 2,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "negative_strategies=1" in line
+    assert "worst_negative_strategy=s1" in line
+    assert "worst_negative_pnl=-1.2500" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    negative_obj = sidecar["negative_strategies"]
+    assert int(negative_obj["count"]) == 1
+    assert str(negative_obj["worst_strategy"]) == "s1"
+    assert float(negative_obj["worst_pnl"]) == -1.25
 
 
 def test_nightly_summary_reports_closed_and_mtm_winrate(tmp_path: Path) -> None:
@@ -941,6 +1027,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top_delim=;" in line_disabled
     assert "rolling_reject_top=disabled" in line_disabled
     assert "rolling_reject_top_normalized=disabled" in line_disabled
+    assert "rolling_reject_top_effective=disabled" in line_disabled
     assert "positive_window_rate=" in line_disabled
     assert "empty_window_count=" in line_disabled
     assert "range_hours=" in line_disabled
@@ -959,6 +1046,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert str(disabled_sidecar["rolling"]["reject_top_delimiter"]) == ";"
     assert str(disabled_sidecar["rolling"]["reject_top"]) == "disabled"
     assert str(disabled_sidecar["rolling"]["reject_top_normalized"]) == "disabled"
+    assert str(disabled_sidecar["rolling"]["reject_top_effective"]) == "disabled"
     assert disabled_sidecar["rolling"]["reject_top_pairs_normalized"] == []
     best_obj = disabled_sidecar["best"]
     assert isinstance(best_obj, dict)
@@ -1005,6 +1093,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top_delim=;" in line_none
     assert "rolling_reject_top=none" in line_none
     assert "rolling_reject_top_normalized=none" in line_none
+    assert "rolling_reject_top_effective=none" in line_none
 
     none_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(none_sidecar)
@@ -1014,6 +1103,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert str(none_sidecar["rolling"]["reject_top_delimiter"]) == ";"
     assert str(none_sidecar["rolling"]["reject_top"]) == "none"
     assert str(none_sidecar["rolling"]["reject_top_normalized"]) == "none"
+    assert str(none_sidecar["rolling"]["reject_top_effective"]) == "none"
     assert none_sidecar["rolling"]["reject_top_pairs_normalized"] == []
 
     # k>0 with reasons containing comma: delimiter must remain ';'
@@ -1052,6 +1142,7 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top_delim=;" in line_reasons
     assert "rolling_reject_top=risk,A:3;riskB:1" in line_reasons
     assert "rolling_reject_top_normalized=risk,A:3;riskB:1" in line_reasons
+    assert "rolling_reject_top_effective=risk,A:3;riskB:1" in line_reasons
 
     reasons_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(reasons_sidecar)
@@ -1100,10 +1191,17 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert (
         "rolling_reject_top_normalized=" "strategy notional limit exceeded:5;circuit breaker open:1"
     ) in line_normalized
+    assert (
+        "rolling_reject_top_effective=" "strategy notional limit exceeded:5;circuit breaker open:1"
+    ) in line_normalized
 
     normalized_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(normalized_sidecar)
     assert verify_nightly_summary_sidecar_checksum(normalized_sidecar)
+    assert (
+        str(normalized_sidecar["rolling"]["reject_top_effective"])
+        == "strategy notional limit exceeded:5;circuit breaker open:1"
+    )
     rolling_norm_pairs = normalized_sidecar["rolling"]["reject_top_pairs_normalized"]
     assert isinstance(rolling_norm_pairs, list)
     assert rolling_norm_pairs == [
