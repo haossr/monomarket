@@ -1250,11 +1250,12 @@ def backtest_rolling(
             "full_detail=rolling-summary.json"
         )
 
-    strategy_rows: list[tuple[str, int, int, float, float, float, int, float, int, int]] = []
+    strategy_rows: list[tuple[str, int, int, float, float, float, float, int, float, int, int]] = []
     for strategy, acc in sorted(strategy_agg.items()):
         windows = int(acc["windows"])
         avg_pnl = acc["pnl_sum"] / windows if windows > 0 else 0.0
         active_windows = int(acc.get("active_windows", 0.0))
+        active_window_rate = (active_windows / windows) if windows > 0 else 0.0
         avg_pnl_active = (
             acc.get("active_pnl_sum", 0.0) / active_windows if active_windows > 0 else 0.0
         )
@@ -1272,6 +1273,7 @@ def backtest_rolling(
                 strategy,
                 windows,
                 active_windows,
+                active_window_rate,
                 avg_pnl,
                 avg_pnl_active,
                 avg_closed_winrate,
@@ -1286,6 +1288,7 @@ def backtest_rolling(
     tb2.add_column("strategy")
     tb2.add_column("windows")
     tb2.add_column("active_windows")
+    tb2.add_column("active_window_rate")
     tb2.add_column("avg_pnl")
     tb2.add_column("avg_pnl_active")
     tb2.add_column("avg_closed_wr")
@@ -1295,6 +1298,7 @@ def backtest_rolling(
         strategy,
         windows,
         active_windows,
+        active_window_rate,
         avg_pnl,
         avg_pnl_active,
         avg_closed_winrate,
@@ -1307,6 +1311,7 @@ def backtest_rolling(
             strategy,
             str(windows),
             str(active_windows),
+            f"{active_window_rate:.2%}",
             f"{avg_pnl:.4f}",
             f"{avg_pnl_active:.4f}",
             _format_rate_with_samples(avg_closed_winrate, closed_sample_sum),
@@ -1356,14 +1361,15 @@ def backtest_rolling(
                 "strategy": x[0],
                 "windows": x[1],
                 "active_windows": x[2],
-                "avg_pnl": x[3],
-                "avg_pnl_active": x[4],
-                "avg_winrate": x[5],
-                "avg_closed_winrate": x[5],
-                "closed_sample_count": x[6],
-                "avg_mtm_winrate": x[7],
-                "mtm_sample_count": x[8],
-                "total_trades": x[9],
+                "active_window_rate": x[3],
+                "avg_pnl": x[4],
+                "avg_pnl_active": x[5],
+                "avg_winrate": x[6],
+                "avg_closed_winrate": x[6],
+                "closed_sample_count": x[7],
+                "avg_mtm_winrate": x[8],
+                "mtm_sample_count": x[9],
+                "total_trades": x[10],
             }
             for x in strategy_rows
         ]
