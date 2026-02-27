@@ -444,6 +444,26 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
     if best_text_top is not None and not isinstance(best_text_top, str):
         raise ValueError("nightly sidecar best_text must be a string")
 
+    negative_strategies = payload.get("negative_strategies")
+    if not isinstance(negative_strategies, Mapping):
+        raise ValueError("nightly sidecar negative_strategies must be an object")
+
+    negative_count = negative_strategies.get("count")
+    if not isinstance(negative_count, int | float):
+        raise ValueError("nightly sidecar negative_strategies.count must be numeric")
+
+    worst_strategy = negative_strategies.get("worst_strategy")
+    if not isinstance(worst_strategy, str):
+        raise ValueError("nightly sidecar negative_strategies.worst_strategy must be a string")
+
+    worst_pnl = negative_strategies.get("worst_pnl")
+    if not isinstance(worst_pnl, int | float):
+        raise ValueError("nightly sidecar negative_strategies.worst_pnl must be numeric")
+
+    negative_text = negative_strategies.get("text")
+    if not isinstance(negative_text, str):
+        raise ValueError("nightly sidecar negative_strategies.text must be a string")
+
     rolling = payload.get("rolling")
     if not isinstance(rolling, Mapping):
         raise ValueError("nightly sidecar rolling must be an object")
@@ -463,7 +483,7 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if not isinstance(raw, int | float):
             raise ValueError(f"nightly sidecar rolling.{key} must be numeric")
 
-    for key in ("coverage_label", "reject_top"):
+    for key in ("coverage_label", "reject_top", "reject_top_effective"):
         raw = rolling.get(key)
         if not isinstance(raw, str):
             raise ValueError(f"nightly sidecar rolling.{key} must be a string")

@@ -269,6 +269,12 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             "text": "best_strategy=s1 pnl=1.2000",
         },
         "best_text": "best_strategy=s1 pnl=1.2000",
+        "negative_strategies": {
+            "count": 1,
+            "worst_strategy": "s2",
+            "worst_pnl": -0.5,
+            "text": "negative_strategies=1 worst_negative_strategy=s2 worst_negative_pnl=-0.5000",
+        },
         "rolling": {
             "runs": 3,
             "execution_rate": 0.8,
@@ -286,6 +292,7 @@ def _nightly_sidecar_payload() -> dict[str, object]:
                 {"reason": "riskB", "count": 1},
             ],
             "reject_top_normalized": "riskA:3;riskB:1",
+            "reject_top_effective": "riskA:3;riskB:1",
             "reject_top_pairs_normalized": [
                 {"reason": "riskA", "count": 3},
                 {"reason": "riskB", "count": 1},
