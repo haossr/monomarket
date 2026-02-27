@@ -163,6 +163,15 @@ def _write_backtest_strategy_csv(report: BacktestReport, output_path: str) -> No
                 "mtm_wins",
                 "mtm_losses",
                 "mtm_sample_count",
+                "sharpe_ratio",
+                "sortino_ratio",
+                "calmar_ratio",
+                "profit_factor",
+                "avg_trade_return",
+                "return_volatility",
+                "expectancy",
+                "best_trade_return",
+                "worst_trade_return",
             ],
         )
         writer.writeheader()
@@ -194,6 +203,15 @@ def _write_backtest_event_csv(report: BacktestReport, output_path: str) -> None:
                 "mtm_wins",
                 "mtm_losses",
                 "mtm_sample_count",
+                "sharpe_ratio",
+                "sortino_ratio",
+                "calmar_ratio",
+                "profit_factor",
+                "avg_trade_return",
+                "return_volatility",
+                "expectancy",
+                "best_trade_return",
+                "worst_trade_return",
             ],
         )
         writer.writeheader()
@@ -831,6 +849,10 @@ def backtest(
     tb = Table(title="Backtest attribution")
     tb.add_column("strategy")
     tb.add_column("pnl")
+    tb.add_column("sharpe")
+    tb.add_column("sortino")
+    tb.add_column("calmar")
+    tb.add_column("pf")
     tb.add_column("closed_wr")
     tb.add_column("mtm_wr")
     tb.add_column("max_drawdown")
@@ -840,6 +862,10 @@ def backtest(
         tb.add_row(
             result.strategy,
             f"{result.pnl:.4f}",
+            f"{result.sharpe_ratio:.3f}",
+            f"{result.sortino_ratio:.3f}",
+            f"{result.calmar_ratio:.3f}",
+            f"{result.profit_factor:.3f}",
             _format_rate_with_samples(result.closed_winrate, result.closed_sample_count),
             _format_rate_with_samples(result.mtm_winrate, result.mtm_sample_count),
             f"{result.max_drawdown:.4f}",
@@ -851,6 +877,9 @@ def backtest(
     event_tb.add_column("strategy")
     event_tb.add_column("event")
     event_tb.add_column("pnl")
+    event_tb.add_column("sharpe")
+    event_tb.add_column("sortino")
+    event_tb.add_column("pf")
     event_tb.add_column("closed_wr")
     event_tb.add_column("mtm_wr")
     event_tb.add_column("max_drawdown")
@@ -861,6 +890,9 @@ def backtest(
             event_result.strategy,
             event_result.event_id,
             f"{event_result.pnl:.4f}",
+            f"{event_result.sharpe_ratio:.3f}",
+            f"{event_result.sortino_ratio:.3f}",
+            f"{event_result.profit_factor:.3f}",
             _format_rate_with_samples(
                 event_result.closed_winrate, event_result.closed_sample_count
             ),

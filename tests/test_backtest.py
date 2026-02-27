@@ -240,6 +240,15 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert r.mtm_losses == 1
     assert r.mtm_sample_count == 2
     assert r.max_drawdown >= 0.0
+    assert abs(r.sharpe_ratio + 0.2) < 1e-9
+    assert abs(r.sortino_ratio + (1.0 / 3.0)) < 1e-9
+    assert abs(r.calmar_ratio - 3.0) < 1e-9
+    assert abs(r.profit_factor - 4.0) < 1e-9
+    assert abs(r.avg_trade_return + (1.0 / 12.0)) < 1e-9
+    assert abs(r.return_volatility - 0.5892556509887895) < 1e-9
+    assert abs(r.expectancy - 0.75) < 1e-9
+    assert abs(r.best_trade_return - (1.0 / 3.0)) < 1e-9
+    assert abs(r.worst_trade_return + 0.5) < 1e-9
 
     assert len(report.event_results) == 2
     event_map = {(x.strategy, x.event_id): x for x in report.event_results}
@@ -247,6 +256,11 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert abs(event_map[("s1", "e2")].pnl + 0.5) < 1e-9
     assert event_map[("s1", "e1")].trade_count == 2
     assert event_map[("s1", "e2")].trade_count == 2
+    assert abs(event_map[("s1", "e1")].avg_trade_return - (1.0 / 3.0)) < 1e-9
+    assert abs(event_map[("s1", "e1")].profit_factor - 0.0) < 1e-9
+    assert abs(event_map[("s1", "e1")].calmar_ratio - 0.0) < 1e-9
+    assert abs(event_map[("s1", "e2")].sortino_ratio + 1.0) < 1e-9
+    assert abs(event_map[("s1", "e2")].calmar_ratio + 1.0) < 1e-9
 
     assert len(report.replay) == 4
     assert report.replay[0].event_id == "e1"
@@ -256,6 +270,37 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert all(x.risk_reason == "ok" for x in report.replay)
     assert all(abs(x.fill_ratio - 1.0) < 1e-9 for x in report.replay)
     assert all(abs(x.fill_probability - 1.0) < 1e-9 for x in report.replay)
+
+
+def test_backtest_metrics_no_trades_are_zero(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+    ).run(["s9"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
+
+    assert report.total_signals == 0
+    assert report.executed_signals == 0
+    assert report.rejected_signals == 0
+    assert len(report.results) == 1
+    r = report.results[0]
+    assert r.strategy == "s9"
+    assert r.trade_count == 0
+    assert r.closed_sample_count == 0
+    assert r.mtm_sample_count == 0
+    assert abs(r.sharpe_ratio) < 1e-9
+    assert abs(r.sortino_ratio) < 1e-9
+    assert abs(r.calmar_ratio) < 1e-9
+    assert abs(r.profit_factor) < 1e-9
+    assert abs(r.avg_trade_return) < 1e-9
+    assert abs(r.return_volatility) < 1e-9
+    assert abs(r.expectancy) < 1e-9
+    assert abs(r.best_trade_return) < 1e-9
+    assert abs(r.worst_trade_return) < 1e-9
 
 
 def test_backtest_partial_fill_model(tmp_path: Path) -> None:
@@ -1196,6 +1241,11 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert abs(float(payload["results"][0]["mtm_winrate"]) - 0.5) < 1e-9
     assert int(payload["results"][0]["closed_sample_count"]) == 2
     assert int(payload["results"][0]["mtm_sample_count"]) == 2
+    assert abs(float(payload["results"][0]["sharpe_ratio"]) + 0.2) < 1e-9
+    assert abs(float(payload["results"][0]["sortino_ratio"]) + (1.0 / 3.0)) < 1e-9
+    assert abs(float(payload["results"][0]["profit_factor"]) - 4.0) < 1e-9
+    assert abs(float(payload["results"][0]["avg_trade_return"]) + (1.0 / 12.0)) < 1e-9
+    assert abs(float(payload["results"][0]["return_volatility"]) - 0.5892556509887895) < 1e-9
 
     with csv_out.open() as f:
         rows = list(csv.DictReader(f))
@@ -1220,6 +1270,10 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert abs(float(strategy_rows[0]["mtm_winrate"]) - 0.5) < 1e-9
     assert int(strategy_rows[0]["closed_sample_count"]) == 2
     assert int(strategy_rows[0]["mtm_sample_count"]) == 2
+    assert abs(float(strategy_rows[0]["sharpe_ratio"]) + 0.2) < 1e-9
+    assert abs(float(strategy_rows[0]["sortino_ratio"]) + (1.0 / 3.0)) < 1e-9
+    assert abs(float(strategy_rows[0]["profit_factor"]) - 4.0) < 1e-9
+    assert "return_volatility" in strategy_rows[0]
 
     with event_csv_out.open() as f:
         event_rows = list(csv.DictReader(f))
@@ -1228,6 +1282,9 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert {x["event_id"] for x in event_rows} == {"e1", "e2"}
     assert all("closed_winrate" in x for x in event_rows)
     assert all("mtm_winrate" in x for x in event_rows)
+    assert all("sharpe_ratio" in x for x in event_rows)
+    assert all("sortino_ratio" in x for x in event_rows)
+    assert all("profit_factor" in x for x in event_rows)
 
     for csv_path in [csv_out, strategy_csv_out, event_csv_out]:
         sidecar_path = csv_path.with_name(csv_path.name + ".sha256")

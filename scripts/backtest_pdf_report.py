@@ -622,31 +622,58 @@ def render_pdf(
 
     write_line("")
 
-    write_line("Strategy Metrics", bold=True, size=12, leading=18)
+    write_line("Strategy Tear Sheet / 策略撕页", bold=True, size=12, leading=18)
     if not strategy_rows:
         write_line("(No strategy rows)")
     else:
+        write_line("Return & Risk")
         for row in strategy_rows:
             strategy = str(row.get("strategy", ""))
             pnl = _safe_float(row.get("pnl"))
+            max_dd = _safe_float(row.get("max_drawdown"))
+            sharpe = _safe_float(row.get("sharpe_ratio"))
+            sortino = _safe_float(row.get("sortino_ratio"))
+            calmar = _safe_float(row.get("calmar_ratio"))
+            ret_vol = _safe_float(row.get("return_volatility"))
+            avg_trade_ret = _safe_float(row.get("avg_trade_return"))
+            write_wrapped(
+                " - "
+                + f"{strategy}: pnl={pnl:.4f}, max_drawdown={max_dd:.4f}, "
+                + f"sharpe={sharpe:.3f}, sortino={sortino:.3f}, calmar={calmar:.3f}, "
+                + f"volatility(trade_return)={ret_vol:.4f}, avg_trade_return={avg_trade_ret:.4f}"
+            )
+
+        write_line("Trade Distribution")
+        for row in strategy_rows:
+            strategy = str(row.get("strategy", ""))
             closed_winrate = _format_rate_with_samples(
                 row.get("closed_winrate", row.get("winrate")), row.get("closed_sample_count")
             )
             mtm_winrate = _format_rate_with_samples(
                 row.get("mtm_winrate"), row.get("mtm_sample_count")
             )
-            max_dd = _safe_float(row.get("max_drawdown"))
             trades = _safe_int(row.get("trade_count"))
             wins = _safe_int(row.get("wins"))
             losses = _safe_int(row.get("losses"))
             closed_samples = _safe_int(row.get("closed_sample_count"))
             mtm_samples = _safe_int(row.get("mtm_sample_count"))
+            profit_factor = _safe_float(row.get("profit_factor"))
+            expectancy = _safe_float(row.get("expectancy"))
+            best_ret = _safe_float(row.get("best_trade_return"))
+            worst_ret = _safe_float(row.get("worst_trade_return"))
             write_wrapped(
                 " - "
-                + f"{strategy}: pnl={pnl:.4f}, closed_winrate={closed_winrate}"
-                + f" ({wins}/{closed_samples}), mtm_winrate={mtm_winrate}, "
-                + f"max_drawdown={max_dd:.4f}, trades={trades}, losses={losses}, mtm_samples={mtm_samples}"
+                + f"{strategy}: profit_factor={profit_factor:.3f}, expectancy={expectancy:.4f}, "
+                + f"best_trade_return={best_ret:.4f}, worst_trade_return={worst_ret:.4f}, "
+                + f"closed_winrate={closed_winrate} ({wins}/{closed_samples}), "
+                + f"mtm_winrate={mtm_winrate}, trades={trades}, losses={losses}, mtm_samples={mtm_samples}"
             )
+
+        write_wrapped(
+            "TODO: annual return/CAGR, annualized volatility, drawdown duration, "
+            "Omega/skew/kurtosis/tail-ratio/VaR, and QC-style exposure/turnover/runtime "
+            "need regularized equity/capital series (not yet available in replay schema)."
+        )
 
     write_line("")
     write_line("PnL Charts", bold=True, size=12, leading=18)

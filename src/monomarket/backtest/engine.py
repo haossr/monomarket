@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -9,6 +10,7 @@ from monomarket.db.storage import Storage
 
 OUTCOME_TOKEN_YES = "YES"  # nosec B105
 BACKTEST_ARTIFACT_SCHEMA_VERSION = "1.0"
+_METRIC_EPS = 1e-12
 
 
 @dataclass(slots=True)
@@ -50,6 +52,17 @@ class BacktestStrategyResult:
     mtm_wins: int
     mtm_losses: int
     mtm_sample_count: int
+    # Risk-adjusted metrics (computed from executed replay fills that close inventory,
+    # i.e. fills where realized_change != 0 under the current toy execution model).
+    sharpe_ratio: float
+    sortino_ratio: float
+    calmar_ratio: float
+    profit_factor: float
+    avg_trade_return: float
+    return_volatility: float
+    expectancy: float
+    best_trade_return: float
+    worst_trade_return: float
 
 
 @dataclass(slots=True)
@@ -69,6 +82,15 @@ class BacktestEventResult:
     mtm_wins: int
     mtm_losses: int
     mtm_sample_count: int
+    sharpe_ratio: float
+    sortino_ratio: float
+    calmar_ratio: float
+    profit_factor: float
+    avg_trade_return: float
+    return_volatility: float
+    expectancy: float
+    best_trade_return: float
+    worst_trade_return: float
 
 
 @dataclass(slots=True)
@@ -141,6 +163,19 @@ class _RiskDecision:
     rejections_before: int
 
 
+@dataclass(slots=True)
+class _RiskAdjustedMetrics:
+    sharpe_ratio: float = 0.0
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
+    profit_factor: float = 0.0
+    avg_trade_return: float = 0.0
+    return_volatility: float = 0.0
+    expectancy: float = 0.0
+    best_trade_return: float = 0.0
+    worst_trade_return: float = 0.0
+
+
 def _parse_ts(raw: str) -> datetime:
     text = raw.strip()
     if text.endswith("Z"):
@@ -181,6 +216,10 @@ class BacktestEngine:
         mtm_wins: dict[str, int] = defaultdict(int)
         mtm_losses: dict[str, int] = defaultdict(int)
         equity_curve: dict[str, list[float]] = defaultdict(lambda: [0.0])
+        # Per-closed-fill return legs for risk-adjusted metrics.
+        # Return leg: realized_change / abs(fill_price * executed_qty).
+        closed_trade_returns: dict[str, list[float]] = defaultdict(list)
+        closed_trade_realized: dict[str, list[float]] = defaultdict(list)
 
         realized_by_event: dict[tuple[str, str], float] = defaultdict(float)
         event_trade_count: dict[tuple[str, str], int] = defaultdict(int)
@@ -189,6 +228,8 @@ class BacktestEngine:
         event_mtm_wins: dict[tuple[str, str], int] = defaultdict(int)
         event_mtm_losses: dict[tuple[str, str], int] = defaultdict(int)
         event_equity_curve: dict[tuple[str, str], list[float]] = defaultdict(lambda: [0.0])
+        event_closed_trade_returns: dict[tuple[str, str], list[float]] = defaultdict(list)
+        event_closed_trade_realized: dict[tuple[str, str], list[float]] = defaultdict(list)
 
         replay: list[BacktestReplayRow] = []
         rejection_count = 0
@@ -393,6 +434,15 @@ class BacktestEngine:
             event_trade_count[event_key] += 1
 
             if outcome.closed_trade:
+                trade_notional = abs(fill_price * executed_qty)
+                trade_return = (
+                    (realized_change / trade_notional) if trade_notional > _METRIC_EPS else 0.0
+                )
+                closed_trade_returns[strategy].append(trade_return)
+                closed_trade_realized[strategy].append(realized_change)
+                event_closed_trade_returns[event_key].append(trade_return)
+                event_closed_trade_realized[event_key].append(realized_change)
+
                 if realized_change > 0:
                     wins[strategy] += 1
                     event_wins[event_key] += 1
@@ -477,6 +527,13 @@ class BacktestEngine:
             closed_winrate = (wins[strategy] / closed_total) if closed_total else 0.0
             mtm_total = mtm_wins[strategy] + mtm_losses[strategy]
             mtm_winrate = (mtm_wins[strategy] / mtm_total) if mtm_total else 0.0
+            strategy_max_drawdown = self._max_drawdown(equity_curve[strategy])
+            strategy_metrics = self._risk_adjusted_metrics(
+                trade_returns=closed_trade_returns[strategy],
+                realized_changes=closed_trade_realized[strategy],
+                pnl=final_equity,
+                max_drawdown=strategy_max_drawdown,
+            )
 
             results.append(
                 BacktestStrategyResult(
@@ -485,7 +542,7 @@ class BacktestEngine:
                     winrate=closed_winrate,
                     closed_winrate=closed_winrate,
                     mtm_winrate=mtm_winrate,
-                    max_drawdown=self._max_drawdown(equity_curve[strategy]),
+                    max_drawdown=strategy_max_drawdown,
                     trade_count=trade_count[strategy],
                     wins=wins[strategy],
                     losses=losses[strategy],
@@ -493,6 +550,15 @@ class BacktestEngine:
                     mtm_wins=mtm_wins[strategy],
                     mtm_losses=mtm_losses[strategy],
                     mtm_sample_count=mtm_total,
+                    sharpe_ratio=strategy_metrics.sharpe_ratio,
+                    sortino_ratio=strategy_metrics.sortino_ratio,
+                    calmar_ratio=strategy_metrics.calmar_ratio,
+                    profit_factor=strategy_metrics.profit_factor,
+                    avg_trade_return=strategy_metrics.avg_trade_return,
+                    return_volatility=strategy_metrics.return_volatility,
+                    expectancy=strategy_metrics.expectancy,
+                    best_trade_return=strategy_metrics.best_trade_return,
+                    worst_trade_return=strategy_metrics.worst_trade_return,
                 )
             )
 
@@ -517,6 +583,13 @@ class BacktestEngine:
             closed_winrate = (event_wins[event_key] / closed_total) if closed_total else 0.0
             mtm_total = event_mtm_wins[event_key] + event_mtm_losses[event_key]
             mtm_winrate = (event_mtm_wins[event_key] / mtm_total) if mtm_total else 0.0
+            event_max_drawdown = self._max_drawdown(event_equity_curve[event_key])
+            event_metrics = self._risk_adjusted_metrics(
+                trade_returns=event_closed_trade_returns[event_key],
+                realized_changes=event_closed_trade_realized[event_key],
+                pnl=final_event_equity,
+                max_drawdown=event_max_drawdown,
+            )
             event_results.append(
                 BacktestEventResult(
                     strategy=strategy,
@@ -525,7 +598,7 @@ class BacktestEngine:
                     winrate=closed_winrate,
                     closed_winrate=closed_winrate,
                     mtm_winrate=mtm_winrate,
-                    max_drawdown=self._max_drawdown(event_equity_curve[event_key]),
+                    max_drawdown=event_max_drawdown,
                     trade_count=event_trade_count[event_key],
                     wins=event_wins[event_key],
                     losses=event_losses[event_key],
@@ -533,6 +606,15 @@ class BacktestEngine:
                     mtm_wins=event_mtm_wins[event_key],
                     mtm_losses=event_mtm_losses[event_key],
                     mtm_sample_count=mtm_total,
+                    sharpe_ratio=event_metrics.sharpe_ratio,
+                    sortino_ratio=event_metrics.sortino_ratio,
+                    calmar_ratio=event_metrics.calmar_ratio,
+                    profit_factor=event_metrics.profit_factor,
+                    avg_trade_return=event_metrics.avg_trade_return,
+                    return_volatility=event_metrics.return_volatility,
+                    expectancy=event_metrics.expectancy,
+                    best_trade_return=event_metrics.best_trade_return,
+                    worst_trade_return=event_metrics.worst_trade_return,
                 )
             )
 
@@ -740,6 +822,77 @@ class BacktestEngine:
             if dd > max_dd:
                 max_dd = dd
         return max_dd
+
+    @staticmethod
+    def _sample_std(values: list[float]) -> float:
+        n = len(values)
+        if n <= 1:
+            return 0.0
+
+        mean = sum(values) / n
+        variance = sum((x - mean) ** 2 for x in values) / (n - 1)
+        if variance <= _METRIC_EPS:
+            return 0.0
+        return math.sqrt(variance)
+
+    @staticmethod
+    def _safe_ratio(numerator: float, denominator: float) -> float:
+        if abs(denominator) <= _METRIC_EPS:
+            return 0.0
+        return numerator / denominator
+
+    @classmethod
+    def _risk_adjusted_metrics(
+        cls,
+        *,
+        trade_returns: list[float],
+        realized_changes: list[float],
+        pnl: float,
+        max_drawdown: float,
+    ) -> _RiskAdjustedMetrics:
+        # Formulas mirror common tear-sheet conventions, adapted to replay trades:
+        #   trade_return_i = realized_change_i / abs(fill_price_i * executed_qty_i)
+        #   avg_trade_return = mean(trade_return_i)
+        #   return_volatility = sample_std(trade_return_i)
+        #   sharpe_ratio = sqrt(N) * avg_trade_return / return_volatility (rf=0)
+        #   sortino_ratio = sqrt(N) * avg_trade_return / downside_deviation
+        #       downside_deviation = sqrt(mean(min(trade_return_i, 0)^2))
+        #   calmar_ratio = pnl / max_drawdown
+        #   profit_factor = gross_profit / abs(gross_loss)
+        #
+        # Edge handling (deterministic/safe): return 0 for undefined denominators
+        # (e.g., no trades, zero variance, no losses, zero drawdown).
+        #
+        # TODO(hsheng): annual return/CAGR, annualized volatility, drawdown duration,
+        # Omega/skew/kurtosis/tail-ratio/VaR, exposure/turnover require a canonical
+        # capital base and regularized time-series returns in replay artifacts.
+        if not trade_returns or not realized_changes:
+            return _RiskAdjustedMetrics()
+
+        n = len(trade_returns)
+        avg_trade_return = sum(trade_returns) / n
+        return_volatility = cls._sample_std(trade_returns)
+        sharpe_ratio = cls._safe_ratio(avg_trade_return, return_volatility) * math.sqrt(float(n))
+
+        downside_dev = math.sqrt(sum(min(x, 0.0) ** 2 for x in trade_returns) / n)
+        sortino_ratio = cls._safe_ratio(avg_trade_return, downside_dev) * math.sqrt(float(n))
+
+        gross_profit = sum(x for x in realized_changes if x > 0.0)
+        gross_loss = -sum(x for x in realized_changes if x < 0.0)
+
+        expectancy = sum(realized_changes) / len(realized_changes)
+
+        return _RiskAdjustedMetrics(
+            sharpe_ratio=sharpe_ratio,
+            sortino_ratio=sortino_ratio,
+            calmar_ratio=cls._safe_ratio(pnl, max_drawdown),
+            profit_factor=cls._safe_ratio(gross_profit, gross_loss),
+            avg_trade_return=avg_trade_return,
+            return_volatility=return_volatility,
+            expectancy=expectancy,
+            best_trade_return=max(trade_returns),
+            worst_trade_return=min(trade_returns),
+        )
 
     @staticmethod
     def _breaker_counts_rejection_reason(reason: str) -> bool:
