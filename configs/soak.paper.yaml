@@ -55,7 +55,7 @@ strategies:
     edge_gate_min_bps: 500.0
     edge_gate_budget_cap_notional: 2.0
     edge_gate_budget_penalty_bps: 200.0
-    exclude_event_ids: ["27829"]
+    exclude_event_ids: ["27829", "27830"]
   s4:
     yes_price_min: 0.01
     yes_price_max: 0.10
