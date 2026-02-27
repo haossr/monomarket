@@ -328,6 +328,7 @@ def _nightly_sidecar_payload() -> dict[str, object]:
                 "generated_span_hours": 0.0,
                 "generated_window_coverage_ratio": 0.0,
                 "generated_low_influence": True,
+                "generated_low_sample_count": True,
                 "generated_low_temporal_coverage": True,
                 "historical_replay_only": True,
                 "experiment_interpretable": False,

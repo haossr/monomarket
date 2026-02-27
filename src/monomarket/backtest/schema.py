@@ -655,6 +655,12 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                 "nightly sidecar cycle_meta.signal_generation.generated_low_influence must be a boolean"
             )
 
+        generated_low_sample_count = signal_generation.get("generated_low_sample_count")
+        if not isinstance(generated_low_sample_count, bool):
+            raise ValueError(
+                "nightly sidecar cycle_meta.signal_generation.generated_low_sample_count must be a boolean"
+            )
+
         generated_low_temporal_coverage = signal_generation.get("generated_low_temporal_coverage")
         if not isinstance(generated_low_temporal_coverage, bool):
             raise ValueError(
