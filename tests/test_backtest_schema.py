@@ -280,11 +280,12 @@ def _nightly_sidecar_payload() -> dict[str, object]:
         },
         "negative_events": {
             "count": 1,
+            "unique_count": 1,
             "worst_event_id": "12345",
             "worst_strategy": "s2",
             "worst_pnl": -0.4,
             "text": (
-                "negative_events=1 worst_negative_event=12345 "
+                "negative_events=1 negative_event_unique_count=1 worst_negative_event=12345 "
                 "worst_negative_event_strategy=s2 worst_negative_event_pnl=-0.4000"
             ),
         },
@@ -772,6 +773,30 @@ def test_validate_nightly_summary_sidecar_reject_bad_negative_event_positive_cas
     negative_events["worst_event_id"] = ""
     negative_events["worst_strategy"] = ""
     negative_events["worst_pnl"] = 0.0
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_negative_event_unique_count_gt_count() -> None:
+    payload = _nightly_sidecar_payload()
+    negative_events = payload["negative_events"]
+    assert isinstance(negative_events, dict)
+    negative_events["count"] = 1
+    negative_events["unique_count"] = 2
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_negative_event_unique_count_zero_when_positive() -> (
+    None
+):
+    payload = _nightly_sidecar_payload()
+    negative_events = payload["negative_events"]
+    assert isinstance(negative_events, dict)
+    negative_events["count"] = 1
+    negative_events["unique_count"] = 0
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

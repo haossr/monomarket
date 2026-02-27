@@ -87,11 +87,13 @@ def _negative_event_summary(payload: dict[str, Any]) -> dict[str, Any]:
     if not negatives:
         return {
             "count": 0,
+            "unique_count": 0,
             "worst_event_id": "",
             "worst_strategy": "",
             "worst_pnl": 0.0,
             "text": (
                 "negative_events=0 "
+                "negative_event_unique_count=0 "
                 "worst_negative_event=n/a "
                 "worst_negative_event_strategy=n/a "
                 "worst_negative_event_pnl=0.0000"
@@ -99,13 +101,16 @@ def _negative_event_summary(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     worst_event_id, worst_strategy, worst_pnl = min(negatives, key=lambda x: x[2])
+    unique_count = len({event_id for event_id, _, _ in negatives})
     return {
         "count": len(negatives),
+        "unique_count": unique_count,
         "worst_event_id": worst_event_id,
         "worst_strategy": worst_strategy,
         "worst_pnl": worst_pnl,
         "text": (
             f"negative_events={len(negatives)} "
+            f"negative_event_unique_count={unique_count} "
             f"worst_negative_event={worst_event_id} "
             f"worst_negative_event_strategy={worst_strategy} "
             f"worst_negative_event_pnl={worst_pnl:.4f}"
@@ -856,6 +861,7 @@ def build_summary_bundle(
         },
         "negative_events": {
             "count": int(_f(negative_event_info.get("count"))),
+            "unique_count": int(_f(negative_event_info.get("unique_count"))),
             "worst_event_id": str(negative_event_info.get("worst_event_id", "")),
             "worst_strategy": str(negative_event_info.get("worst_strategy", "")),
             "worst_pnl": float(_f(negative_event_info.get("worst_pnl"))),

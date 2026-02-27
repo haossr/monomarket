@@ -523,6 +523,16 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
     if negative_event_count < 0:
         raise ValueError("nightly sidecar negative_events.count must be >= 0")
 
+    negative_event_unique_count = negative_events.get("unique_count")
+    if not isinstance(negative_event_unique_count, int):
+        raise ValueError("nightly sidecar negative_events.unique_count must be an integer")
+    if negative_event_unique_count < 0:
+        raise ValueError("nightly sidecar negative_events.unique_count must be >= 0")
+    if negative_event_unique_count > negative_event_count:
+        raise ValueError(
+            "nightly sidecar negative_events.unique_count must be <= negative_events.count"
+        )
+
     worst_event_id = negative_events.get("worst_event_id")
     if not isinstance(worst_event_id, str):
         raise ValueError("nightly sidecar negative_events.worst_event_id must be a string")
@@ -540,6 +550,8 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         raise ValueError("nightly sidecar negative_events.text must be a string")
 
     if negative_event_count == 0:
+        if negative_event_unique_count != 0:
+            raise ValueError("nightly sidecar negative_events.unique_count must be 0 when count=0")
         if worst_event_id not in {"", "n/a"}:
             raise ValueError(
                 "nightly sidecar negative_events.worst_event_id must be empty/n-a when count=0"
@@ -551,6 +563,10 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if float(worst_event_pnl) != 0.0:
             raise ValueError("nightly sidecar negative_events.worst_pnl must be 0 when count=0")
     else:
+        if negative_event_unique_count <= 0:
+            raise ValueError(
+                "nightly sidecar negative_events.unique_count must be > 0 when count>0"
+            )
         if not worst_event_id:
             raise ValueError(
                 "nightly sidecar negative_events.worst_event_id must be non-empty when count>0"

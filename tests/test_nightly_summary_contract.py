@@ -64,6 +64,7 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "worst_negative_strategy=",
         "worst_negative_pnl=",
         "negative_events=",
+        "negative_event_unique_count=",
         "worst_negative_event=",
         "worst_negative_event_strategy=",
         "worst_negative_event_pnl=",
@@ -247,6 +248,7 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     negative_event_obj = sidecar["negative_events"]
     assert isinstance(negative_event_obj, dict)
     assert int(negative_event_obj["count"]) == 0
+    assert int(negative_event_obj["unique_count"]) == 0
     assert str(negative_event_obj["worst_event_id"]) == ""
     assert str(negative_event_obj["worst_strategy"]) == ""
     assert float(negative_event_obj["worst_pnl"]) == 0.0
@@ -429,6 +431,7 @@ def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> N
     assert "worst_negative_strategy=s1" in line
     assert "worst_negative_pnl=-1.2500" in line
     assert "negative_events=1" in line
+    assert "negative_event_unique_count=1" in line
     assert "worst_negative_event=111" in line
     assert "worst_negative_event_strategy=s1" in line
     assert "worst_negative_event_pnl=-1.2500" in line
@@ -444,6 +447,7 @@ def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> N
     negative_event_obj = sidecar["negative_events"]
     assert isinstance(negative_event_obj, dict)
     assert int(negative_event_obj["count"]) == 1
+    assert int(negative_event_obj["unique_count"]) == 1
     assert str(negative_event_obj["worst_event_id"]) == "111"
     assert str(negative_event_obj["worst_strategy"]) == "s1"
     assert float(negative_event_obj["worst_pnl"]) == -1.25
