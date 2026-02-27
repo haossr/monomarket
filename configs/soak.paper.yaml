@@ -50,7 +50,7 @@ strategies:
     inventory_decay: 0.25
     enable_cross_market_arb: false
   s2:
-    prob_sum_tolerance: 0.04
+    prob_sum_tolerance: 0.10
     max_order_notional: 12.0
     edge_gate_min_bps: 500.0
     edge_gate_budget_cap_notional: 2.0
