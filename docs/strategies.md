@@ -27,6 +27,7 @@
 
 - 主仓：筛选低 yes（高 no 胜率）市场，建立 NO carry
 - 对冲：从超低 yes 池里选 tail hedge，按 `hedge_budget_ratio` 配比
+- 支持 `exclude_event_ids`：按 event_id 过滤已知高噪声/负贡献事件
 - 输出 payload 包含主仓 + 对冲建议
 
 ## 参数位置

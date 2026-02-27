@@ -69,3 +69,4 @@ strategies:
     max_signals_per_event: 2
     event_notional_cap: 30.0
     inventory_decay: 0.15
+    exclude_event_ids: []

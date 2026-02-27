@@ -33,6 +33,17 @@ class S8NoCarryTailHedge(Strategy):
         if edge_gate_budget_cap_notional <= 0:
             edge_gate_budget_cap_notional = max(0.0, max_order_notional)
 
+        exclude_event_ids_raw = cfg.get("exclude_event_ids", [])
+        exclude_event_ids: set[str] = set()
+        if isinstance(exclude_event_ids_raw, str):
+            exclude_event_ids = {
+                item.strip() for item in exclude_event_ids_raw.split(",") if item.strip()
+            }
+        elif isinstance(exclude_event_ids_raw, list):
+            exclude_event_ids = {
+                str(item).strip() for item in exclude_event_ids_raw if str(item).strip()
+            }
+
         mains = [
             m
             for m in markets
@@ -41,6 +52,7 @@ class S8NoCarryTailHedge(Strategy):
             and float(m.yes_price) <= yes_cap
             and m.no_price is not None
             and m.liquidity > 100
+            and str(m.event_id) not in exclude_event_ids
         ]
         tails = [
             m
@@ -49,6 +61,7 @@ class S8NoCarryTailHedge(Strategy):
             and m.yes_price is not None
             and float(m.yes_price) <= 0.08
             and m.liquidity > 30
+            and str(m.event_id) not in exclude_event_ids
         ]
 
         mains.sort(key=lambda m: (float(m.yes_price or 1.0), -m.liquidity))
