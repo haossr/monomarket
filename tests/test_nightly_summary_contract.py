@@ -65,6 +65,7 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "worst_negative_pnl=",
         "negative_events=",
         "negative_event_unique_count=",
+        "negative_event_source=",
         "worst_negative_event=",
         "worst_negative_event_strategy=",
         "worst_negative_event_pnl=",
@@ -223,6 +224,7 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert "best_strategy=n/a" in line
     assert "negative_strategies=0" in line
     assert "worst_negative_strategy=n/a" in line
+    assert "negative_event_source=missing" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -249,6 +251,7 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert isinstance(negative_event_obj, dict)
     assert int(negative_event_obj["count"]) == 0
     assert int(negative_event_obj["unique_count"]) == 0
+    assert bool(negative_event_obj["source_present"]) is False
     assert str(negative_event_obj["worst_event_id"]) == ""
     assert str(negative_event_obj["worst_strategy"]) == ""
     assert float(negative_event_obj["worst_pnl"]) == 0.0
@@ -432,6 +435,7 @@ def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> N
     assert "worst_negative_pnl=-1.2500" in line
     assert "negative_events=1" in line
     assert "negative_event_unique_count=1" in line
+    assert "negative_event_source=present" in line
     assert "worst_negative_event=111" in line
     assert "worst_negative_event_strategy=s1" in line
     assert "worst_negative_event_pnl=-1.2500" in line
@@ -448,6 +452,7 @@ def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> N
     assert isinstance(negative_event_obj, dict)
     assert int(negative_event_obj["count"]) == 1
     assert int(negative_event_obj["unique_count"]) == 1
+    assert bool(negative_event_obj["source_present"]) is True
     assert str(negative_event_obj["worst_event_id"]) == "111"
     assert str(negative_event_obj["worst_strategy"]) == "s1"
     assert float(negative_event_obj["worst_pnl"]) == -1.25

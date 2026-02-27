@@ -533,6 +533,10 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
             "nightly sidecar negative_events.unique_count must be <= negative_events.count"
         )
 
+    negative_event_source_present = negative_events.get("source_present")
+    if not isinstance(negative_event_source_present, bool):
+        raise ValueError("nightly sidecar negative_events.source_present must be a bool")
+
     worst_event_id = negative_events.get("worst_event_id")
     if not isinstance(worst_event_id, str):
         raise ValueError("nightly sidecar negative_events.worst_event_id must be a string")
@@ -549,6 +553,16 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
     if not isinstance(negative_event_text, str):
         raise ValueError("nightly sidecar negative_events.text must be a string")
 
+    if not negative_event_source_present:
+        if negative_event_count != 0:
+            raise ValueError(
+                "nightly sidecar negative_events.count must be 0 when source_present=false"
+            )
+        if negative_event_unique_count != 0:
+            raise ValueError(
+                "nightly sidecar negative_events.unique_count must be 0 when source_present=false"
+            )
+
     if negative_event_count == 0:
         if negative_event_unique_count != 0:
             raise ValueError("nightly sidecar negative_events.unique_count must be 0 when count=0")
@@ -563,6 +577,10 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if float(worst_event_pnl) != 0.0:
             raise ValueError("nightly sidecar negative_events.worst_pnl must be 0 when count=0")
     else:
+        if not negative_event_source_present:
+            raise ValueError(
+                "nightly sidecar negative_events.source_present must be true when count>0"
+            )
         if negative_event_unique_count <= 0:
             raise ValueError(
                 "nightly sidecar negative_events.unique_count must be > 0 when count>0"
