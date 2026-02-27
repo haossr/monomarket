@@ -539,6 +539,111 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert signal_generation["experiment_reason"] == "historical_replay_only"
 
 
+def test_nightly_cycle_meta_history_limited_does_not_trigger_low_temporal_coverage(
+    tmp_path: Path,
+) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    cycle_meta_json = tmp_path / "cycle-meta.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T10:00:00Z",
+        "total_signals": 20,
+        "executed_signals": 20,
+        "rejected_signals": 0,
+        "results": [
+            {
+                "strategy": "s8",
+                "pnl": 1.0,
+                "mtm_wins": 10,
+                "mtm_losses": 10,
+            }
+        ],
+        "replay": [
+            {"ts": "2026-02-24T08:00:00Z", "realized_change": 0.0},
+            {"ts": "2026-02-24T09:00:00Z", "realized_change": 0.0},
+        ],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 1.0,
+            "positive_window_rate": 1.0,
+            "empty_window_count": 0,
+            "range_hours": 10,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    cycle_meta_payload = {
+        "fixed_window_mode": True,
+        "signal_generation": {
+            "new_signals_total": 20,
+            "new_signals_in_window": 20,
+            "new_signals_first_ts": "2026-02-24T08:00:00Z",
+            "new_signals_last_ts": "2026-02-24T09:00:00Z",
+            "clear_signals_window": True,
+            "cleared_signals_in_window": 20,
+            "rebuild_signals_window": True,
+            "rebuild_step_hours": 6.0,
+            "rebuild_sampled_steps": 2,
+            "historical_replay_only": False,
+            "edge_gate": {"total_raw": 0, "total_pass": 0, "total_fail": 0, "pass_rate": 0.0},
+        },
+    }
+    cycle_meta_json.write_text(json.dumps(cycle_meta_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--cycle-meta-json",
+            str(cycle_meta_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "history_limited=true" in line
+    assert "generated_low_temporal_coverage=false" in line
+    assert "generated_low_sample_count=false" in line
+    assert "experiment_interpretable=true" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    signal_generation = sidecar["cycle_meta"]["signal_generation"]
+    assert signal_generation["generated_low_temporal_coverage"] is False
+    assert signal_generation["generated_low_sample_count"] is False
+    assert signal_generation["experiment_interpretable"] is True
+
+
 def test_nightly_window_coverage_history_limited_runtime(tmp_path: Path) -> None:
     backtest_json = tmp_path / "latest.json"
     rolling_json = tmp_path / "rolling.json"

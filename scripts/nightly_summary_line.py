@@ -420,6 +420,7 @@ def build_summary_bundle(
     )
     generated_low_temporal_coverage = (
         cycle_fixed_window_mode
+        and (not window_history_limited)
         and cycle_new_signals_in_window > 0
         and generated_window_coverage_ratio < 0.20
     )
