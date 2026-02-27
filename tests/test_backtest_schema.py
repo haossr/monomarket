@@ -599,6 +599,40 @@ def test_validate_nightly_summary_sidecar_reject_bad_cycle_meta_rebuild_fields()
         validate_nightly_summary_sidecar(payload)
 
 
+def test_validate_nightly_summary_sidecar_reject_bad_negative_count_type() -> None:
+    payload = _nightly_sidecar_payload()
+    negative = payload["negative_strategies"]
+    assert isinstance(negative, dict)
+    negative["count"] = 1.5
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_negative_zero_case() -> None:
+    payload = _nightly_sidecar_payload()
+    negative = payload["negative_strategies"]
+    assert isinstance(negative, dict)
+    negative["count"] = 0
+    negative["worst_strategy"] = "s2"
+    negative["worst_pnl"] = -0.5
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_negative_positive_case() -> None:
+    payload = _nightly_sidecar_payload()
+    negative = payload["negative_strategies"]
+    assert isinstance(negative, dict)
+    negative["count"] = 1
+    negative["worst_strategy"] = ""
+    negative["worst_pnl"] = 0.0
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
 def test_nightly_sidecar_required_fields_contract() -> None:
     assert REQUIRED_NIGHTLY_SUMMARY_SIDECAR_FIELDS == {
         "schema_version",

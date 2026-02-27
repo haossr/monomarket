@@ -449,8 +449,10 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         raise ValueError("nightly sidecar negative_strategies must be an object")
 
     negative_count = negative_strategies.get("count")
-    if not isinstance(negative_count, int | float):
-        raise ValueError("nightly sidecar negative_strategies.count must be numeric")
+    if not isinstance(negative_count, int):
+        raise ValueError("nightly sidecar negative_strategies.count must be an integer")
+    if negative_count < 0:
+        raise ValueError("nightly sidecar negative_strategies.count must be >= 0")
 
     worst_strategy = negative_strategies.get("worst_strategy")
     if not isinstance(worst_strategy, str):
@@ -463,6 +465,23 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
     negative_text = negative_strategies.get("text")
     if not isinstance(negative_text, str):
         raise ValueError("nightly sidecar negative_strategies.text must be a string")
+
+    if negative_count == 0:
+        if worst_strategy not in {"", "n/a"}:
+            raise ValueError(
+                "nightly sidecar negative_strategies.worst_strategy must be empty/n-a when count=0"
+            )
+        if float(worst_pnl) != 0.0:
+            raise ValueError("nightly sidecar negative_strategies.worst_pnl must be 0 when count=0")
+    else:
+        if not worst_strategy:
+            raise ValueError(
+                "nightly sidecar negative_strategies.worst_strategy must be non-empty when count>0"
+            )
+        if float(worst_pnl) >= 0.0:
+            raise ValueError(
+                "nightly sidecar negative_strategies.worst_pnl must be negative when count>0"
+            )
 
     rolling = payload.get("rolling")
     if not isinstance(rolling, Mapping):
