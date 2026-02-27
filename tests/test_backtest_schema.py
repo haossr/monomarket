@@ -293,6 +293,8 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             ],
             "reject_top_normalized": "riskA:3;riskB:1",
             "reject_top_effective": "riskA:3;riskB:1",
+            "reject_top_effective_primary_reason": "riskA",
+            "reject_top_effective_primary_count": 3,
             "reject_top_pairs_normalized": [
                 {"reason": "riskA", "count": 3},
                 {"reason": "riskB", "count": 1},
@@ -580,6 +582,40 @@ def test_validate_nightly_summary_sidecar_reject_bad_effective_reject_top_when_f
     rolling["reject_top"] = "riskA:3;riskB:1"
     rolling["reject_top_normalized"] = "none"
     rolling["reject_top_effective"] = "strategy notional limit exceeded:3"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_effective_primary_reason() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top_effective"] = "riskA:3;riskB:1"
+    rolling["reject_top_effective_primary_reason"] = "riskB"
+    rolling["reject_top_effective_primary_count"] = 1
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_effective_primary_none_case() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top_effective"] = "none"
+    rolling["reject_top_effective_primary_reason"] = "riskA"
+    rolling["reject_top_effective_primary_count"] = 3
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_effective_primary_count_fractional() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top_effective_primary_count"] = 3.5
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

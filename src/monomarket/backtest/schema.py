@@ -496,13 +496,19 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         "coverage_ratio",
         "overlap_ratio",
         "reject_top_k",
+        "reject_top_effective_primary_count",
     )
     for key in rolling_required_numeric:
         raw = rolling.get(key)
         if not isinstance(raw, int | float):
             raise ValueError(f"nightly sidecar rolling.{key} must be numeric")
 
-    for key in ("coverage_label", "reject_top", "reject_top_effective"):
+    for key in (
+        "coverage_label",
+        "reject_top",
+        "reject_top_effective",
+        "reject_top_effective_primary_reason",
+    ):
         raw = rolling.get(key)
         if not isinstance(raw, str):
             raise ValueError(f"nightly sidecar rolling.{key} must be a string")
@@ -566,6 +572,44 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         raise ValueError(
             "nightly sidecar rolling.reject_top_effective must match normalized fallback logic"
         )
+
+    effective_primary_reason = str(rolling.get("reject_top_effective_primary_reason", ""))
+    effective_primary_count = float(rolling.get("reject_top_effective_primary_count", 0))
+    if effective_primary_count < 0:
+        raise ValueError("nightly sidecar rolling.reject_top_effective_primary_count must be >= 0")
+    if int(effective_primary_count) != effective_primary_count:
+        raise ValueError(
+            "nightly sidecar rolling.reject_top_effective_primary_count must be integer-like"
+        )
+
+    if reject_top_effective in {"none", "disabled"}:
+        if effective_primary_reason != reject_top_effective:
+            raise ValueError(
+                "nightly sidecar rolling.reject_top_effective_primary_reason"
+                " must match reject_top_effective when none/disabled"
+            )
+        if effective_primary_count != 0:
+            raise ValueError(
+                "nightly sidecar rolling.reject_top_effective_primary_count"
+                " must be 0 when reject_top_effective is none/disabled"
+            )
+    else:
+        if not effective_primary_reason:
+            raise ValueError(
+                "nightly sidecar rolling.reject_top_effective_primary_reason"
+                " must be non-empty when reject_top_effective is populated"
+            )
+        if effective_primary_count <= 0:
+            raise ValueError(
+                "nightly sidecar rolling.reject_top_effective_primary_count"
+                " must be > 0 when reject_top_effective is populated"
+            )
+        prefix = f"{effective_primary_reason}:{int(effective_primary_count)}"
+        if not reject_top_effective.startswith(prefix):
+            raise ValueError(
+                "nightly sidecar rolling.reject_top_effective must start with"
+                " rolling.reject_top_effective_primary_reason:count"
+            )
 
     def _validate_rolling_negative_object(raw_obj: object, path: str) -> None:
         if not isinstance(raw_obj, Mapping):

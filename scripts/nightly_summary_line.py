@@ -586,6 +586,8 @@ def build_summary_bundle(
     rolling_reject_top_normalized = "disabled" if k_norm <= 0 else "none"
     rolling_reject_top_pairs_normalized: list[tuple[str, int]] = []
     rolling_reject_top_effective = "disabled" if k_norm <= 0 else "none"
+    rolling_reject_top_effective_primary_reason = "disabled" if k_norm <= 0 else "none"
+    rolling_reject_top_effective_primary_count = 0
 
     rolling_summary = None
     if isinstance(rolling_payload, dict):
@@ -628,6 +630,18 @@ def build_summary_bundle(
                 if rolling_reject_top_normalized not in {"none", "disabled"}
                 else rolling_reject_top
             )
+            effective_pairs = (
+                rolling_reject_top_pairs_normalized
+                if rolling_reject_top_normalized not in {"none", "disabled"}
+                else rolling_reject_top_pairs
+            )
+            if effective_pairs:
+                primary_reason, primary_count = effective_pairs[0]
+                rolling_reject_top_effective_primary_reason = primary_reason
+                rolling_reject_top_effective_primary_count = int(primary_count)
+            else:
+                rolling_reject_top_effective_primary_reason = rolling_reject_top_effective
+                rolling_reject_top_effective_primary_count = 0
 
     line = (
         f"Nightly {nightly_date} | window={payload.get('from_ts', '')} -> {payload.get('to_ts', '')} "
@@ -685,6 +699,8 @@ def build_summary_bundle(
         f"rolling_reject_top={rolling_reject_top} "
         f"rolling_reject_top_normalized={rolling_reject_top_normalized} "
         f"rolling_reject_top_effective={rolling_reject_top_effective} "
+        f"rolling_reject_top_effective_primary_reason={rolling_reject_top_effective_primary_reason} "
+        f"rolling_reject_top_effective_primary_count={rolling_reject_top_effective_primary_count} "
         f"reject_strategy_top={reject_strategy_top} "
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
@@ -764,6 +780,8 @@ def build_summary_bundle(
             ],
             "reject_top_normalized": rolling_reject_top_normalized,
             "reject_top_effective": rolling_reject_top_effective,
+            "reject_top_effective_primary_reason": rolling_reject_top_effective_primary_reason,
+            "reject_top_effective_primary_count": rolling_reject_top_effective_primary_count,
             "reject_top_pairs_normalized": [
                 {"reason": reason, "count": count}
                 for reason, count in rolling_reject_top_pairs_normalized

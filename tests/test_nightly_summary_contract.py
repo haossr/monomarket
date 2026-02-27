@@ -77,6 +77,8 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "rolling_reject_top_k=",
         "rolling_reject_top_normalized=",
         "rolling_reject_top_effective=",
+        "rolling_reject_top_effective_primary_reason=",
+        "rolling_reject_top_effective_primary_count=",
     ]
     for token in required_tokens:
         assert token in content
@@ -233,6 +235,11 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert int(negative_obj["count"]) == 0
     assert str(negative_obj["worst_strategy"]) == ""
     assert float(negative_obj["worst_pnl"]) == 0.0
+
+    rolling_obj = sidecar["rolling"]
+    assert str(rolling_obj["reject_top_effective"]) == "none"
+    assert str(rolling_obj["reject_top_effective_primary_reason"]) == "none"
+    assert float(rolling_obj["reject_top_effective_primary_count"]) == 0.0
 
     rolling_negative_obj = sidecar["rolling"]["negative_strategies"]
     assert isinstance(rolling_negative_obj, dict)
@@ -1142,6 +1149,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top=disabled" in line_disabled
     assert "rolling_reject_top_normalized=disabled" in line_disabled
     assert "rolling_reject_top_effective=disabled" in line_disabled
+    assert "rolling_reject_top_effective_primary_reason=disabled" in line_disabled
+    assert "rolling_reject_top_effective_primary_count=0" in line_disabled
     assert "positive_window_rate=" in line_disabled
     assert "empty_window_count=" in line_disabled
     assert "range_hours=" in line_disabled
@@ -1161,6 +1170,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert str(disabled_sidecar["rolling"]["reject_top"]) == "disabled"
     assert str(disabled_sidecar["rolling"]["reject_top_normalized"]) == "disabled"
     assert str(disabled_sidecar["rolling"]["reject_top_effective"]) == "disabled"
+    assert str(disabled_sidecar["rolling"]["reject_top_effective_primary_reason"]) == "disabled"
+    assert float(disabled_sidecar["rolling"]["reject_top_effective_primary_count"]) == 0.0
     assert disabled_sidecar["rolling"]["reject_top_pairs_normalized"] == []
     best_obj = disabled_sidecar["best"]
     assert isinstance(best_obj, dict)
@@ -1208,6 +1219,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top=none" in line_none
     assert "rolling_reject_top_normalized=none" in line_none
     assert "rolling_reject_top_effective=none" in line_none
+    assert "rolling_reject_top_effective_primary_reason=none" in line_none
+    assert "rolling_reject_top_effective_primary_count=0" in line_none
 
     none_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(none_sidecar)
@@ -1218,6 +1231,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert str(none_sidecar["rolling"]["reject_top"]) == "none"
     assert str(none_sidecar["rolling"]["reject_top_normalized"]) == "none"
     assert str(none_sidecar["rolling"]["reject_top_effective"]) == "none"
+    assert str(none_sidecar["rolling"]["reject_top_effective_primary_reason"]) == "none"
+    assert float(none_sidecar["rolling"]["reject_top_effective_primary_count"]) == 0.0
     assert none_sidecar["rolling"]["reject_top_pairs_normalized"] == []
 
     # k>0 with reasons containing comma: delimiter must remain ';'
@@ -1257,6 +1272,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert "rolling_reject_top=risk,A:3;riskB:1" in line_reasons
     assert "rolling_reject_top_normalized=risk,A:3;riskB:1" in line_reasons
     assert "rolling_reject_top_effective=risk,A:3;riskB:1" in line_reasons
+    assert "rolling_reject_top_effective_primary_reason=risk,A" in line_reasons
+    assert "rolling_reject_top_effective_primary_count=3" in line_reasons
 
     reasons_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(reasons_sidecar)
@@ -1264,6 +1281,8 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
 
     rolling_norm = reasons_sidecar["rolling"]
     assert str(rolling_norm["reject_top_normalized"]) == "risk,A:3;riskB:1"
+    assert str(rolling_norm["reject_top_effective_primary_reason"]) == "risk,A"
+    assert float(rolling_norm["reject_top_effective_primary_count"]) == 3.0
 
     # normalization should collapse noisy numeric suffixes into family-level reasons
     rolling_payload_normalized = {
@@ -1308,6 +1327,10 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
     assert (
         "rolling_reject_top_effective=" "strategy notional limit exceeded:5;circuit breaker open:1"
     ) in line_normalized
+    assert (
+        "rolling_reject_top_effective_primary_reason=strategy notional limit exceeded"
+    ) in line_normalized
+    assert "rolling_reject_top_effective_primary_count=5" in line_normalized
 
     normalized_sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(normalized_sidecar)
@@ -1316,6 +1339,11 @@ def test_nightly_reject_topk_zero_disabled_and_none_runtime(tmp_path: Path) -> N
         str(normalized_sidecar["rolling"]["reject_top_effective"])
         == "strategy notional limit exceeded:5;circuit breaker open:1"
     )
+    assert (
+        str(normalized_sidecar["rolling"]["reject_top_effective_primary_reason"])
+        == "strategy notional limit exceeded"
+    )
+    assert float(normalized_sidecar["rolling"]["reject_top_effective_primary_count"]) == 5.0
     rolling_norm_pairs = normalized_sidecar["rolling"]["reject_top_pairs_normalized"]
     assert isinstance(rolling_norm_pairs, list)
     assert rolling_norm_pairs == [
