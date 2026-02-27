@@ -29,6 +29,13 @@ class S2NegRiskRebalance(Strategy):
         if edge_gate_budget_cap_notional <= 0:
             edge_gate_budget_cap_notional = max(0.0, max_order_notional)
 
+        exclude_event_ids_raw = cfg.get("exclude_event_ids", [])
+        if isinstance(exclude_event_ids_raw, str | bytes):
+            exclude_event_ids_raw = [exclude_event_ids_raw]
+        exclude_event_ids = {
+            str(event_id).strip() for event_id in exclude_event_ids_raw if str(event_id).strip()
+        }
+
         by_event: dict[str, list[MarketView]] = defaultdict(list)
         for m in markets:
             if m.status != "open" or not m.neg_risk:
@@ -39,6 +46,8 @@ class S2NegRiskRebalance(Strategy):
 
         signals: list[Signal] = []
         for event_id, rows in by_event.items():
+            if str(event_id) in exclude_event_ids:
+                continue
             if len(rows) < 2:
                 continue
             prob_sum = sum(float(r.yes_price or 0.0) for r in rows)

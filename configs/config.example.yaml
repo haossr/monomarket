@@ -48,6 +48,7 @@ strategies:
   s2:
     prob_sum_tolerance: 0.04
     max_order_notional: 15.0
+    exclude_event_ids: []
   s4:
     yes_price_min: 0.01
     yes_price_max: 0.15

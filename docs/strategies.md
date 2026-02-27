@@ -11,6 +11,7 @@
 - 识别 `neg_risk=true` 且同 event 的市场集合
 - 计算 `sum(yes_price)` 与 1 的偏离
 - 若偏离超过容差，生成多腿 rebalance 信号
+- 支持 `exclude_event_ids`：按 event_id 过滤已知高噪声/负贡献事件
 
 ## S4 低概率 Yes 篮子
 
