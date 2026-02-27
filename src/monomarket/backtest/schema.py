@@ -513,6 +513,57 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                 "nightly sidecar negative_strategies.worst_pnl must be negative when count>0"
             )
 
+    negative_events = payload.get("negative_events")
+    if not isinstance(negative_events, Mapping):
+        raise ValueError("nightly sidecar negative_events must be an object")
+
+    negative_event_count = negative_events.get("count")
+    if not isinstance(negative_event_count, int):
+        raise ValueError("nightly sidecar negative_events.count must be an integer")
+    if negative_event_count < 0:
+        raise ValueError("nightly sidecar negative_events.count must be >= 0")
+
+    worst_event_id = negative_events.get("worst_event_id")
+    if not isinstance(worst_event_id, str):
+        raise ValueError("nightly sidecar negative_events.worst_event_id must be a string")
+
+    worst_event_strategy = negative_events.get("worst_strategy")
+    if not isinstance(worst_event_strategy, str):
+        raise ValueError("nightly sidecar negative_events.worst_strategy must be a string")
+
+    worst_event_pnl = negative_events.get("worst_pnl")
+    if not isinstance(worst_event_pnl, int | float):
+        raise ValueError("nightly sidecar negative_events.worst_pnl must be numeric")
+
+    negative_event_text = negative_events.get("text")
+    if not isinstance(negative_event_text, str):
+        raise ValueError("nightly sidecar negative_events.text must be a string")
+
+    if negative_event_count == 0:
+        if worst_event_id not in {"", "n/a"}:
+            raise ValueError(
+                "nightly sidecar negative_events.worst_event_id must be empty/n-a when count=0"
+            )
+        if worst_event_strategy not in {"", "n/a"}:
+            raise ValueError(
+                "nightly sidecar negative_events.worst_strategy must be empty/n-a when count=0"
+            )
+        if float(worst_event_pnl) != 0.0:
+            raise ValueError("nightly sidecar negative_events.worst_pnl must be 0 when count=0")
+    else:
+        if not worst_event_id:
+            raise ValueError(
+                "nightly sidecar negative_events.worst_event_id must be non-empty when count>0"
+            )
+        if not worst_event_strategy:
+            raise ValueError(
+                "nightly sidecar negative_events.worst_strategy must be non-empty when count>0"
+            )
+        if float(worst_event_pnl) >= 0.0:
+            raise ValueError(
+                "nightly sidecar negative_events.worst_pnl must be negative when count>0"
+            )
+
     rolling = payload.get("rolling")
     if not isinstance(rolling, Mapping):
         raise ValueError("nightly sidecar rolling must be an object")

@@ -63,6 +63,10 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "negative_strategies=",
         "worst_negative_strategy=",
         "worst_negative_pnl=",
+        "negative_events=",
+        "worst_negative_event=",
+        "worst_negative_event_strategy=",
+        "worst_negative_event_pnl=",
         "rolling_negative_strategies=",
         "rolling_worst_negative_strategy=",
         "rolling_worst_avg_pnl=",
@@ -240,6 +244,13 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert str(negative_obj["worst_strategy"]) == ""
     assert float(negative_obj["worst_pnl"]) == 0.0
 
+    negative_event_obj = sidecar["negative_events"]
+    assert isinstance(negative_event_obj, dict)
+    assert int(negative_event_obj["count"]) == 0
+    assert str(negative_event_obj["worst_event_id"]) == ""
+    assert str(negative_event_obj["worst_strategy"]) == ""
+    assert float(negative_event_obj["worst_pnl"]) == 0.0
+
     rolling_obj = sidecar["rolling"]
     assert str(rolling_obj["reject_top_effective"]) == "none"
     assert str(rolling_obj["reject_top_effective_primary_reason"]) == "none"
@@ -351,6 +362,24 @@ def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> N
             {"strategy": "s1", "pnl": -1.25, "mtm_wins": 0, "mtm_losses": 1},
             {"strategy": "s8", "pnl": 0.75, "mtm_wins": 1, "mtm_losses": 0},
         ],
+        "event_results": [
+            {
+                "strategy": "s1",
+                "event_id": 111,
+                "pnl": -1.25,
+                "trade_count": 1,
+                "mtm_wins": 0,
+                "mtm_losses": 1,
+            },
+            {
+                "strategy": "s8",
+                "event_id": 222,
+                "pnl": 0.75,
+                "trade_count": 1,
+                "mtm_wins": 1,
+                "mtm_losses": 0,
+            },
+        ],
         "replay": [{"ts": "2026-02-24T00:00:00Z", "realized_change": 0.0}],
     }
     backtest_json.write_text(json.dumps(backtest_payload))
@@ -399,6 +428,10 @@ def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> N
     assert "negative_strategies=1" in line
     assert "worst_negative_strategy=s1" in line
     assert "worst_negative_pnl=-1.2500" in line
+    assert "negative_events=1" in line
+    assert "worst_negative_event=111" in line
+    assert "worst_negative_event_strategy=s1" in line
+    assert "worst_negative_event_pnl=-1.2500" in line
     assert "rolling_negative_strategies=0" in line
 
     sidecar = json.loads(summary_json.read_text())
@@ -407,6 +440,13 @@ def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> N
     assert int(negative_obj["count"]) == 1
     assert str(negative_obj["worst_strategy"]) == "s1"
     assert float(negative_obj["worst_pnl"]) == -1.25
+
+    negative_event_obj = sidecar["negative_events"]
+    assert isinstance(negative_event_obj, dict)
+    assert int(negative_event_obj["count"]) == 1
+    assert str(negative_event_obj["worst_event_id"]) == "111"
+    assert str(negative_event_obj["worst_strategy"]) == "s1"
+    assert float(negative_event_obj["worst_pnl"]) == -1.25
 
 
 def test_nightly_summary_reports_rolling_negative_strategy_metadata(tmp_path: Path) -> None:

@@ -24,6 +24,14 @@ def _f(raw: object) -> float:
         return 0.0
 
 
+def _event_id_str(raw: object) -> str:
+    try:
+        return str(int(float(raw)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        text = str(raw or "")
+        return text.strip()
+
+
 def _negative_strategy_summary(payload: dict[str, Any]) -> dict[str, Any]:
     rows = payload.get("results")
     negatives: list[tuple[str, float]] = []
@@ -52,6 +60,55 @@ def _negative_strategy_summary(payload: dict[str, Any]) -> dict[str, Any]:
             f"negative_strategies={len(negatives)} "
             f"worst_negative_strategy={worst_strategy} "
             f"worst_negative_pnl={worst_pnl:.4f}"
+        ),
+    }
+
+
+def _negative_event_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    rows = payload.get("event_results")
+    negatives: list[tuple[str, str, float]] = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if not _strategy_has_activity(row):
+                continue
+            pnl = _f(row.get("pnl"))
+            if pnl >= 0:
+                continue
+            negatives.append(
+                (
+                    _event_id_str(row.get("event_id")),
+                    str(row.get("strategy", "")),
+                    pnl,
+                )
+            )
+
+    if not negatives:
+        return {
+            "count": 0,
+            "worst_event_id": "",
+            "worst_strategy": "",
+            "worst_pnl": 0.0,
+            "text": (
+                "negative_events=0 "
+                "worst_negative_event=n/a "
+                "worst_negative_event_strategy=n/a "
+                "worst_negative_event_pnl=0.0000"
+            ),
+        }
+
+    worst_event_id, worst_strategy, worst_pnl = min(negatives, key=lambda x: x[2])
+    return {
+        "count": len(negatives),
+        "worst_event_id": worst_event_id,
+        "worst_strategy": worst_strategy,
+        "worst_pnl": worst_pnl,
+        "text": (
+            f"negative_events={len(negatives)} "
+            f"worst_negative_event={worst_event_id} "
+            f"worst_negative_event_strategy={worst_strategy} "
+            f"worst_negative_event_pnl={worst_pnl:.4f}"
         ),
     }
 
@@ -425,6 +482,16 @@ def build_summary_bundle(
         negative_info.get("text")
         or "negative_strategies=0 worst_negative_strategy=n/a worst_negative_pnl=0.0000"
     )
+    negative_event_info = _negative_event_summary(payload)
+    negative_event_text = str(
+        negative_event_info.get("text")
+        or (
+            "negative_events=0 "
+            "worst_negative_event=n/a "
+            "worst_negative_event_strategy=n/a "
+            "worst_negative_event_pnl=0.0000"
+        )
+    )
     rolling_negative_info = _rolling_negative_strategy_summary(
         rolling_payload,
         metric_key="avg_pnl",
@@ -709,6 +776,7 @@ def build_summary_bundle(
         f"| {best_text} "
         f"best_strategy_basis={best_strategy_basis} "
         f"| {negative_text} "
+        f"| {negative_event_text} "
         f"| {rolling_negative_text} "
         f"| {rolling_negative_active_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
@@ -785,6 +853,13 @@ def build_summary_bundle(
             "worst_strategy": str(negative_info.get("worst_strategy", "")),
             "worst_pnl": float(_f(negative_info.get("worst_pnl"))),
             "text": negative_text,
+        },
+        "negative_events": {
+            "count": int(_f(negative_event_info.get("count"))),
+            "worst_event_id": str(negative_event_info.get("worst_event_id", "")),
+            "worst_strategy": str(negative_event_info.get("worst_strategy", "")),
+            "worst_pnl": float(_f(negative_event_info.get("worst_pnl"))),
+            "text": negative_event_text,
         },
         "rolling": {
             "runs": rolling_runs,
