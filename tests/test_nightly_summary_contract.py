@@ -79,6 +79,7 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "rolling_reject_top_effective=",
         "rolling_reject_top_effective_primary_reason=",
         "rolling_reject_top_effective_primary_count=",
+        "best_strategy_basis=",
     ]
     for token in required_tokens:
         assert token in content
@@ -227,6 +228,9 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert bool(best_obj["available"]) is False
     assert str(best_obj["strategy"]) == ""
     assert float(best_obj["pnl"]) == 0.0
+    assert str(best_obj["selection_basis"]) == "none"
+    assert int(best_obj["candidate_count"]) == 0
+    assert int(best_obj["active_candidate_count"]) == 0
     assert str(best_obj["text"]) == "best_strategy=n/a"
     assert str(sidecar["best_text"]) == "best_strategy=n/a"
 
@@ -317,6 +321,7 @@ def test_nightly_best_strategy_prefers_active_strategies(tmp_path: Path) -> None
 
     line = summary_txt.read_text().strip()
     assert "best_strategy=s8 pnl=-0.2500" in line
+    assert "best_strategy_basis=active_first" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -324,6 +329,9 @@ def test_nightly_best_strategy_prefers_active_strategies(tmp_path: Path) -> None
     assert isinstance(best_obj, dict)
     assert str(best_obj["strategy"]) == "s8"
     assert abs(float(best_obj["pnl"]) - (-0.25)) < 1e-9
+    assert str(best_obj["selection_basis"]) == "active_first"
+    assert int(best_obj["candidate_count"]) == 3
+    assert int(best_obj["active_candidate_count"]) == 1
 
 
 def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> None:

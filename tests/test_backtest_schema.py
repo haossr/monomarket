@@ -266,6 +266,9 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             "available": True,
             "strategy": "s1",
             "pnl": 1.2,
+            "selection_basis": "active_first",
+            "candidate_count": 4,
+            "active_candidate_count": 3,
             "text": "best_strategy=s1 pnl=1.2000",
         },
         "best_text": "best_strategy=s1 pnl=1.2000",
@@ -384,6 +387,27 @@ def test_validate_nightly_summary_sidecar_legacy_best_string_ok() -> None:
     payload["best"] = "best_strategy=s1 pnl=1.2000"
     payload.pop("best_text", None)
     validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_best_selection_basis() -> None:
+    payload = _nightly_sidecar_payload()
+    best = payload["best"]
+    assert isinstance(best, dict)
+    best["selection_basis"] = "bad"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_best_active_count_gt_candidate_count() -> None:
+    payload = _nightly_sidecar_payload()
+    best = payload["best"]
+    assert isinstance(best, dict)
+    best["candidate_count"] = 1
+    best["active_candidate_count"] = 2
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
 
 
 def test_verify_nightly_summary_sidecar_checksum() -> None:

@@ -133,16 +133,23 @@ def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
             "available": False,
             "strategy": "",
             "pnl": 0.0,
+            "selection_basis": "none",
+            "candidate_count": 0,
+            "active_candidate_count": 0,
             "text": "best_strategy=n/a",
         }
 
     rows = payload.get("results") or []
     best: dict[str, Any] | None = None
+    candidates: list[dict[str, Any]] = []
+    active_candidates: list[dict[str, Any]] = []
+    selection_basis = "none"
     if isinstance(rows, list) and rows:
         candidates = [r for r in rows if isinstance(r, dict)]
         if candidates:
             active_candidates = [r for r in candidates if _strategy_has_activity(r)]
             best_pool = active_candidates if active_candidates else candidates
+            selection_basis = "active_first" if active_candidates else "all_candidates"
             best = max(best_pool, key=lambda r: _f(r.get("pnl")))
 
     if not isinstance(best, dict):
@@ -150,6 +157,9 @@ def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
             "available": False,
             "strategy": "",
             "pnl": 0.0,
+            "selection_basis": "none",
+            "candidate_count": len(candidates),
+            "active_candidate_count": len(active_candidates),
             "text": "best_strategy=n/a",
         }
 
@@ -159,6 +169,9 @@ def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
         "available": True,
         "strategy": strategy,
         "pnl": pnl,
+        "selection_basis": selection_basis,
+        "candidate_count": len(candidates),
+        "active_candidate_count": len(active_candidates),
         "text": f"best_strategy={strategy} pnl={pnl:.4f}",
     }
 
@@ -406,6 +419,7 @@ def build_summary_bundle(
 ) -> tuple[str, dict[str, Any]]:
     best_info = _best_strategy(payload)
     best_text = str(best_info.get("text") or "best_strategy=n/a")
+    best_strategy_basis = str(best_info.get("selection_basis") or "none")
     negative_info = _negative_strategy_summary(payload)
     negative_text = str(
         negative_info.get("text")
@@ -693,6 +707,7 @@ def build_summary_bundle(
         f"edge_gate_pass_rate={edge_gate_pass_rate:.2%} "
         f"edge_gate_top={edge_gate_by_strategy_top} "
         f"| {best_text} "
+        f"best_strategy_basis={best_strategy_basis} "
         f"| {negative_text} "
         f"| {rolling_negative_text} "
         f"| {rolling_negative_active_text} "
@@ -759,6 +774,9 @@ def build_summary_bundle(
             "available": bool(best_info.get("available", False)),
             "strategy": str(best_info.get("strategy", "")),
             "pnl": float(best_info.get("pnl", 0.0)),
+            "selection_basis": best_strategy_basis,
+            "candidate_count": int(_f(best_info.get("candidate_count", 0))),
+            "active_candidate_count": int(_f(best_info.get("active_candidate_count", 0))),
             "text": best_text,
         },
         "best_text": best_text,

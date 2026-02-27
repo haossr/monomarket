@@ -434,6 +434,36 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         best_text = best.get("text")
         if not isinstance(best_text, str):
             raise ValueError("nightly sidecar best.text must be a string")
+
+        best_selection_basis = best.get("selection_basis")
+        if best_selection_basis is not None:
+            if not isinstance(best_selection_basis, str):
+                raise ValueError("nightly sidecar best.selection_basis must be a string")
+            if best_selection_basis not in {"none", "active_first", "all_candidates"}:
+                raise ValueError(
+                    "nightly sidecar best.selection_basis must be one of "
+                    "none/active_first/all_candidates"
+                )
+
+        best_candidate_count = best.get("candidate_count")
+        if best_candidate_count is not None:
+            if not isinstance(best_candidate_count, int | float):
+                raise ValueError("nightly sidecar best.candidate_count must be numeric")
+            if float(best_candidate_count) < 0:
+                raise ValueError("nightly sidecar best.candidate_count must be >= 0")
+
+        best_active_candidate_count = best.get("active_candidate_count")
+        if best_active_candidate_count is not None:
+            if not isinstance(best_active_candidate_count, int | float):
+                raise ValueError("nightly sidecar best.active_candidate_count must be numeric")
+            if float(best_active_candidate_count) < 0:
+                raise ValueError("nightly sidecar best.active_candidate_count must be >= 0")
+            if best_candidate_count is not None and float(best_active_candidate_count) > float(
+                best_candidate_count
+            ):
+                raise ValueError(
+                    "nightly sidecar best.active_candidate_count must be <= best.candidate_count"
+                )
     elif isinstance(best, str):
         # Backward compatibility for legacy sidecars where best was plain text.
         pass
