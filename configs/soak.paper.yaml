@@ -44,7 +44,7 @@ strategies:
     min_spread: 0.04
     min_event_spread: 0.06
     min_liquidity: 90.0
-    max_order_notional: 0.2
+    max_order_notional: 0.1
     max_signals_per_event: 1
     event_notional_cap: 12.0
     inventory_decay: 0.25
