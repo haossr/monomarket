@@ -66,6 +66,9 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "rolling_negative_strategies=",
         "rolling_worst_negative_strategy=",
         "rolling_worst_avg_pnl=",
+        "rolling_active_negative_strategies=",
+        "rolling_active_worst_negative_strategy=",
+        "rolling_active_worst_avg_pnl=",
         "positive_window_rate=",
         "empty_window_count=",
         "range_hours=",
@@ -237,6 +240,12 @@ def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> No
     assert str(rolling_negative_obj["worst_strategy"]) == ""
     assert float(rolling_negative_obj["worst_avg_pnl"]) == 0.0
 
+    rolling_negative_active_obj = sidecar["rolling"]["negative_strategies_active"]
+    assert isinstance(rolling_negative_active_obj, dict)
+    assert int(rolling_negative_active_obj["count"]) == 0
+    assert str(rolling_negative_active_obj["worst_strategy"]) == ""
+    assert float(rolling_negative_active_obj["worst_avg_pnl"]) == 0.0
+
 
 def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> None:
     backtest_json = tmp_path / "latest.json"
@@ -391,6 +400,9 @@ def test_nightly_summary_reports_rolling_negative_strategy_metadata(tmp_path: Pa
     assert "rolling_negative_strategies=1" in line
     assert "rolling_worst_negative_strategy=s2" in line
     assert "rolling_worst_avg_pnl=-0.1000" in line
+    assert "rolling_active_negative_strategies=1" in line
+    assert "rolling_active_worst_negative_strategy=s2" in line
+    assert "rolling_active_worst_avg_pnl=-0.1000" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -398,6 +410,11 @@ def test_nightly_summary_reports_rolling_negative_strategy_metadata(tmp_path: Pa
     assert int(rolling_negative_obj["count"]) == 1
     assert str(rolling_negative_obj["worst_strategy"]) == "s2"
     assert float(rolling_negative_obj["worst_avg_pnl"]) == -0.1
+
+    rolling_negative_active_obj = sidecar["rolling"]["negative_strategies_active"]
+    assert int(rolling_negative_active_obj["count"]) == 1
+    assert str(rolling_negative_active_obj["worst_strategy"]) == "s2"
+    assert float(rolling_negative_active_obj["worst_avg_pnl"]) == -0.1
 
 
 def test_nightly_summary_reports_closed_and_mtm_winrate(tmp_path: Path) -> None:

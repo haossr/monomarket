@@ -56,7 +56,15 @@ def _negative_strategy_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _rolling_negative_strategy_summary(rolling_payload: dict[str, Any] | None) -> dict[str, Any]:
+def _rolling_negative_strategy_summary(
+    rolling_payload: dict[str, Any] | None,
+    *,
+    metric_key: str,
+    count_label: str,
+    strategy_label: str,
+    pnl_label: str,
+    active_only: bool = False,
+) -> dict[str, Any]:
     rows: object = None
     if isinstance(rolling_payload, dict):
         rows = rolling_payload.get("strategy_aggregate")
@@ -66,7 +74,12 @@ def _rolling_negative_strategy_summary(rolling_payload: dict[str, Any] | None) -
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            pnl = _f(row.get("avg_pnl"))
+            if active_only and int(_f(row.get("active_windows"))) <= 0:
+                continue
+            metric_raw = row.get(metric_key)
+            if metric_key == "avg_pnl_active" and metric_raw is None:
+                metric_raw = row.get("avg_pnl")
+            pnl = _f(metric_raw)
             if pnl < 0:
                 negatives.append((str(row.get("strategy", "")), pnl))
 
@@ -75,10 +88,12 @@ def _rolling_negative_strategy_summary(rolling_payload: dict[str, Any] | None) -
             "count": 0,
             "worst_strategy": "",
             "worst_avg_pnl": 0.0,
+            "metric_key": metric_key,
+            "active_only": active_only,
             "text": (
-                "rolling_negative_strategies=0 "
-                "rolling_worst_negative_strategy=n/a "
-                "rolling_worst_avg_pnl=0.0000"
+                f"{count_label}=0 "
+                f"{strategy_label}=n/a "
+                f"{pnl_label}=0.0000"
             ),
         }
 
@@ -87,10 +102,12 @@ def _rolling_negative_strategy_summary(rolling_payload: dict[str, Any] | None) -
         "count": len(negatives),
         "worst_strategy": worst_strategy,
         "worst_avg_pnl": worst_avg_pnl,
+        "metric_key": metric_key,
+        "active_only": active_only,
         "text": (
-            f"rolling_negative_strategies={len(negatives)} "
-            f"rolling_worst_negative_strategy={worst_strategy} "
-            f"rolling_worst_avg_pnl={worst_avg_pnl:.4f}"
+            f"{count_label}={len(negatives)} "
+            f"{strategy_label}={worst_strategy} "
+            f"{pnl_label}={worst_avg_pnl:.4f}"
         ),
     }
 
@@ -378,13 +395,35 @@ def build_summary_bundle(
         negative_info.get("text")
         or "negative_strategies=0 worst_negative_strategy=n/a worst_negative_pnl=0.0000"
     )
-    rolling_negative_info = _rolling_negative_strategy_summary(rolling_payload)
+    rolling_negative_info = _rolling_negative_strategy_summary(
+        rolling_payload,
+        metric_key="avg_pnl",
+        count_label="rolling_negative_strategies",
+        strategy_label="rolling_worst_negative_strategy",
+        pnl_label="rolling_worst_avg_pnl",
+    )
     rolling_negative_text = str(
         rolling_negative_info.get("text")
         or (
             "rolling_negative_strategies=0 "
             "rolling_worst_negative_strategy=n/a "
             "rolling_worst_avg_pnl=0.0000"
+        )
+    )
+    rolling_negative_active_info = _rolling_negative_strategy_summary(
+        rolling_payload,
+        metric_key="avg_pnl_active",
+        count_label="rolling_active_negative_strategies",
+        strategy_label="rolling_active_worst_negative_strategy",
+        pnl_label="rolling_active_worst_avg_pnl",
+        active_only=True,
+    )
+    rolling_negative_active_text = str(
+        rolling_negative_active_info.get("text")
+        or (
+            "rolling_active_negative_strategies=0 "
+            "rolling_active_worst_negative_strategy=n/a "
+            "rolling_active_worst_avg_pnl=0.0000"
         )
     )
 
@@ -626,6 +665,7 @@ def build_summary_bundle(
         f"| {best_text} "
         f"| {negative_text} "
         f"| {rolling_negative_text} "
+        f"| {rolling_negative_active_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
         f"positive_window_rate={rolling_positive_window_rate:.2%} "
@@ -732,7 +772,25 @@ def build_summary_bundle(
                 "count": int(_f(rolling_negative_info.get("count"))),
                 "worst_strategy": str(rolling_negative_info.get("worst_strategy", "")),
                 "worst_avg_pnl": float(_f(rolling_negative_info.get("worst_avg_pnl"))),
+                "metric_key": str(rolling_negative_info.get("metric_key", "avg_pnl")),
+                "active_only": bool(rolling_negative_info.get("active_only", False)),
                 "text": rolling_negative_text,
+            },
+            "negative_strategies_active": {
+                "count": int(_f(rolling_negative_active_info.get("count"))),
+                "worst_strategy": str(
+                    rolling_negative_active_info.get("worst_strategy", "")
+                ),
+                "worst_avg_pnl": float(
+                    _f(rolling_negative_active_info.get("worst_avg_pnl"))
+                ),
+                "metric_key": str(
+                    rolling_negative_active_info.get("metric_key", "avg_pnl_active")
+                ),
+                "active_only": bool(
+                    rolling_negative_active_info.get("active_only", True)
+                ),
+                "text": rolling_negative_active_text,
             },
         },
         "reject_by_strategy": {
