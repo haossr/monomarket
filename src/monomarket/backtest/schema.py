@@ -556,9 +556,7 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
 
     reject_top_raw = str(rolling.get("reject_top", ""))
     reject_top_norm = (
-        str(reject_top_normalized)
-        if isinstance(reject_top_normalized, str)
-        else reject_top_raw
+        str(reject_top_normalized) if isinstance(reject_top_normalized, str) else reject_top_raw
     )
     reject_top_effective = str(rolling.get("reject_top_effective", ""))
     expected_reject_top_effective = (

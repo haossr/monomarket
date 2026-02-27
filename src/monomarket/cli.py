@@ -1103,6 +1103,8 @@ def backtest_rolling(
                     "mtm_wins_sum": 0.0,
                     "mtm_sample_sum": 0.0,
                     "trade_count_sum": 0.0,
+                    "active_windows": 0.0,
+                    "active_pnl_sum": 0.0,
                 },
             )
             acc["windows"] += 1.0
@@ -1112,6 +1114,9 @@ def backtest_rolling(
             acc["mtm_wins_sum"] += float(result_row.mtm_wins)
             acc["mtm_sample_sum"] += float(result_row.mtm_sample_count)
             acc["trade_count_sum"] += float(result_row.trade_count)
+            if float(result_row.trade_count) > 0:
+                acc["active_windows"] += 1.0
+                acc["active_pnl_sum"] += result_row.pnl
 
         cursor += step_delta
 
@@ -1245,10 +1250,14 @@ def backtest_rolling(
             "full_detail=rolling-summary.json"
         )
 
-    strategy_rows: list[tuple[str, int, float, float, int, float, int, int]] = []
+    strategy_rows: list[tuple[str, int, int, float, float, float, int, float, int, int]] = []
     for strategy, acc in sorted(strategy_agg.items()):
         windows = int(acc["windows"])
         avg_pnl = acc["pnl_sum"] / windows if windows > 0 else 0.0
+        active_windows = int(acc.get("active_windows", 0.0))
+        avg_pnl_active = (
+            acc.get("active_pnl_sum", 0.0) / active_windows if active_windows > 0 else 0.0
+        )
 
         closed_sample_sum = int(acc["closed_sample_sum"])
         closed_wins_sum = int(acc["closed_wins_sum"])
@@ -1262,7 +1271,9 @@ def backtest_rolling(
             (
                 strategy,
                 windows,
+                active_windows,
                 avg_pnl,
+                avg_pnl_active,
                 avg_closed_winrate,
                 closed_sample_sum,
                 avg_mtm_winrate,
@@ -1274,14 +1285,18 @@ def backtest_rolling(
     tb2 = Table(title="Backtest rolling strategy aggregate")
     tb2.add_column("strategy")
     tb2.add_column("windows")
+    tb2.add_column("active_windows")
     tb2.add_column("avg_pnl")
+    tb2.add_column("avg_pnl_active")
     tb2.add_column("avg_closed_wr")
     tb2.add_column("avg_mtm_wr")
     tb2.add_column("total_trades")
     for (
         strategy,
         windows,
+        active_windows,
         avg_pnl,
+        avg_pnl_active,
         avg_closed_winrate,
         closed_sample_sum,
         avg_mtm_winrate,
@@ -1291,7 +1306,9 @@ def backtest_rolling(
         tb2.add_row(
             strategy,
             str(windows),
+            str(active_windows),
             f"{avg_pnl:.4f}",
+            f"{avg_pnl_active:.4f}",
             _format_rate_with_samples(avg_closed_winrate, closed_sample_sum),
             _format_rate_with_samples(avg_mtm_winrate, mtm_sample_sum),
             str(total_trades),
@@ -1338,13 +1355,15 @@ def backtest_rolling(
             {
                 "strategy": x[0],
                 "windows": x[1],
-                "avg_pnl": x[2],
-                "avg_winrate": x[3],
-                "avg_closed_winrate": x[3],
-                "closed_sample_count": x[4],
-                "avg_mtm_winrate": x[5],
-                "mtm_sample_count": x[6],
-                "total_trades": x[7],
+                "active_windows": x[2],
+                "avg_pnl": x[3],
+                "avg_pnl_active": x[4],
+                "avg_winrate": x[5],
+                "avg_closed_winrate": x[5],
+                "closed_sample_count": x[6],
+                "avg_mtm_winrate": x[7],
+                "mtm_sample_count": x[8],
+                "total_trades": x[9],
             }
             for x in strategy_rows
         ]
