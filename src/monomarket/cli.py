@@ -1186,6 +1186,10 @@ def backtest_rolling(
         f"executed_notional_sum={executed_notional_sum:.2f}"
     )
 
+    rolling_window_table_max_rows = 60
+    display_start = max(0, runs - rolling_window_table_max_rows)
+    run_rows_for_display = run_rows[display_start:]
+
     tb = Table(title=f"Backtest rolling windows ({runs})")
     tb.add_column("idx")
     tb.add_column("from")
@@ -1199,7 +1203,7 @@ def backtest_rolling(
     tb.add_column("markets")
     tb.add_column("exec_notional")
     tb.add_column("top_reject_reason")
-    for idx, run_row in enumerate(run_rows, start=1):
+    for idx, run_row in enumerate(run_rows_for_display, start=display_start + 1):
         (
             run_from_ts,
             run_to_ts,
@@ -1234,6 +1238,12 @@ def backtest_rolling(
             top_reject_reason,
         )
     console.print(tb)
+    if display_start > 0:
+        console.print(
+            "backtest rolling windows table truncated "
+            f"showing_last={len(run_rows_for_display)} total={runs}; "
+            "full_detail=rolling-summary.json"
+        )
 
     strategy_rows: list[tuple[str, int, float, float, int, float, int, int]] = []
     for strategy, acc in sorted(strategy_agg.items()):
