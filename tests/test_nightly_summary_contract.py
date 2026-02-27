@@ -55,6 +55,7 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "generated_span_h=",
         "generated_window_coverage=",
         "generated_low_influence=",
+        "generated_low_sample_count=",
         "generated_low_temporal_coverage=",
         "historical_replay_only=",
         "experiment_interpretable=",
@@ -505,6 +506,7 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert "generated_span_h=0.00" in line
     assert "generated_window_coverage=0.00%" in line
     assert "generated_low_influence=true" in line
+    assert "generated_low_sample_count=true" in line
     assert "generated_low_temporal_coverage=false" in line
     assert "historical_replay_only=true" in line
     assert "experiment_interpretable=false" in line
@@ -530,6 +532,7 @@ def test_nightly_cycle_meta_runtime(tmp_path: Path) -> None:
     assert abs(float(signal_generation["generated_span_hours"])) < 1e-9
     assert abs(float(signal_generation["generated_window_coverage_ratio"])) < 1e-9
     assert signal_generation["generated_low_influence"] is True
+    assert signal_generation["generated_low_sample_count"] is True
     assert signal_generation["generated_low_temporal_coverage"] is False
     assert signal_generation["historical_replay_only"] is True
     assert signal_generation["experiment_interpretable"] is False

@@ -14,6 +14,7 @@ from monomarket.backtest import (
 from monomarket.backtest.reject_reason import format_reject_top, normalize_reject_reason
 
 ROLLING_REJECT_TOP_DELIMITER = ";"
+INTERPRETABLE_MIN_EXECUTED_SIGNALS = 10
 
 
 def _f(raw: object) -> float:
@@ -396,10 +397,15 @@ def build_summary_bundle(
                         else "none"
                     )
 
+    executed_signals_total = int(_f(payload.get("executed_signals")))
     generated_share_of_total = (
         (cycle_new_signals_in_window / total_signals) if total_signals > 0 else 0.0
     )
     generated_low_influence = cycle_fixed_window_mode and generated_share_of_total < 0.05
+    generated_low_sample_count = (
+        cycle_fixed_window_mode
+        and executed_signals_total < INTERPRETABLE_MIN_EXECUTED_SIGNALS
+    )
 
     window_hours = float(_f(window_coverage.get("window_hours")))
     generated_span_hours = 0.0
@@ -515,6 +521,7 @@ def build_summary_bundle(
         f"generated_span_h={generated_span_hours:.2f} "
         f"generated_window_coverage={generated_window_coverage_ratio:.2%} "
         f"generated_low_influence={str(generated_low_influence).lower()} "
+        f"generated_low_sample_count={str(generated_low_sample_count).lower()} "
         f"generated_low_temporal_coverage={str(generated_low_temporal_coverage).lower()} "
         f"historical_replay_only={str(cycle_historical_replay_only).lower()} "
         f"experiment_interpretable={str(experiment_interpretable).lower()} "
@@ -652,6 +659,7 @@ def build_summary_bundle(
                 "generated_span_hours": generated_span_hours,
                 "generated_window_coverage_ratio": generated_window_coverage_ratio,
                 "generated_low_influence": generated_low_influence,
+                "generated_low_sample_count": generated_low_sample_count,
                 "generated_low_temporal_coverage": generated_low_temporal_coverage,
                 "historical_replay_only": cycle_historical_replay_only,
                 "experiment_interpretable": experiment_interpretable,
