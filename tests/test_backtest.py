@@ -1382,6 +1382,10 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert payload["windows"][1]["risk_rejection_reasons"] == {}
     assert any(x["strategy"] == "s1" for x in payload["strategy_aggregate"])
     s1_row = next(x for x in payload["strategy_aggregate"] if x["strategy"] == "s1")
+    assert "active_windows" in s1_row
+    assert "active_window_rate" in s1_row
+    assert abs(float(s1_row["active_window_rate"]) - 0.5) < 1e-9
+    assert "avg_pnl_active" in s1_row
     assert "avg_closed_winrate" in s1_row
     assert "avg_mtm_winrate" in s1_row
     assert "closed_sample_count" in s1_row
