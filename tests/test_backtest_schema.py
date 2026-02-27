@@ -297,6 +297,16 @@ def _nightly_sidecar_payload() -> dict[str, object]:
                 {"reason": "riskA", "count": 3},
                 {"reason": "riskB", "count": 1},
             ],
+            "negative_strategies": {
+                "count": 1,
+                "worst_strategy": "s2",
+                "worst_avg_pnl": -0.2,
+                "text": (
+                    "rolling_negative_strategies=1 "
+                    "rolling_worst_negative_strategy=s2 "
+                    "rolling_worst_avg_pnl=-0.2000"
+                ),
+            },
         },
         "reject_by_strategy": {
             "top_k": 3,
@@ -652,6 +662,34 @@ def test_validate_nightly_summary_sidecar_reject_bad_negative_positive_case() ->
     negative["count"] = 1
     negative["worst_strategy"] = ""
     negative["worst_pnl"] = 0.0
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_rolling_negative_zero_case() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling_negative = rolling["negative_strategies"]
+    assert isinstance(rolling_negative, dict)
+    rolling_negative["count"] = 0
+    rolling_negative["worst_strategy"] = "s2"
+    rolling_negative["worst_avg_pnl"] = -0.2
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_rolling_negative_positive_case() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling_negative = rolling["negative_strategies"]
+    assert isinstance(rolling_negative, dict)
+    rolling_negative["count"] = 1
+    rolling_negative["worst_strategy"] = ""
+    rolling_negative["worst_avg_pnl"] = 0.0
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

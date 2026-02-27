@@ -56,6 +56,45 @@ def _negative_strategy_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _rolling_negative_strategy_summary(rolling_payload: dict[str, Any] | None) -> dict[str, Any]:
+    rows: object = None
+    if isinstance(rolling_payload, dict):
+        rows = rolling_payload.get("strategy_aggregate")
+
+    negatives: list[tuple[str, float]] = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pnl = _f(row.get("avg_pnl"))
+            if pnl < 0:
+                negatives.append((str(row.get("strategy", "")), pnl))
+
+    if not negatives:
+        return {
+            "count": 0,
+            "worst_strategy": "",
+            "worst_avg_pnl": 0.0,
+            "text": (
+                "rolling_negative_strategies=0 "
+                "rolling_worst_negative_strategy=n/a "
+                "rolling_worst_avg_pnl=0.0000"
+            ),
+        }
+
+    worst_strategy, worst_avg_pnl = min(negatives, key=lambda x: x[1])
+    return {
+        "count": len(negatives),
+        "worst_strategy": worst_strategy,
+        "worst_avg_pnl": worst_avg_pnl,
+        "text": (
+            f"rolling_negative_strategies={len(negatives)} "
+            f"rolling_worst_negative_strategy={worst_strategy} "
+            f"rolling_worst_avg_pnl={worst_avg_pnl:.4f}"
+        ),
+    }
+
+
 def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
     executed_signals = int(_f(payload.get("executed_signals")))
     if executed_signals <= 0:
@@ -339,6 +378,15 @@ def build_summary_bundle(
         negative_info.get("text")
         or "negative_strategies=0 worst_negative_strategy=n/a worst_negative_pnl=0.0000"
     )
+    rolling_negative_info = _rolling_negative_strategy_summary(rolling_payload)
+    rolling_negative_text = str(
+        rolling_negative_info.get("text")
+        or (
+            "rolling_negative_strategies=0 "
+            "rolling_worst_negative_strategy=n/a "
+            "rolling_worst_avg_pnl=0.0000"
+        )
+    )
 
     winrate_info = _aggregate_winrate(payload)
     closed_winrate = float(winrate_info.get("closed_winrate", 0.0))
@@ -577,6 +625,7 @@ def build_summary_bundle(
         f"edge_gate_top={edge_gate_by_strategy_top} "
         f"| {best_text} "
         f"| {negative_text} "
+        f"| {rolling_negative_text} "
         f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
         f"positive_window_rate={rolling_positive_window_rate:.2%} "
@@ -679,6 +728,12 @@ def build_summary_bundle(
                 {"reason": reason, "count": count}
                 for reason, count in rolling_reject_top_pairs_normalized
             ],
+            "negative_strategies": {
+                "count": int(_f(rolling_negative_info.get("count"))),
+                "worst_strategy": str(rolling_negative_info.get("worst_strategy", "")),
+                "worst_avg_pnl": float(_f(rolling_negative_info.get("worst_avg_pnl"))),
+                "text": rolling_negative_text,
+            },
         },
         "reject_by_strategy": {
             "top_k": int(reject_strategy_info.get("top_k", 0)),

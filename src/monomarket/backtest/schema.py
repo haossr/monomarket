@@ -567,6 +567,55 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
             "nightly sidecar rolling.reject_top_effective must match normalized fallback logic"
         )
 
+    rolling_negative = rolling.get("negative_strategies")
+    if not isinstance(rolling_negative, Mapping):
+        raise ValueError("nightly sidecar rolling.negative_strategies must be an object")
+
+    rolling_negative_count = rolling_negative.get("count")
+    if not isinstance(rolling_negative_count, int):
+        raise ValueError("nightly sidecar rolling.negative_strategies.count must be an integer")
+    if rolling_negative_count < 0:
+        raise ValueError("nightly sidecar rolling.negative_strategies.count must be >= 0")
+
+    rolling_worst_strategy = rolling_negative.get("worst_strategy")
+    if not isinstance(rolling_worst_strategy, str):
+        raise ValueError(
+            "nightly sidecar rolling.negative_strategies.worst_strategy must be a string"
+        )
+
+    rolling_worst_avg_pnl = rolling_negative.get("worst_avg_pnl")
+    if not isinstance(rolling_worst_avg_pnl, int | float):
+        raise ValueError(
+            "nightly sidecar rolling.negative_strategies.worst_avg_pnl must be numeric"
+        )
+
+    rolling_negative_text = rolling_negative.get("text")
+    if not isinstance(rolling_negative_text, str):
+        raise ValueError("nightly sidecar rolling.negative_strategies.text must be a string")
+
+    if rolling_negative_count == 0:
+        if rolling_worst_strategy not in {"", "n/a"}:
+            raise ValueError(
+                "nightly sidecar rolling.negative_strategies.worst_strategy"
+                " must be empty/n-a when count=0"
+            )
+        if float(rolling_worst_avg_pnl) != 0.0:
+            raise ValueError(
+                "nightly sidecar rolling.negative_strategies.worst_avg_pnl"
+                " must be 0 when count=0"
+            )
+    else:
+        if not rolling_worst_strategy:
+            raise ValueError(
+                "nightly sidecar rolling.negative_strategies.worst_strategy"
+                " must be non-empty when count>0"
+            )
+        if float(rolling_worst_avg_pnl) >= 0.0:
+            raise ValueError(
+                "nightly sidecar rolling.negative_strategies.worst_avg_pnl"
+                " must be negative when count>0"
+            )
+
     reject_by_strategy = payload.get("reject_by_strategy")
     if reject_by_strategy is not None:
         if not isinstance(reject_by_strategy, Mapping):
