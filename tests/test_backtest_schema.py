@@ -537,6 +537,30 @@ def test_validate_nightly_summary_sidecar_reject_bad_normalized_pairs_row() -> N
         validate_nightly_summary_sidecar(payload)
 
 
+def test_validate_nightly_summary_sidecar_reject_bad_effective_reject_top_when_normalized() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top"] = "riskA:3;riskB:1"
+    rolling["reject_top_normalized"] = "strategy notional limit exceeded:3;risk b:1"
+    rolling["reject_top_effective"] = "riskA:3;riskB:1"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_effective_reject_top_when_fallback() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["reject_top"] = "riskA:3;riskB:1"
+    rolling["reject_top_normalized"] = "none"
+    rolling["reject_top_effective"] = "strategy notional limit exceeded:3"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
 def test_validate_nightly_summary_sidecar_reject_bad_reject_by_strategy_type() -> None:
     payload = _nightly_sidecar_payload()
     payload["reject_by_strategy"] = "bad"

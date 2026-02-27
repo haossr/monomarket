@@ -554,6 +554,21 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                     f"[{idx}].count must be numeric"
                 )
 
+    reject_top_raw = str(rolling.get("reject_top", ""))
+    reject_top_norm = (
+        str(reject_top_normalized)
+        if isinstance(reject_top_normalized, str)
+        else reject_top_raw
+    )
+    reject_top_effective = str(rolling.get("reject_top_effective", ""))
+    expected_reject_top_effective = (
+        reject_top_norm if reject_top_norm not in {"none", "disabled"} else reject_top_raw
+    )
+    if reject_top_effective != expected_reject_top_effective:
+        raise ValueError(
+            "nightly sidecar rolling.reject_top_effective must match normalized fallback logic"
+        )
+
     reject_by_strategy = payload.get("reject_by_strategy")
     if reject_by_strategy is not None:
         if not isinstance(reject_by_strategy, Mapping):
