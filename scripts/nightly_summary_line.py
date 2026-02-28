@@ -548,6 +548,16 @@ def build_summary_bundle(
 
     reject_strategy_info = _reject_by_strategy(payload, top_k=3)
     reject_strategy_top = str(reject_strategy_info.get("top", "none"))
+    reject_strategy_rows_obj = reject_strategy_info.get("rows")
+    reject_strategy_rows = (
+        reject_strategy_rows_obj if isinstance(reject_strategy_rows_obj, list) else []
+    )
+    reject_strategy_top_reason = "none"
+    reject_strategy_top_rejected = 0
+    if reject_strategy_rows and isinstance(reject_strategy_rows[0], dict):
+        top_row = reject_strategy_rows[0]
+        reject_strategy_top_reason = str(top_row.get("top_reason") or "none")
+        reject_strategy_top_rejected = int(_f(top_row.get("rejected")))
 
     total_signals = int(_f(payload.get("total_signals")))
 
@@ -822,6 +832,8 @@ def build_summary_bundle(
         f"rolling_reject_top_effective_primary_reason={rolling_reject_top_effective_primary_reason} "
         f"rolling_reject_top_effective_primary_count={rolling_reject_top_effective_primary_count} "
         f"reject_strategy_top={reject_strategy_top} "
+        f"reject_strategy_top_reason={reject_strategy_top_reason} "
+        f"reject_strategy_top_rejected={reject_strategy_top_rejected} "
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
 
@@ -950,6 +962,8 @@ def build_summary_bundle(
             "top_k": int(reject_strategy_info.get("top_k", 0)),
             "delimiter": str(reject_strategy_info.get("delimiter", ROLLING_REJECT_TOP_DELIMITER)),
             "top": reject_strategy_top,
+            "top_reason": reject_strategy_top_reason,
+            "top_rejected": reject_strategy_top_rejected,
             "rows": [
                 {
                     "strategy": str(row.get("strategy", "")),
@@ -958,7 +972,7 @@ def build_summary_bundle(
                     "reject_rate": float(_f(row.get("reject_rate"))),
                     "top_reason": str(row.get("top_reason", "none")),
                 }
-                for row in reject_strategy_info.get("rows", [])
+                for row in reject_strategy_rows
                 if isinstance(row, dict)
             ],
         },

@@ -346,6 +346,8 @@ def _nightly_sidecar_payload() -> dict[str, object]:
             "top_k": 3,
             "delimiter": ";",
             "top": "s4:3;s8:1",
+            "top_reason": "strategy notional limit exceeded:3",
+            "top_rejected": 3,
             "rows": [
                 {
                     "strategy": "s4",
@@ -685,6 +687,30 @@ def test_validate_nightly_summary_sidecar_reject_bad_reject_by_strategy_row() ->
     reject_by_strategy = payload["reject_by_strategy"]
     assert isinstance(reject_by_strategy, dict)
     reject_by_strategy["rows"] = [{"strategy": "s4", "total": 1, "rejected": "x"}]
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_reject_by_strategy_top_reason_mismatch() -> (
+    None
+):
+    payload = _nightly_sidecar_payload()
+    reject_by_strategy = payload["reject_by_strategy"]
+    assert isinstance(reject_by_strategy, dict)
+    reject_by_strategy["top_reason"] = "different"
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_reject_by_strategy_top_rejected_mismatch() -> (
+    None
+):
+    payload = _nightly_sidecar_payload()
+    reject_by_strategy = payload["reject_by_strategy"]
+    assert isinstance(reject_by_strategy, dict)
+    reject_by_strategy["top_rejected"] = 4
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

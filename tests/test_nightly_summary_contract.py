@@ -88,6 +88,9 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "rolling_reject_top_effective=",
         "rolling_reject_top_effective_primary_reason=",
         "rolling_reject_top_effective_primary_count=",
+        "reject_strategy_top=",
+        "reject_strategy_top_reason=",
+        "reject_strategy_top_rejected=",
         "best_strategy_basis=",
     ]
     for token in required_tokens:
@@ -731,12 +734,16 @@ def test_nightly_reject_by_strategy_runtime(tmp_path: Path) -> None:
 
     line = summary_txt.read_text().strip()
     assert "reject_strategy_top=s4:2;s1:1;s8:1" in line
+    assert "reject_strategy_top_reason=strategy notional limit exceeded:2" in line
+    assert "reject_strategy_top_rejected=2" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
     reject_by_strategy = sidecar["reject_by_strategy"]
     assert isinstance(reject_by_strategy, dict)
     assert reject_by_strategy["top"] == "s4:2;s1:1;s8:1"
+    assert reject_by_strategy["top_reason"] == "strategy notional limit exceeded:2"
+    assert int(reject_by_strategy["top_rejected"]) == 2
     rows = reject_by_strategy["rows"]
     assert isinstance(rows, list)
     assert rows[0]["strategy"] == "s4"

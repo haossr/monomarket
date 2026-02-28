@@ -819,6 +819,18 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if not isinstance(top, str):
             raise ValueError("nightly sidecar reject_by_strategy.top must be a string")
 
+        top_reason_top = reject_by_strategy.get("top_reason")
+        if not isinstance(top_reason_top, str):
+            raise ValueError("nightly sidecar reject_by_strategy.top_reason must be a string")
+
+        top_rejected = reject_by_strategy.get("top_rejected")
+        if not isinstance(top_rejected, int | float):
+            raise ValueError("nightly sidecar reject_by_strategy.top_rejected must be numeric")
+        if float(top_rejected) < 0:
+            raise ValueError("nightly sidecar reject_by_strategy.top_rejected must be >= 0")
+        if int(float(top_rejected)) != float(top_rejected):
+            raise ValueError("nightly sidecar reject_by_strategy.top_rejected must be integer-like")
+
         rows = reject_by_strategy.get("rows")
         if not isinstance(rows, list):
             raise ValueError("nightly sidecar reject_by_strategy.rows must be an array")
@@ -832,7 +844,7 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
             total = row.get("total")
             rejected = row.get("rejected")
             reject_rate = row.get("reject_rate")
-            top_reason = row.get("top_reason")
+            row_top_reason = row.get("top_reason")
             if not isinstance(strategy, str):
                 raise ValueError(
                     f"nightly sidecar reject_by_strategy.rows[{idx}].strategy must be a string"
@@ -849,9 +861,36 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                 raise ValueError(
                     f"nightly sidecar reject_by_strategy.rows[{idx}].reject_rate must be numeric"
                 )
-            if not isinstance(top_reason, str):
+            if not isinstance(row_top_reason, str):
                 raise ValueError(
                     f"nightly sidecar reject_by_strategy.rows[{idx}].top_reason must be a string"
+                )
+
+        if rows:
+            first_row = rows[0]
+            if isinstance(first_row, Mapping):
+                first_rejected = float(first_row.get("rejected", 0))
+                first_top_reason = str(first_row.get("top_reason", "none"))
+                if int(first_rejected) != int(float(top_rejected)):
+                    raise ValueError(
+                        "nightly sidecar reject_by_strategy.top_rejected"
+                        " must match rows[0].rejected"
+                    )
+                if first_top_reason != top_reason_top:
+                    raise ValueError(
+                        "nightly sidecar reject_by_strategy.top_reason"
+                        " must match rows[0].top_reason"
+                    )
+        else:
+            if top_reason_top != "none":
+                raise ValueError(
+                    "nightly sidecar reject_by_strategy.top_reason"
+                    " must be 'none' when rows is empty"
+                )
+            if int(float(top_rejected)) != 0:
+                raise ValueError(
+                    "nightly sidecar reject_by_strategy.top_rejected"
+                    " must be 0 when rows is empty"
                 )
 
     cycle_meta = payload.get("cycle_meta")
