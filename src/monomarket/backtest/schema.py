@@ -385,6 +385,7 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         raw = signals.get(key)
         if not isinstance(raw, int | float):
             raise ValueError(f"nightly sidecar signals.{key} must be numeric")
+    signals_rejected = float(signals.get("rejected", 0))
 
     winrate = payload.get("winrate")
     if winrate is not None:
@@ -831,6 +832,12 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if int(float(top_rejected)) != float(top_rejected):
             raise ValueError("nightly sidecar reject_by_strategy.top_rejected must be integer-like")
 
+        top_share = reject_by_strategy.get("top_share")
+        if not isinstance(top_share, int | float):
+            raise ValueError("nightly sidecar reject_by_strategy.top_share must be numeric")
+        if not (0.0 <= float(top_share) <= 1.0):
+            raise ValueError("nightly sidecar reject_by_strategy.top_share must be in [0,1]")
+
         rows = reject_by_strategy.get("rows")
         if not isinstance(rows, list):
             raise ValueError("nightly sidecar reject_by_strategy.rows must be an array")
@@ -892,6 +899,15 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                     "nightly sidecar reject_by_strategy.top_rejected"
                     " must be 0 when rows is empty"
                 )
+
+        expected_top_share = (
+            float(top_rejected) / signals_rejected if signals_rejected > 0 else 0.0
+        )
+        if abs(float(top_share) - expected_top_share) > 1e-12:
+            raise ValueError(
+                "nightly sidecar reject_by_strategy.top_share"
+                " must equal top_rejected / signals.rejected"
+            )
 
     cycle_meta = payload.get("cycle_meta")
     if cycle_meta is not None:

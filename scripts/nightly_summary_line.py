@@ -560,6 +560,12 @@ def build_summary_bundle(
         reject_strategy_top_rejected = int(_f(top_row.get("rejected")))
 
     total_signals = int(_f(payload.get("total_signals")))
+    rejected_signals = int(_f(payload.get("rejected_signals")))
+    reject_strategy_top_share = (
+        float(reject_strategy_top_rejected) / float(rejected_signals)
+        if rejected_signals > 0
+        else 0.0
+    )
 
     cycle_fixed_window_mode = False
     cycle_new_signals_total = 0
@@ -834,6 +840,7 @@ def build_summary_bundle(
         f"reject_strategy_top={reject_strategy_top} "
         f"reject_strategy_top_reason={reject_strategy_top_reason} "
         f"reject_strategy_top_rejected={reject_strategy_top_rejected} "
+        f"reject_strategy_top_share={reject_strategy_top_share:.2%} "
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
 
@@ -964,6 +971,7 @@ def build_summary_bundle(
             "top": reject_strategy_top,
             "top_reason": reject_strategy_top_reason,
             "top_rejected": reject_strategy_top_rejected,
+            "top_share": reject_strategy_top_share,
             "rows": [
                 {
                     "strategy": str(row.get("strategy", "")),
