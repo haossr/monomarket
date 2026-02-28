@@ -22,6 +22,10 @@ class S8NoCarryTailHedge(Strategy):
         yes_cap = float(cfg.get("yes_price_max_for_no", 0.25))
         hedge_ratio = float(cfg.get("hedge_budget_ratio", 0.15))
         max_order_notional = float(cfg.get("max_order_notional", 25.0))
+        max_candidates = int(cfg.get("max_candidates", 30))
+        if max_candidates < 1:
+            return []
+
         edge_gate_min_bps = float(cfg.get("edge_gate_min_bps", 0.0))
         edge_gate_budget_penalty_bps = max(
             0.0,
@@ -68,7 +72,7 @@ class S8NoCarryTailHedge(Strategy):
         tails.sort(key=lambda m: (float(m.yes_price or 1.0), -m.liquidity))
 
         signals: list[Signal] = []
-        for m in mains[:30]:
+        for m in mains[:max_candidates]:
             yes_px = float(m.yes_price or 0.0)
             no_px = float(m.no_price or 1.0 - yes_px)
             base_qty = max(3.0, m.liquidity * 0.012)
