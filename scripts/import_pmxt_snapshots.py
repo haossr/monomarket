@@ -275,6 +275,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--bucket-minutes", type=int, default=15, help="Snapshot bucket size in minutes")
     p.add_argument("--max-files", type=int, default=0, help="Max files per run (0 = no limit)")
+    p.add_argument(
+        "--delete-imported",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Delete source parquet after successful import (default: false)",
+    )
     p.add_argument("--dry-run", action="store_true", help="List pending files without importing")
     return p
 
@@ -339,6 +345,7 @@ def main() -> int:
             imported_files = 0
             imported_rows = 0
             deleted_rows = 0
+            deleted_source_files = 0
 
             for idx, file_hour in enumerate(todo, start=1):
                 print(f"[import] ({idx}/{len(todo)}) {file_hour.name}")
@@ -356,6 +363,13 @@ def main() -> int:
                 state["processed"] = processed
                 save_state(state_path, state)
 
+                if args.delete_imported:
+                    try:
+                        file_hour.path.unlink(missing_ok=True)
+                        deleted_source_files += 1
+                    except OSError as exc:
+                        print(f"[import] WARN failed to delete source {file_hour.name}: {exc}")
+
                 imported_files += 1
                 imported_rows += inserted
                 deleted_rows += max(0, deleted)
@@ -364,7 +378,7 @@ def main() -> int:
         elapsed = time.time() - started
         print(
             f"[import] finished files={imported_files} inserted={imported_rows} "
-            f"deleted={deleted_rows} elapsed={elapsed:.1f}s"
+            f"deleted={deleted_rows} source_deleted={deleted_source_files} elapsed={elapsed:.1f}s"
         )
 
     return 0

@@ -116,8 +116,8 @@ rolling summary 会额外输出：
 # 先看待处理文件（不落库）
 python scripts/import_pmxt_snapshots.py --dry-run
 
-# 正式导入（可限制单次文件数）
-python scripts/import_pmxt_snapshots.py --bucket-minutes 15 --max-files 24
+# 正式导入（可限制单次文件数；导入后删除源 parquet，只保留回测快照）
+python scripts/import_pmxt_snapshots.py --bucket-minutes 15 --max-files 24 --delete-imported
 ```
 
 默认路径：
@@ -129,6 +129,7 @@ python scripts/import_pmxt_snapshots.py --bucket-minutes 15 --max-files 24
 - 写入 `market_snapshots` 且 `source='pmxt_archive'`
 - 按文件小时窗口幂等重放（同一小时会先删后写）
 - 使用状态文件 `.ingest_state.json` 追踪已处理文件
+- 可选 `--delete-imported`：导入成功后删除源 parquet（节省磁盘，仅保留回测所需快照）
 
 `monomarket backtest` 无需额外参数；读取 `market_snapshots` 时会自然用到这批更密集快照。
 
