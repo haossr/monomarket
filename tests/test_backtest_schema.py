@@ -292,6 +292,9 @@ def _nightly_sidecar_payload() -> dict[str, object]:
         },
         "rolling": {
             "runs": 3,
+            "total_signals": 10,
+            "executed_signals": 8,
+            "rejected_signals": 2,
             "execution_rate": 0.8,
             "positive_window_rate": 0.66,
             "empty_window_count": 1,
@@ -652,6 +655,18 @@ def test_validate_nightly_summary_sidecar_reject_bad_effective_primary_count_fra
     rolling = payload["rolling"]
     assert isinstance(rolling, dict)
     rolling["reject_top_effective_primary_count"] = 3.5
+
+    with pytest.raises(ValueError):
+        validate_nightly_summary_sidecar(payload)
+
+
+def test_validate_nightly_summary_sidecar_reject_bad_rolling_signal_count_relation() -> None:
+    payload = _nightly_sidecar_payload()
+    rolling = payload["rolling"]
+    assert isinstance(rolling, dict)
+    rolling["total_signals"] = 10
+    rolling["executed_signals"] = 9
+    rolling["rejected_signals"] = 2
 
     with pytest.raises(ValueError):
         validate_nightly_summary_sidecar(payload)

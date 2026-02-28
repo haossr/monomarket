@@ -604,6 +604,9 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
 
     rolling_required_numeric = (
         "runs",
+        "total_signals",
+        "executed_signals",
+        "rejected_signals",
         "execution_rate",
         "positive_window_rate",
         "empty_window_count",
@@ -617,6 +620,25 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         raw = rolling.get(key)
         if not isinstance(raw, int | float):
             raise ValueError(f"nightly sidecar rolling.{key} must be numeric")
+
+    rolling_total_signals = float(rolling.get("total_signals", 0))
+    rolling_executed_signals = float(rolling.get("executed_signals", 0))
+    rolling_rejected_signals = float(rolling.get("rejected_signals", 0))
+    for key, value in (
+        ("total_signals", rolling_total_signals),
+        ("executed_signals", rolling_executed_signals),
+        ("rejected_signals", rolling_rejected_signals),
+    ):
+        if value < 0:
+            raise ValueError(f"nightly sidecar rolling.{key} must be >= 0")
+        if int(value) != value:
+            raise ValueError(f"nightly sidecar rolling.{key} must be integer-like")
+
+    if rolling_executed_signals + rolling_rejected_signals != rolling_total_signals:
+        raise ValueError(
+            "nightly sidecar rolling.executed_signals + rolling.rejected_signals"
+            " must equal rolling.total_signals"
+        )
 
     for key in (
         "coverage_label",

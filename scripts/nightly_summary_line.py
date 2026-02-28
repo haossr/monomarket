@@ -674,6 +674,9 @@ def build_summary_bundle(
         experiment_reason = "sufficient_generated_share"
 
     rolling_runs = 0
+    rolling_total_signals = 0
+    rolling_executed_signals = 0
+    rolling_rejected_signals = 0
     rolling_exec_rate = 0.0
     rolling_range_hours = 0.0
     rolling_coverage_ratio = 0.0
@@ -703,6 +706,9 @@ def build_summary_bundle(
 
     if isinstance(rolling_summary, dict):
         rolling_runs = int(_f(rolling_summary.get("run_count")))
+        rolling_total_signals = int(_f(rolling_summary.get("total_signals")))
+        rolling_executed_signals = int(_f(rolling_summary.get("executed_signals")))
+        rolling_rejected_signals = int(_f(rolling_summary.get("rejected_signals")))
         rolling_exec_rate = _f(rolling_summary.get("execution_rate"))
         rolling_range_hours = _f(rolling_summary.get("range_hours"))
         rolling_coverage_ratio = _f(rolling_summary.get("coverage_ratio"))
@@ -790,7 +796,11 @@ def build_summary_bundle(
         f"| {negative_event_text} "
         f"| {rolling_negative_text} "
         f"| {rolling_negative_active_text} "
-        f"| rolling runs={rolling_runs} exec_rate={rolling_exec_rate:.2%} "
+        f"| rolling runs={rolling_runs} "
+        f"rolling_total_signals={rolling_total_signals} "
+        f"rolling_executed_signals={rolling_executed_signals} "
+        f"rolling_rejected_signals={rolling_rejected_signals} "
+        f"exec_rate={rolling_exec_rate:.2%} "
         f"pos_win_rate={rolling_positive_window_rate:.2%} empty_windows={rolling_empty_window_count} "
         f"positive_window_rate={rolling_positive_window_rate:.2%} "
         f"empty_window_count={rolling_empty_window_count} "
@@ -876,6 +886,9 @@ def build_summary_bundle(
         },
         "rolling": {
             "runs": rolling_runs,
+            "total_signals": rolling_total_signals,
+            "executed_signals": rolling_executed_signals,
+            "rejected_signals": rolling_rejected_signals,
             "execution_rate": rolling_exec_rate,
             "pos_win_rate": rolling_positive_window_rate,
             "empty_windows": rolling_empty_window_count,
