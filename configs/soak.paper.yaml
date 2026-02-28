@@ -68,7 +68,7 @@ strategies:
   s8:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.10
-    max_order_notional: 8.85
+    max_order_notional: 8.8
     edge_gate_min_bps: 700.0
     edge_gate_budget_cap_notional: 10.0
     edge_gate_budget_penalty_bps: 80.0
