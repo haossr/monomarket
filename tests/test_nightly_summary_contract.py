@@ -91,6 +91,7 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "reject_strategy_top=",
         "reject_strategy_top_reason=",
         "reject_strategy_top_rejected=",
+        "reject_strategy_non_top_rejected=",
         "reject_strategy_top_share=",
         "best_strategy_basis=",
     ]
@@ -737,6 +738,7 @@ def test_nightly_reject_by_strategy_runtime(tmp_path: Path) -> None:
     assert "reject_strategy_top=s4:2;s1:1;s8:1" in line
     assert "reject_strategy_top_reason=strategy notional limit exceeded:2" in line
     assert "reject_strategy_top_rejected=2" in line
+    assert "reject_strategy_non_top_rejected=2" in line
     assert "reject_strategy_top_share=50.00%" in line
 
     sidecar = json.loads(summary_json.read_text())
@@ -746,6 +748,7 @@ def test_nightly_reject_by_strategy_runtime(tmp_path: Path) -> None:
     assert reject_by_strategy["top"] == "s4:2;s1:1;s8:1"
     assert reject_by_strategy["top_reason"] == "strategy notional limit exceeded:2"
     assert int(reject_by_strategy["top_rejected"]) == 2
+    assert int(reject_by_strategy["non_top_rejected"]) == 2
     assert abs(float(reject_by_strategy["top_share"]) - 0.5) < 1e-12
     rows = reject_by_strategy["rows"]
     assert isinstance(rows, list)

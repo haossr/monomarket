@@ -832,6 +832,16 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
         if int(float(top_rejected)) != float(top_rejected):
             raise ValueError("nightly sidecar reject_by_strategy.top_rejected must be integer-like")
 
+        non_top_rejected = reject_by_strategy.get("non_top_rejected")
+        if not isinstance(non_top_rejected, int | float):
+            raise ValueError("nightly sidecar reject_by_strategy.non_top_rejected must be numeric")
+        if float(non_top_rejected) < 0:
+            raise ValueError("nightly sidecar reject_by_strategy.non_top_rejected must be >= 0")
+        if int(float(non_top_rejected)) != float(non_top_rejected):
+            raise ValueError(
+                "nightly sidecar reject_by_strategy.non_top_rejected must be integer-like"
+            )
+
         top_share = reject_by_strategy.get("top_share")
         if not isinstance(top_share, int | float):
             raise ValueError("nightly sidecar reject_by_strategy.top_share must be numeric")
@@ -900,9 +910,13 @@ def validate_nightly_summary_sidecar(payload: Mapping[str, Any]) -> None:
                     " must be 0 when rows is empty"
                 )
 
-        expected_top_share = (
-            float(top_rejected) / signals_rejected if signals_rejected > 0 else 0.0
-        )
+        if int(float(top_rejected) + float(non_top_rejected)) != int(signals_rejected):
+            raise ValueError(
+                "nightly sidecar reject_by_strategy.top_rejected +"
+                " non_top_rejected must equal signals.rejected"
+            )
+
+        expected_top_share = float(top_rejected) / signals_rejected if signals_rejected > 0 else 0.0
         if abs(float(top_share) - expected_top_share) > 1e-12:
             raise ValueError(
                 "nightly sidecar reject_by_strategy.top_share"
