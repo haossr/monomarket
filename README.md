@@ -108,6 +108,30 @@ rolling summary 会额外输出：
 
 > 说明：S1 依赖同 canonical 的多来源同步历史快照；最小可用版本先覆盖 S4/S8（可选 S2）。
 
+## 接入 PMXT 本地 orderbook（用于更密回测快照）
+
+当你已经把 `archive.pmxt.dev` 的 parquet 下到本地后，可将其导入 `market_snapshots`，让回测使用更高频率的快照点（默认 15 分钟 bucket）：
+
+```bash
+# 先看待处理文件（不落库）
+python scripts/import_pmxt_snapshots.py --dry-run
+
+# 正式导入（可限制单次文件数）
+python scripts/import_pmxt_snapshots.py --bucket-minutes 15 --max-files 24
+```
+
+默认路径：
+- 输入目录：`/Users/hao/.openclaw/workspace/data/pmxt/Polymarket`
+- 数据库：`/Users/hao/.openclaw/workspace/projects/monomarket/data/monomarket.db`
+
+导入器行为：
+- 只处理 `polymarket_orderbook_*.parquet`（自动忽略 `.part`）
+- 写入 `market_snapshots` 且 `source='pmxt_archive'`
+- 按文件小时窗口幂等重放（同一小时会先删后写）
+- 使用状态文件 `.ingest_state.json` 追踪已处理文件
+
+`monomarket backtest` 无需额外参数；读取 `market_snapshots` 时会自然用到这批更密集快照。
+
 v1->v2 迁移（校验 + 转换）：
 
 ```bash
