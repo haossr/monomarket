@@ -240,8 +240,8 @@ def _nightly_sidecar_payload() -> dict[str, object]:
         },
         "signals": {
             "total": 10,
-            "executed": 8,
-            "rejected": 2,
+            "executed": 6,
+            "rejected": 4,
         },
         "winrate": {
             "closed_winrate": 0.5,
