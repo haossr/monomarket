@@ -69,7 +69,7 @@ strategies:
     yes_price_max_for_no: 0.25
     hedge_budget_ratio: 0.10
     max_candidates: 28
-    max_signals_per_event: 7
+    max_signals_per_event: 8
     max_order_notional: 9.2
     edge_gate_min_bps: 916.0
     edge_gate_budget_cap_notional: 10.0
