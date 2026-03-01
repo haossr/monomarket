@@ -10,7 +10,7 @@ trading:
 
 risk:
   max_daily_loss: 250.0
-  max_strategy_notional: 1060.0
+  max_strategy_notional: 1065.0
   max_event_notional: 1500.0
   circuit_breaker_rejections: 5
 
