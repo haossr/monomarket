@@ -55,3 +55,28 @@ def test_s8_exclude_event_ids_filters_main_event() -> None:
 
     assert len(signals) >= 1
     assert {s.event_id for s in signals} == {"keep-me"}
+
+
+def test_s8_max_signals_per_event_caps_single_event() -> None:
+    strategy = S8NoCarryTailHedge()
+    markets = [
+        _market(1, event_id="same-event", yes=0.10, liq=800),
+        _market(2, event_id="same-event", yes=0.11, liq=780),
+        _market(3, event_id="same-event", yes=0.12, liq=760),
+        _market(4, event_id="other-event", yes=0.13, liq=700),
+        _market(5, event_id="tail-1", yes=0.05, liq=120),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "yes_price_max_for_no": 0.25,
+            "max_candidates": 10,
+            "max_signals_per_event": 1,
+        },
+    )
+
+    assert len(signals) >= 2
+    event_ids = [s.event_id for s in signals]
+    assert event_ids.count("same-event") == 1
+    assert "other-event" in event_ids

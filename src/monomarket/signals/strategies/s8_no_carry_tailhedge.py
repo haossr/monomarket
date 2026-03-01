@@ -23,8 +23,11 @@ class S8NoCarryTailHedge(Strategy):
         hedge_ratio = float(cfg.get("hedge_budget_ratio", 0.15))
         max_order_notional = float(cfg.get("max_order_notional", 25.0))
         max_candidates = int(cfg.get("max_candidates", 30))
+        max_signals_per_event = int(cfg.get("max_signals_per_event", 0))
         if max_candidates < 1:
             return []
+        if max_signals_per_event < 0:
+            max_signals_per_event = 0
 
         edge_gate_min_bps = float(cfg.get("edge_gate_min_bps", 0.0))
         edge_gate_budget_penalty_bps = max(
@@ -72,7 +75,14 @@ class S8NoCarryTailHedge(Strategy):
         tails.sort(key=lambda m: (float(m.yes_price or 1.0), -m.liquidity))
 
         signals: list[Signal] = []
-        for m in mains[:max_candidates]:
+        event_signal_counts: dict[str, int] = {}
+        for m in mains:
+            event_id = str(m.event_id)
+            if (
+                max_signals_per_event > 0
+                and event_signal_counts.get(event_id, 0) >= max_signals_per_event
+            ):
+                continue
             yes_px = float(m.yes_price or 0.0)
             no_px = float(m.no_price or 1.0 - yes_px)
             base_qty = max(3.0, m.liquidity * 0.012)
@@ -141,5 +151,8 @@ class S8NoCarryTailHedge(Strategy):
                     },
                 )
             )
+            event_signal_counts[event_id] = event_signal_counts.get(event_id, 0) + 1
+            if len(signals) >= max_candidates:
+                break
 
         return signals
