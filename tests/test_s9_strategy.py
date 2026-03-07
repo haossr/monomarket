@@ -315,3 +315,109 @@ def test_s9_can_opt_out_same_condition_guard() -> None:
     )
 
     assert len(signals) == 2
+
+
+def test_s9_diagnostics_tracks_reject_reason_by_event() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-mixed",
+            event_id="e1",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team A win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-mixed",
+            event_id="e2",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Team A win?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "require_same_event": True,
+            "require_same_condition": True,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy:non_positive_gross_edge") == 1
+
+    reject_by_event = diagnostics.get("candidate_reject_reasons_by_event", {})
+    assert reject_by_event.get("e1", {}).get("buy:non_positive_gross_edge") == 1
+
+
+def test_s9_diagnostics_event_top_k_summary() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-main",
+            event_id="e1",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team A win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-main",
+            event_id="e1",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Team A win?",
+        ),
+        _market(
+            3,
+            canonical_id="c-thin",
+            event_id="e2",
+            yes=0.40,
+            no=0.61,
+            liq=900,
+            question="Will Team B win?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "allow_sell_parity": True,
+            "min_effective_edge_bps": 900.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "diagnostics_event_top_k": 1,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("canonical_under_two_legs") == 1
+    assert reject_reasons.get("buy:effective_edge_below_min") == 1
+    assert reject_reasons.get("sell:effective_edge_below_min") == 1
+
+    reject_by_event = diagnostics.get("candidate_reject_reasons_by_event", {})
+    assert reject_by_event.get("e1", {}).get("buy:effective_edge_below_min") == 1
+    assert reject_by_event.get("e1", {}).get("sell:effective_edge_below_min") == 1
+    assert reject_by_event.get("e2", {}).get("canonical_under_two_legs") == 1
+
+    assert diagnostics.get("candidate_reject_reasons_by_event_top_k") == 1
+    reject_top = diagnostics.get("candidate_reject_reasons_by_event_top", {})
+    assert list(reject_top.keys()) == ["e1"]

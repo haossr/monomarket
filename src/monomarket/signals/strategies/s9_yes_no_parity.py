@@ -36,6 +36,48 @@ def _normalize_text(raw: str) -> str:
     return " ".join(str(raw).strip().lower().split())
 
 
+def _bump_counter(bucket: dict[str, int], key: str) -> None:
+    bucket[key] = int(bucket.get(key, 0)) + 1
+
+
+def _record_reject_reason(
+    *,
+    reject_reasons: dict[str, int],
+    reject_reasons_by_event: dict[str, dict[str, int]],
+    event_id: str,
+    reason: str,
+) -> None:
+    _bump_counter(reject_reasons, reason)
+    event_rejects = reject_reasons_by_event.setdefault(event_id, {})
+    _bump_counter(event_rejects, reason)
+
+
+def _normalize_reject_reasons_by_event(
+    reject_reasons_by_event: dict[str, dict[str, int]],
+) -> dict[str, dict[str, int]]:
+    return {
+        event_id: {reason: reasons[reason] for reason in sorted(reasons)}
+        for event_id, reasons in sorted(reject_reasons_by_event.items())
+        if reasons
+    }
+
+
+def _top_k_reject_reasons_by_event(
+    reject_reasons_by_event: dict[str, dict[str, int]],
+    *,
+    top_k: int,
+) -> dict[str, dict[str, int]]:
+    normalized = _normalize_reject_reasons_by_event(reject_reasons_by_event)
+    if top_k <= 0:
+        return normalized
+
+    ranked = sorted(
+        normalized.items(),
+        key=lambda item: (-sum(int(v) for v in item[1].values()), item[0]),
+    )
+    return {event_id: reasons for event_id, reasons in ranked[:top_k]}
+
+
 class S9YesNoParityArb(Strategy):
     """
     S9: same-condition YES/NO parity arbitrage.
@@ -48,6 +90,9 @@ class S9YesNoParityArb(Strategy):
     """
 
     name = "s9"
+
+    def __init__(self) -> None:
+        self.last_diagnostics: dict[str, Any] = {}
 
     def generate(
         self,
@@ -73,8 +118,22 @@ class S9YesNoParityArb(Strategy):
         require_same_condition = _as_bool(cfg.get("require_same_condition"), True)
         max_pairs_per_event = max(0, int(float(cfg.get("max_pairs_per_event", 2))))
         max_event_pair_notional = float(cfg.get("max_event_pair_notional", 20.0))
+        diagnostics_event_top_k = max(0, int(float(cfg.get("diagnostics_event_top_k", 20))))
 
         if max_order_notional <= 0 or max_signals <= 0:
+            self.last_diagnostics = {
+                "canonical_groups_total": 0,
+                "events_total": 0,
+                "pair_attempts": 0,
+                "pairs_emitted": 0,
+                "signals_emitted": 0,
+                "direction_attempts": {"buy": 0, "sell": 0},
+                "direction_pass": {"buy": 0, "sell": 0},
+                "candidate_reject_reasons": {"strategy_disabled": 1},
+                "candidate_reject_reasons_by_event": {},
+                "candidate_reject_reasons_by_event_top_k": diagnostics_event_top_k,
+                "candidate_reject_reasons_by_event_top": {},
+            }
             return []
 
         by_canonical: dict[str, list[MarketView]] = defaultdict(list)
@@ -90,10 +149,22 @@ class S9YesNoParityArb(Strategy):
         event_pair_counts: dict[str, int] = defaultdict(int)
         event_pair_notional: dict[str, float] = defaultdict(float)
         signals: list[Signal] = []
+        reject_reasons: dict[str, int] = {}
+        reject_reasons_by_event: dict[str, dict[str, int]] = {}
+        direction_attempts: dict[str, int] = {"buy": 0, "sell": 0}
+        direction_pass: dict[str, int] = {"buy": 0, "sell": 0}
+        pairs_emitted = 0
 
         for canonical_id in sorted(by_canonical):
             rows = by_canonical[canonical_id]
+            event_hint = self._event_hint_for_rows(rows)
             if len(rows) < 2:
+                _record_reject_reason(
+                    reject_reasons=reject_reasons,
+                    reject_reasons_by_event=reject_reasons_by_event,
+                    event_id=event_hint,
+                    reason="canonical_under_two_legs",
+                )
                 continue
 
             candidate_sides: list[tuple[str, bool]] = [("buy", True)]
@@ -101,6 +172,7 @@ class S9YesNoParityArb(Strategy):
                 candidate_sides.append(("sell", False))
 
             for side, buy_mode in candidate_sides:
+                direction_attempts[side] = int(direction_attempts.get(side, 0)) + 1
                 pair = self._best_pair(
                     rows,
                     buy_mode=buy_mode,
@@ -108,15 +180,28 @@ class S9YesNoParityArb(Strategy):
                     require_same_condition=require_same_condition,
                 )
                 if pair is None:
+                    _record_reject_reason(
+                        reject_reasons=reject_reasons,
+                        reject_reasons_by_event=reject_reasons_by_event,
+                        event_id=event_hint,
+                        reason=f"{side}:pair_not_found",
+                    )
                     continue
 
                 yes_leg, no_leg = pair
+                pair_event_hint = self._event_hint_for_pair(yes_leg=yes_leg, no_leg=no_leg)
                 event_id = self._resolve_pair_event_id(
                     yes_leg=yes_leg,
                     no_leg=no_leg,
                     require_same_event=require_same_event,
                 )
                 if event_id is None:
+                    _record_reject_reason(
+                        reject_reasons=reject_reasons,
+                        reject_reasons_by_event=reject_reasons_by_event,
+                        event_id=pair_event_hint,
+                        reason=f"{side}:pair_event_mismatch",
+                    )
                     continue
 
                 condition_key = self._resolve_pair_condition_key(
@@ -125,9 +210,21 @@ class S9YesNoParityArb(Strategy):
                     require_same_condition=require_same_condition,
                 )
                 if condition_key is None:
+                    _record_reject_reason(
+                        reject_reasons=reject_reasons,
+                        reject_reasons_by_event=reject_reasons_by_event,
+                        event_id=event_id,
+                        reason=f"{side}:pair_condition_mismatch",
+                    )
                     continue
 
                 if max_pairs_per_event > 0 and event_pair_counts[event_id] >= max_pairs_per_event:
+                    _record_reject_reason(
+                        reject_reasons=reject_reasons,
+                        reject_reasons_by_event=reject_reasons_by_event,
+                        event_id=event_id,
+                        reason=f"{side}:event_pair_limit_reached",
+                    )
                     continue
 
                 used_before = float(event_pair_notional[event_id])
@@ -135,9 +232,15 @@ class S9YesNoParityArb(Strategy):
                 if max_event_pair_notional > 0:
                     event_notional_budget = max_event_pair_notional - used_before
                     if event_notional_budget <= 0:
+                        _record_reject_reason(
+                            reject_reasons=reject_reasons,
+                            reject_reasons_by_event=reject_reasons_by_event,
+                            event_id=event_id,
+                            reason=f"{side}:event_notional_budget_exhausted",
+                        )
                         continue
 
-                pair_signals = self._emit_pair_signals(
+                pair_signals, pair_reject_reason = self._emit_pair_signals(
                     canonical_id=canonical_id,
                     event_id=event_id,
                     condition_key=condition_key,
@@ -160,11 +263,23 @@ class S9YesNoParityArb(Strategy):
                     max_pairs_per_event=max_pairs_per_event,
                 )
                 if not pair_signals:
+                    _record_reject_reason(
+                        reject_reasons=reject_reasons,
+                        reject_reasons_by_event=reject_reasons_by_event,
+                        event_id=event_id,
+                        reason=(
+                            f"{side}:{pair_reject_reason}"
+                            if pair_reject_reason
+                            else f"{side}:emit_rejected_unknown"
+                        ),
+                    )
                     continue
 
                 pair_notional = float(pair_signals[0].payload.get("pair_notional", 0.0))
                 event_pair_notional[event_id] = used_before + max(0.0, pair_notional)
                 event_pair_counts[event_id] += 1
+                direction_pass[side] = int(direction_pass.get(side, 0)) + 1
+                pairs_emitted += 1
                 signals.extend(pair_signals)
 
                 if len(signals) >= max_signals:
@@ -174,7 +289,56 @@ class S9YesNoParityArb(Strategy):
                 break
 
         signals.sort(key=lambda s: s.score, reverse=True)
-        return signals[:max_signals]
+        selected_signals = signals[:max_signals]
+        reject_by_event = _normalize_reject_reasons_by_event(reject_reasons_by_event)
+        events_total = len(
+            {
+                str(row.event_id).strip()
+                for grouped_rows in by_canonical.values()
+                for row in grouped_rows
+                if str(row.event_id).strip()
+            }
+        )
+        self.last_diagnostics = {
+            "canonical_groups_total": len(by_canonical),
+            "events_total": events_total,
+            "pair_attempts": sum(int(v) for v in direction_attempts.values()),
+            "pairs_emitted": pairs_emitted,
+            "signals_emitted": len(selected_signals),
+            "direction_attempts": direction_attempts,
+            "direction_pass": direction_pass,
+            "candidate_reject_reasons": {
+                key: reject_reasons[key] for key in sorted(reject_reasons)
+            },
+            "candidate_reject_reasons_by_event": reject_by_event,
+            "candidate_reject_reasons_by_event_top_k": diagnostics_event_top_k,
+            "candidate_reject_reasons_by_event_top": _top_k_reject_reasons_by_event(
+                reject_by_event,
+                top_k=diagnostics_event_top_k,
+            ),
+        }
+        return selected_signals
+
+    @staticmethod
+    def _event_hint_for_rows(rows: list[MarketView]) -> str:
+        event_ids = {
+            str(row.event_id or "").strip() for row in rows if str(row.event_id or "").strip()
+        }
+        if not event_ids:
+            return "unknown"
+        if len(event_ids) == 1:
+            return next(iter(event_ids))
+        return "mixed"
+
+    @staticmethod
+    def _event_hint_for_pair(*, yes_leg: MarketView, no_leg: MarketView) -> str:
+        yes_event = str(yes_leg.event_id or "").strip()
+        no_event = str(no_leg.event_id or "").strip()
+        if yes_event and no_event and yes_event == no_event:
+            return yes_event
+        if yes_event or no_event:
+            return "mixed"
+        return "unknown"
 
     @staticmethod
     def _resolve_pair_event_id(
@@ -297,11 +461,11 @@ class S9YesNoParityArb(Strategy):
         event_notional_used_before: float,
         event_pair_index: int,
         max_pairs_per_event: int,
-    ) -> list[Signal]:
+    ) -> tuple[list[Signal], str | None]:
         yes_px = float(yes_leg.yes_price or 0.0)
         no_px = float(no_leg.no_price or 0.0)
         if yes_px <= 0 or no_px <= 0:
-            return []
+            return [], "non_positive_leg_price"
 
         parity_sum = yes_px + no_px
         if side == "buy":
@@ -312,7 +476,7 @@ class S9YesNoParityArb(Strategy):
             direction = "sell_overround"
 
         if gross_edge <= 0:
-            return []
+            return [], "non_positive_gross_edge"
 
         notional_ref = max(1e-9, parity_sum)
         gross_edge_bps = (gross_edge / notional_ref) * 10000.0
@@ -334,11 +498,11 @@ class S9YesNoParityArb(Strategy):
 
         total_cost_bps = yes_cost.total_bps + no_cost.total_bps
         if max_total_cost_bps > 0 and total_cost_bps > max_total_cost_bps:
-            return []
+            return [], "total_cost_cap_exceeded"
 
         effective_edge_bps = gross_edge_bps - total_cost_bps
         if effective_edge_bps < min_effective_edge_bps:
-            return []
+            return [], "effective_edge_below_min"
 
         min_leg_liq = min(float(yes_leg.liquidity), float(no_leg.liquidity))
         pair_qty = max(min_qty, min_leg_liq * liquidity_fraction)
@@ -348,15 +512,15 @@ class S9YesNoParityArb(Strategy):
         if event_notional_budget is not None:
             budget = max(0.0, float(event_notional_budget))
             if budget <= 1e-12:
-                return []
+                return [], "event_notional_budget_non_positive"
             pair_qty = min(pair_qty, budget / max(1e-9, parity_sum))
 
         if pair_qty <= 1e-12:
-            return []
+            return [], "qty_non_positive"
 
         pair_notional = pair_qty * parity_sum
         if pair_notional <= 1e-12:
-            return []
+            return [], "pair_notional_non_positive"
 
         confidence = min(0.98, 0.50 + max(0.0, effective_edge_bps) / 600.0)
         score = (effective_edge_bps / 10000.0) * (1.0 + min_leg_liq / depth_reference_liquidity)
@@ -467,29 +631,32 @@ class S9YesNoParityArb(Strategy):
             }
         )
 
-        return [
-            Signal(
-                strategy=self.name,
-                market_id=yes_leg.market_id,
-                event_id=event_id,
-                side=side,
-                score=score,
-                confidence=confidence,
-                target_price=yes_target,
-                size_hint=pair_qty,
-                rationale=rationale,
-                payload=yes_payload,
-            ),
-            Signal(
-                strategy=self.name,
-                market_id=no_leg.market_id,
-                event_id=event_id,
-                side=side,
-                score=score,
-                confidence=confidence,
-                target_price=no_target,
-                size_hint=pair_qty,
-                rationale=rationale,
-                payload=no_payload,
-            ),
-        ]
+        return (
+            [
+                Signal(
+                    strategy=self.name,
+                    market_id=yes_leg.market_id,
+                    event_id=event_id,
+                    side=side,
+                    score=score,
+                    confidence=confidence,
+                    target_price=yes_target,
+                    size_hint=pair_qty,
+                    rationale=rationale,
+                    payload=yes_payload,
+                ),
+                Signal(
+                    strategy=self.name,
+                    market_id=no_leg.market_id,
+                    event_id=event_id,
+                    side=side,
+                    score=score,
+                    confidence=confidence,
+                    target_price=no_target,
+                    size_hint=pair_qty,
+                    rationale=rationale,
+                    payload=no_payload,
+                ),
+            ],
+            None,
+        )
