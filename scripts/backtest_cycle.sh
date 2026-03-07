@@ -30,6 +30,7 @@ Options:
   --from-ts <ISO8601>        Optional fixed backtest window start (requires --to-ts)
   --to-ts <ISO8601>          Optional fixed backtest window end (requires --from-ts)
   --market-limit <int>       Market limit for generate-signals (default: 2000)
+  --strategies <csv>         Strategy ids for generate-signals/backtest (default: s1,s2,s4,s8,s9,s10)
   --liquidity-top-fraction <0..1>
                              Liquidity top-fraction universe before strategy generation (default: 0.30)
   --ingest-limit <int>       Ingest limit for gamma source (default: 5000)
@@ -61,6 +62,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --market-limit)
       MARKET_LIMIT="$2"
+      shift 2
+      ;;
+    --strategies)
+      STRATEGIES="$2"
       shift 2
       ;;
     --liquidity-top-fraction)
@@ -133,6 +138,11 @@ fi
 
 if [[ "$INGEST_MODE" != "full" && "$INGEST_MODE" != "incremental" ]]; then
   echo "[backtest-cycle] --ingest-mode must be full|incremental" >&2
+  exit 1
+fi
+
+if [[ -z "${STRATEGIES//[[:space:],]/}" ]]; then
+  echo "[backtest-cycle] --strategies cannot be empty" >&2
   exit 1
 fi
 
