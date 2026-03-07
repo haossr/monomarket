@@ -19,6 +19,20 @@ class _LegCost:
     depth_penalty_bps: float
 
 
+@dataclass(slots=True)
+class _PairPricingDiagnostics:
+    pre_floor_parity_sum: float
+    post_floor_parity_sum: float
+    post_slippage_parity_sum: float
+    pre_floor_gross_edge_bps: float
+    post_floor_gross_edge_bps: float
+    post_slippage_gross_edge_bps: float
+    post_floor_effective_edge_bps: float
+    post_slippage_effective_edge_bps: float
+    floor_adjusted_legs: int
+    tiny_price_legs: int
+
+
 def _as_bool(raw: object, default: bool) -> bool:
     if isinstance(raw, bool):
         return raw
@@ -94,6 +108,42 @@ class S9YesNoParityArb(Strategy):
     def __init__(self) -> None:
         self.last_diagnostics: dict[str, Any] = {}
 
+    @staticmethod
+    def _safe_avg(total: float, count: int) -> float:
+        if count <= 0:
+            return 0.0
+        return float(total) / float(count)
+
+    @staticmethod
+    def _clamp_target_price(price: float, *, price_floor: float) -> float:
+        return max(price_floor, min(0.99, float(price)))
+
+    @staticmethod
+    def _edge_from_parity(*, side: str, parity_sum: float) -> float:
+        if side == "buy":
+            return 1.0 - parity_sum
+        return parity_sum - 1.0
+
+    @classmethod
+    def _edge_bps_from_parity(cls, *, side: str, parity_sum: float) -> float:
+        gross_edge = cls._edge_from_parity(side=side, parity_sum=parity_sum)
+        return (gross_edge / max(1e-9, parity_sum)) * 10000.0
+
+    @classmethod
+    def _expected_fill_price(
+        cls,
+        *,
+        side: str,
+        target_price: float,
+        slippage_bps: float,
+        price_floor: float,
+    ) -> float:
+        px = cls._clamp_target_price(target_price, price_floor=price_floor)
+        slip = px * max(0.0, slippage_bps) / 10000.0
+        if side == "buy":
+            return min(0.99, px + slip)
+        return max(price_floor, px - slip)
+
     def generate(
         self,
         markets: list[MarketView],
@@ -113,6 +163,7 @@ class S9YesNoParityArb(Strategy):
         min_qty = max(0.1, float(cfg.get("min_qty", 1.0)))
         max_signals = max(0, int(float(cfg.get("max_signals", 120))))
         quote_improve = max(0.0, float(cfg.get("quote_improve", 0.0)))
+        executable_price_floor = max(0.01, float(cfg.get("executable_price_floor", 0.01)))
         allow_sell_parity = _as_bool(cfg.get("allow_sell_parity"), False)
         require_same_event = _as_bool(cfg.get("require_same_event"), True)
         require_same_condition = _as_bool(cfg.get("require_same_condition"), True)
@@ -133,6 +184,24 @@ class S9YesNoParityArb(Strategy):
                 "candidate_reject_reasons_by_event": {},
                 "candidate_reject_reasons_by_event_top_k": diagnostics_event_top_k,
                 "candidate_reject_reasons_by_event_top": {},
+                "pricing_consistency": {
+                    "price_floor": executable_price_floor,
+                    "pair_candidates_priced": 0,
+                    "pairs_with_floor_adjustment": 0,
+                    "tiny_price_legs": 0,
+                    "tiny_price_pairs": 0,
+                    "avg_pre_floor_parity_sum": 0.0,
+                    "avg_post_floor_parity_sum": 0.0,
+                    "avg_post_slippage_parity_sum": 0.0,
+                    "avg_pre_floor_gross_edge_bps": 0.0,
+                    "avg_post_floor_gross_edge_bps": 0.0,
+                    "avg_post_slippage_gross_edge_bps": 0.0,
+                    "avg_post_floor_effective_edge_bps": 0.0,
+                    "avg_post_slippage_effective_edge_bps": 0.0,
+                    "filtered_post_floor_non_positive": 0,
+                    "filtered_post_slippage_non_positive": 0,
+                    "filtered_post_slippage_effective_edge_below_min": 0,
+                },
             }
             return []
 
@@ -154,6 +223,22 @@ class S9YesNoParityArb(Strategy):
         direction_attempts: dict[str, int] = {"buy": 0, "sell": 0}
         direction_pass: dict[str, int] = {"buy": 0, "sell": 0}
         pairs_emitted = 0
+
+        pricing_diag_count = 0
+        pricing_diag_sum_pre_floor_parity = 0.0
+        pricing_diag_sum_post_floor_parity = 0.0
+        pricing_diag_sum_post_slippage_parity = 0.0
+        pricing_diag_sum_pre_floor_gross_bps = 0.0
+        pricing_diag_sum_post_floor_gross_bps = 0.0
+        pricing_diag_sum_post_slippage_gross_bps = 0.0
+        pricing_diag_sum_post_floor_effective_bps = 0.0
+        pricing_diag_sum_post_slippage_effective_bps = 0.0
+        pricing_diag_floor_adjusted_pairs = 0
+        pricing_diag_tiny_price_legs = 0
+        pricing_diag_tiny_price_pairs = 0
+        pricing_diag_filtered_post_floor_non_positive = 0
+        pricing_diag_filtered_post_slippage_non_positive = 0
+        pricing_diag_filtered_effective_below_min = 0
 
         for canonical_id in sorted(by_canonical):
             rows = by_canonical[canonical_id]
@@ -240,7 +325,7 @@ class S9YesNoParityArb(Strategy):
                         )
                         continue
 
-                pair_signals, pair_reject_reason = self._emit_pair_signals(
+                pair_signals, pair_reject_reason, pair_pricing_diag = self._emit_pair_signals(
                     canonical_id=canonical_id,
                     event_id=event_id,
                     condition_key=condition_key,
@@ -261,7 +346,44 @@ class S9YesNoParityArb(Strategy):
                     event_notional_used_before=used_before,
                     event_pair_index=event_pair_counts[event_id] + 1,
                     max_pairs_per_event=max_pairs_per_event,
+                    executable_price_floor=executable_price_floor,
                 )
+
+                if pair_pricing_diag is not None:
+                    pricing_diag_count += 1
+                    pricing_diag_sum_pre_floor_parity += pair_pricing_diag.pre_floor_parity_sum
+                    pricing_diag_sum_post_floor_parity += pair_pricing_diag.post_floor_parity_sum
+                    pricing_diag_sum_post_slippage_parity += (
+                        pair_pricing_diag.post_slippage_parity_sum
+                    )
+                    pricing_diag_sum_pre_floor_gross_bps += (
+                        pair_pricing_diag.pre_floor_gross_edge_bps
+                    )
+                    pricing_diag_sum_post_floor_gross_bps += (
+                        pair_pricing_diag.post_floor_gross_edge_bps
+                    )
+                    pricing_diag_sum_post_slippage_gross_bps += (
+                        pair_pricing_diag.post_slippage_gross_edge_bps
+                    )
+                    pricing_diag_sum_post_floor_effective_bps += (
+                        pair_pricing_diag.post_floor_effective_edge_bps
+                    )
+                    pricing_diag_sum_post_slippage_effective_bps += (
+                        pair_pricing_diag.post_slippage_effective_edge_bps
+                    )
+                    pricing_diag_tiny_price_legs += int(pair_pricing_diag.tiny_price_legs)
+                    if pair_pricing_diag.floor_adjusted_legs > 0:
+                        pricing_diag_floor_adjusted_pairs += 1
+                    if pair_pricing_diag.tiny_price_legs > 0:
+                        pricing_diag_tiny_price_pairs += 1
+
+                if pair_reject_reason == "post_floor_non_positive_gross_edge":
+                    pricing_diag_filtered_post_floor_non_positive += 1
+                elif pair_reject_reason == "post_slippage_non_positive_gross_edge":
+                    pricing_diag_filtered_post_slippage_non_positive += 1
+                elif pair_reject_reason == "effective_edge_below_min":
+                    pricing_diag_filtered_effective_below_min += 1
+
                 if not pair_signals:
                     _record_reject_reason(
                         reject_reasons=reject_reasons,
@@ -316,6 +438,50 @@ class S9YesNoParityArb(Strategy):
                 reject_by_event,
                 top_k=diagnostics_event_top_k,
             ),
+            "pricing_consistency": {
+                "price_floor": executable_price_floor,
+                "pair_candidates_priced": pricing_diag_count,
+                "pairs_with_floor_adjustment": pricing_diag_floor_adjusted_pairs,
+                "tiny_price_legs": pricing_diag_tiny_price_legs,
+                "tiny_price_pairs": pricing_diag_tiny_price_pairs,
+                "avg_pre_floor_parity_sum": self._safe_avg(
+                    pricing_diag_sum_pre_floor_parity,
+                    pricing_diag_count,
+                ),
+                "avg_post_floor_parity_sum": self._safe_avg(
+                    pricing_diag_sum_post_floor_parity,
+                    pricing_diag_count,
+                ),
+                "avg_post_slippage_parity_sum": self._safe_avg(
+                    pricing_diag_sum_post_slippage_parity,
+                    pricing_diag_count,
+                ),
+                "avg_pre_floor_gross_edge_bps": self._safe_avg(
+                    pricing_diag_sum_pre_floor_gross_bps,
+                    pricing_diag_count,
+                ),
+                "avg_post_floor_gross_edge_bps": self._safe_avg(
+                    pricing_diag_sum_post_floor_gross_bps,
+                    pricing_diag_count,
+                ),
+                "avg_post_slippage_gross_edge_bps": self._safe_avg(
+                    pricing_diag_sum_post_slippage_gross_bps,
+                    pricing_diag_count,
+                ),
+                "avg_post_floor_effective_edge_bps": self._safe_avg(
+                    pricing_diag_sum_post_floor_effective_bps,
+                    pricing_diag_count,
+                ),
+                "avg_post_slippage_effective_edge_bps": self._safe_avg(
+                    pricing_diag_sum_post_slippage_effective_bps,
+                    pricing_diag_count,
+                ),
+                "filtered_post_floor_non_positive": pricing_diag_filtered_post_floor_non_positive,
+                "filtered_post_slippage_non_positive": pricing_diag_filtered_post_slippage_non_positive,
+                "filtered_post_slippage_effective_edge_below_min": (
+                    pricing_diag_filtered_effective_below_min
+                ),
+            },
         }
         return selected_signals
 
@@ -461,25 +627,67 @@ class S9YesNoParityArb(Strategy):
         event_notional_used_before: float,
         event_pair_index: int,
         max_pairs_per_event: int,
-    ) -> tuple[list[Signal], str | None]:
+        executable_price_floor: float,
+    ) -> tuple[list[Signal], str | None, _PairPricingDiagnostics | None]:
         yes_px = float(yes_leg.yes_price or 0.0)
         no_px = float(no_leg.no_price or 0.0)
         if yes_px <= 0 or no_px <= 0:
-            return [], "non_positive_leg_price"
+            return [], "non_positive_leg_price", None
 
-        parity_sum = yes_px + no_px
         if side == "buy":
-            gross_edge = 1.0 - parity_sum
             direction = "buy_carry"
+            yes_target_raw = yes_px + quote_improve
+            no_target_raw = no_px + quote_improve
         else:
-            gross_edge = parity_sum - 1.0
             direction = "sell_overround"
+            yes_target_raw = yes_px - quote_improve
+            no_target_raw = no_px - quote_improve
 
-        if gross_edge <= 0:
-            return [], "non_positive_gross_edge"
+        pre_floor_parity_sum = yes_target_raw + no_target_raw
+        pre_floor_gross_edge = self._edge_from_parity(side=side, parity_sum=pre_floor_parity_sum)
 
-        notional_ref = max(1e-9, parity_sum)
-        gross_edge_bps = (gross_edge / notional_ref) * 10000.0
+        yes_target = self._clamp_target_price(yes_target_raw, price_floor=executable_price_floor)
+        no_target = self._clamp_target_price(no_target_raw, price_floor=executable_price_floor)
+
+        tiny_price_legs = int(yes_target_raw < executable_price_floor) + int(
+            no_target_raw < executable_price_floor
+        )
+        floor_adjusted_legs = int(abs(yes_target - yes_target_raw) > 1e-12) + int(
+            abs(no_target - no_target_raw) > 1e-12
+        )
+
+        post_floor_parity_sum = yes_target + no_target
+        post_floor_gross_edge = self._edge_from_parity(side=side, parity_sum=post_floor_parity_sum)
+
+        yes_fill_est = self._expected_fill_price(
+            side=side,
+            target_price=yes_target,
+            slippage_bps=slippage_bps,
+            price_floor=executable_price_floor,
+        )
+        no_fill_est = self._expected_fill_price(
+            side=side,
+            target_price=no_target,
+            slippage_bps=slippage_bps,
+            price_floor=executable_price_floor,
+        )
+        post_slippage_parity_sum = yes_fill_est + no_fill_est
+        post_slippage_gross_edge = self._edge_from_parity(
+            side=side,
+            parity_sum=post_slippage_parity_sum,
+        )
+
+        pre_floor_gross_edge_bps = self._edge_bps_from_parity(
+            side=side, parity_sum=pre_floor_parity_sum
+        )
+        post_floor_gross_edge_bps = self._edge_bps_from_parity(
+            side=side,
+            parity_sum=post_floor_parity_sum,
+        )
+        post_slippage_gross_edge_bps = self._edge_bps_from_parity(
+            side=side,
+            parity_sum=post_slippage_parity_sum,
+        )
 
         yes_cost = self._leg_cost(
             liquidity=yes_leg.liquidity,
@@ -497,30 +705,61 @@ class S9YesNoParityArb(Strategy):
         )
 
         total_cost_bps = yes_cost.total_bps + no_cost.total_bps
+        non_slippage_cost_bps = (
+            max(0.0, fee_bps)
+            + yes_cost.depth_penalty_bps
+            + max(0.0, fee_bps)
+            + no_cost.depth_penalty_bps
+        )
+        post_floor_effective_edge_bps = post_floor_gross_edge_bps - total_cost_bps
+        effective_edge_bps = post_slippage_gross_edge_bps - non_slippage_cost_bps
+
+        pricing_diag = _PairPricingDiagnostics(
+            pre_floor_parity_sum=pre_floor_parity_sum,
+            post_floor_parity_sum=post_floor_parity_sum,
+            post_slippage_parity_sum=post_slippage_parity_sum,
+            pre_floor_gross_edge_bps=pre_floor_gross_edge_bps,
+            post_floor_gross_edge_bps=post_floor_gross_edge_bps,
+            post_slippage_gross_edge_bps=post_slippage_gross_edge_bps,
+            post_floor_effective_edge_bps=post_floor_effective_edge_bps,
+            post_slippage_effective_edge_bps=effective_edge_bps,
+            floor_adjusted_legs=floor_adjusted_legs,
+            tiny_price_legs=tiny_price_legs,
+        )
+
+        if pre_floor_gross_edge <= 0:
+            return [], "non_positive_gross_edge", pricing_diag
+
+        if post_floor_gross_edge <= 0:
+            return [], "post_floor_non_positive_gross_edge", pricing_diag
+
+        if post_slippage_gross_edge <= 0:
+            return [], "post_slippage_non_positive_gross_edge", pricing_diag
+
         if max_total_cost_bps > 0 and total_cost_bps > max_total_cost_bps:
-            return [], "total_cost_cap_exceeded"
+            return [], "total_cost_cap_exceeded", pricing_diag
 
-        effective_edge_bps = gross_edge_bps - total_cost_bps
         if effective_edge_bps < min_effective_edge_bps:
-            return [], "effective_edge_below_min"
+            return [], "effective_edge_below_min", pricing_diag
 
+        pricing_parity_ref = max(1e-9, post_floor_parity_sum)
         min_leg_liq = min(float(yes_leg.liquidity), float(no_leg.liquidity))
         pair_qty = max(min_qty, min_leg_liq * liquidity_fraction)
         if max_order_notional > 0:
-            pair_qty = min(pair_qty, max_order_notional / max(1e-9, parity_sum))
+            pair_qty = min(pair_qty, max_order_notional / pricing_parity_ref)
 
         if event_notional_budget is not None:
             budget = max(0.0, float(event_notional_budget))
             if budget <= 1e-12:
-                return [], "event_notional_budget_non_positive"
-            pair_qty = min(pair_qty, budget / max(1e-9, parity_sum))
+                return [], "event_notional_budget_non_positive", pricing_diag
+            pair_qty = min(pair_qty, budget / pricing_parity_ref)
 
         if pair_qty <= 1e-12:
-            return [], "qty_non_positive"
+            return [], "qty_non_positive", pricing_diag
 
-        pair_notional = pair_qty * parity_sum
+        pair_notional = pair_qty * post_floor_parity_sum
         if pair_notional <= 1e-12:
-            return [], "pair_notional_non_positive"
+            return [], "pair_notional_non_positive", pricing_diag
 
         confidence = min(0.98, 0.50 + max(0.0, effective_edge_bps) / 600.0)
         score = (effective_edge_bps / 10000.0) * (1.0 + min_leg_liq / depth_reference_liquidity)
@@ -533,18 +772,16 @@ class S9YesNoParityArb(Strategy):
         pair_batch_id = f"{pair_id}:{event_pair_index}"
 
         if side == "buy":
-            yes_target = min(0.99, yes_px + quote_improve)
-            no_target = min(0.99, no_px + quote_improve)
             rationale = (
-                f"同条件平价套利({direction}): yes+no={parity_sum:.4f}<1, "
-                f"gross={gross_edge_bps:.1f}bps, eff={effective_edge_bps:.1f}bps"
+                f"同条件平价套利({direction}): post_floor_yes+no={post_floor_parity_sum:.4f}<1, "
+                f"gross_exec={post_slippage_gross_edge_bps:.1f}bps, "
+                f"eff_exec={effective_edge_bps:.1f}bps"
             )
         else:
-            yes_target = max(0.01, yes_px - quote_improve)
-            no_target = max(0.01, no_px - quote_improve)
             rationale = (
-                f"同条件平价套利({direction}): yes+no={parity_sum:.4f}>1, "
-                f"gross={gross_edge_bps:.1f}bps, eff={effective_edge_bps:.1f}bps"
+                f"同条件平价套利({direction}): post_floor_yes+no={post_floor_parity_sum:.4f}>1, "
+                f"gross_exec={post_slippage_gross_edge_bps:.1f}bps, "
+                f"eff_exec={effective_edge_bps:.1f}bps"
             )
 
         event_budget_payload: float | None = None
@@ -562,10 +799,25 @@ class S9YesNoParityArb(Strategy):
             "pair_atomic": True,
             "pair_leg_tokens": [OUTCOME_TOKEN_YES, OUTCOME_TOKEN_NO],
             "direction": direction,
-            "parity_sum": parity_sum,
-            "gross_edge": gross_edge,
-            "gross_edge_bps": gross_edge_bps,
+            "parity_sum": post_floor_parity_sum,
+            "gross_edge": post_floor_gross_edge,
+            "gross_edge_bps": post_floor_gross_edge_bps,
             "effective_edge_bps": effective_edge_bps,
+            "pre_floor_parity_sum": pre_floor_parity_sum,
+            "post_floor_parity_sum": post_floor_parity_sum,
+            "post_slippage_parity_sum": post_slippage_parity_sum,
+            "pre_floor_gross_edge_bps": pre_floor_gross_edge_bps,
+            "post_floor_gross_edge_bps": post_floor_gross_edge_bps,
+            "post_slippage_gross_edge_bps": post_slippage_gross_edge_bps,
+            "post_floor_effective_edge_bps": post_floor_effective_edge_bps,
+            "post_slippage_effective_edge_bps": effective_edge_bps,
+            "price_floor": executable_price_floor,
+            "floor_adjusted_legs": floor_adjusted_legs,
+            "tiny_price_legs": tiny_price_legs,
+            "estimated_fill_prices": {
+                "yes": yes_fill_est,
+                "no": no_fill_est,
+            },
             "pair_qty": pair_qty,
             "pair_notional": pair_notional,
             "event_pair_index": event_pair_index,
@@ -583,6 +835,7 @@ class S9YesNoParityArb(Strategy):
                 "yes_total_cost_bps": yes_cost.total_bps,
                 "no_total_cost_bps": no_cost.total_bps,
                 "total_cost_bps": total_cost_bps,
+                "non_slippage_cost_bps": non_slippage_cost_bps,
                 "max_total_cost_bps": max_total_cost_bps,
             },
             "legs": [
@@ -659,4 +912,5 @@ class S9YesNoParityArb(Strategy):
                 ),
             ],
             None,
+            pricing_diag,
         )

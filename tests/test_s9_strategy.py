@@ -421,3 +421,96 @@ def test_s9_diagnostics_event_top_k_summary() -> None:
     assert diagnostics.get("candidate_reject_reasons_by_event_top_k") == 1
     reject_top = diagnostics.get("candidate_reject_reasons_by_event_top", {})
     assert list(reject_top.keys()) == ["e1"]
+
+
+def test_s9_floor_applied_to_tiny_leg_targets_and_payload() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-floor",
+            event_id="e-floor",
+            yes=0.0005,
+            no=0.82,
+            liq=1000,
+            question="Will Team C win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-floor",
+            event_id="e-floor",
+            yes=0.30,
+            no=0.15,
+            liq=1000,
+            question="Will Team C win?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "min_effective_edge_bps": 1.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_order_notional": 10.0,
+        },
+    )
+
+    assert len(signals) == 2
+    yes_signal = next(
+        s for s in signals if str(s.payload.get("primary_leg", {}).get("token")) == "YES"
+    )
+    assert abs(float(yes_signal.target_price) - 0.01) < 1e-12
+    assert float(yes_signal.payload.get("pre_floor_parity_sum", 0.0)) < float(
+        yes_signal.payload.get("post_floor_parity_sum", 0.0)
+    )
+    assert int(float(yes_signal.payload.get("tiny_price_legs", 0.0))) == 1
+    assert int(float(yes_signal.payload.get("floor_adjusted_legs", 0.0))) == 1
+
+    pricing_diag = strategy.last_diagnostics.get("pricing_consistency", {})
+    assert int(float(pricing_diag.get("tiny_price_pairs", 0.0))) == 1
+    assert int(float(pricing_diag.get("pairs_with_floor_adjustment", 0.0))) == 1
+
+
+def test_s9_rejects_when_post_floor_parity_turns_negative() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-floor-reject",
+            event_id="e-floor-reject",
+            yes=0.0005,
+            no=0.95,
+            liq=1000,
+            question="Will Team D win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-floor-reject",
+            event_id="e-floor-reject",
+            yes=0.85,
+            no=0.995,
+            liq=1000,
+            question="Will Team D win?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "min_effective_edge_bps": 1.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy:post_floor_non_positive_gross_edge") == 1
+
+    pricing_diag = diagnostics.get("pricing_consistency", {})
+    assert int(float(pricing_diag.get("filtered_post_floor_non_positive", 0.0))) == 1
+    assert int(float(pricing_diag.get("tiny_price_pairs", 0.0))) == 1

@@ -85,6 +85,7 @@ strategies:
     max_pairs_per_event: 2
     max_event_pair_notional: 20.0
     quote_improve: 0.0
+    executable_price_floor: 0.01
     allow_sell_parity: false
     require_same_event: true
     require_same_condition: true
