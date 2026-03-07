@@ -6,7 +6,9 @@ cd "$ROOT"
 
 LOOKBACK_HOURS="4380"
 MARKET_LIMIT="2000"
-INGEST_LIMIT="300"
+INGEST_LIMIT="5000"
+INGEST_MODE="full"
+LIQUIDITY_TOP_FRACTION="0.30"
 CONFIG_PATH="configs/config.yaml"
 NIGHTLY_ROOT="artifacts/backtest/nightly"
 NIGHTLY_DATE=""
@@ -28,7 +30,10 @@ Usage: bash scripts/backtest_nightly_report.sh [options]
 Options:
   --lookback-hours <float>   Backtest lookback in hours (default: 4380)
   --market-limit <int>       Market limit for signal generation (default: 2000)
-  --ingest-limit <int>       Ingest limit for gamma source (default: 300)
+  --liquidity-top-fraction <0..1>
+                             Liquidity top-fraction universe before strategy generation (default: 0.30)
+  --ingest-limit <int>       Ingest limit for gamma source (default: 5000)
+  --ingest-mode <mode>       gamma ingest mode: full|incremental (default: full)
   --config <path>            Config path (default: configs/config.yaml)
   --nightly-root <path>      Nightly root dir (default: artifacts/backtest/nightly)
   --date <YYYY-MM-DD>        Override nightly date (default: today local date)
@@ -58,8 +63,16 @@ while [[ $# -gt 0 ]]; do
       MARKET_LIMIT="$2"
       shift 2
       ;;
+    --liquidity-top-fraction)
+      LIQUIDITY_TOP_FRACTION="$2"
+      shift 2
+      ;;
     --ingest-limit)
       INGEST_LIMIT="$2"
+      shift 2
+      ;;
+    --ingest-mode)
+      INGEST_MODE="$2"
       shift 2
       ;;
     --config)
@@ -143,6 +156,11 @@ if [[ "$REBUILD_SIGNALS_WINDOW" == "1" && "$CLEAR_SIGNALS_WINDOW" != "1" ]]; the
   exit 1
 fi
 
+if [[ "$INGEST_MODE" != "full" && "$INGEST_MODE" != "incremental" ]]; then
+  echo "[nightly] --ingest-mode must be full|incremental" >&2
+  exit 1
+fi
+
 if [[ -x ".venv/bin/python" ]]; then
   # shellcheck disable=SC1091
   source .venv/bin/activate
@@ -193,7 +211,9 @@ echo "[nightly] running cycle"
 bash scripts/backtest_cycle.sh \
   --lookback-hours "$LOOKBACK_HOURS" \
   --market-limit "$MARKET_LIMIT" \
+  --liquidity-top-fraction "$LIQUIDITY_TOP_FRACTION" \
   --ingest-limit "$INGEST_LIMIT" \
+  --ingest-mode "$INGEST_MODE" \
   --config "$CONFIG_PATH" \
   --output-dir "$RUN_DIR" \
   ${CYCLE_WINDOW_ARGS[@]-} \

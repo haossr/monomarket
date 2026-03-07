@@ -652,13 +652,23 @@ def list_markets(
 def generate_signals(
     strategies: str = typer.Option("s1,s2,s4,s8,s9,s10", help="Comma-separated strategy ids"),
     market_limit: int = typer.Option(2000, min=10, max=20000),
+    liquidity_top_fraction: float | None = typer.Option(
+        None,
+        min=0.0,
+        max=1.0,
+        help="Top liquidity universe fraction before strategy generation (None=use config)",
+    ),
     config: str | None = typer.Option(None),
 ) -> None:
     settings, storage = _ctx(config)
     storage.init_db()
     engine = SignalEngine(storage, settings)
     selected = [s.strip().lower() for s in strategies.split(",") if s.strip()]
-    signals = engine.generate(selected, market_limit=market_limit)
+    signals = engine.generate(
+        selected,
+        market_limit=market_limit,
+        liquidity_top_fraction=liquidity_top_fraction,
+    )
 
     by_strategy: dict[str, int] = {}
     for s in signals:
@@ -667,6 +677,20 @@ def generate_signals(
     console.print(f"[green]generated[/green] {len(signals)} signals")
     for k, v in sorted(by_strategy.items()):
         console.print(f"- {k}: {v}")
+
+    universe = engine.last_generation_stats.get("universe", {})
+    if isinstance(universe, dict):
+        selected_markets = int(float(universe.get("selected_markets", 0)))
+        total_markets = int(float(universe.get("total_markets", 0)))
+        selected_market_share = float(universe.get("selected_market_share", 0.0) or 0.0)
+        top_fraction = float(universe.get("liquidity_top_fraction", 0.0) or 0.0)
+        liquidity_cutoff = float(universe.get("liquidity_cutoff", 0.0) or 0.0)
+        console.print(
+            "universe "
+            f"selected={selected_markets}/{total_markets} "
+            f"share={selected_market_share:.2%} top_fraction={top_fraction:.2f} "
+            f"liquidity_cutoff={liquidity_cutoff:.2f}"
+        )
 
     edge_gate = engine.last_generation_stats.get("edge_gate", {})
     if isinstance(edge_gate, dict):

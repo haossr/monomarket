@@ -149,15 +149,19 @@ monomarket backtest-migration-map --format json --with-checksum \
 
 ## 本周持续回测 + 每晚 PDF 报告
 
-单轮流水线（init-db -> ingest gamma incremental -> generate-signals -> backtest）：
+单轮流水线（init-db -> ingest gamma full -> generate-signals -> backtest）：
 
 ```bash
 bash scripts/backtest_cycle.sh \
   --lookback-hours 24 \
   --market-limit 2000 \
-  --ingest-limit 300 \
+  --liquidity-top-fraction 0.30 \
+  --ingest-limit 5000 \
+  --ingest-mode full \
   --config configs/soak.paper.yaml
 ```
+
+默认 universe 策略：**先全量抓取（gamma full, limit=5000）再按流动性筛选 top 30%**（可通过 `--liquidity-top-fraction` / `--ingest-mode` / `--ingest-limit` 覆盖）。
 
 输出：`artifacts/backtest/runs/<timestamp>/latest.json|replay.csv|strategy.csv|event.csv|summary.md`
 （并为各 CSV 生成 `.sha256` sidecar）。
@@ -186,7 +190,9 @@ Nightly 一键：
 bash scripts/backtest_nightly_report.sh \
   --lookback-hours 4380 \
   --market-limit 2000 \
-  --ingest-limit 300 \
+  --liquidity-top-fraction 0.30 \
+  --ingest-limit 5000 \
+  --ingest-mode full \
   --rolling-reject-top-k 2 \
   --config configs/soak.paper.yaml
 # 默认启用 summary.json checksum；如需关闭可加 --no-checksum

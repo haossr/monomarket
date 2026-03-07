@@ -12,9 +12,22 @@ class _FakeSignalEngine:
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         self.last_generation_stats: dict[str, Any] = {}
 
-    def generate(self, _selected: list[str], market_limit: int = 2000) -> list[Any]:
+    def generate(
+        self,
+        _selected: list[str],
+        market_limit: int = 2000,
+        liquidity_top_fraction: float | None = None,
+    ) -> list[Any]:
         assert market_limit == 2000
+        assert liquidity_top_fraction is None
         self.last_generation_stats = {
+            "universe": {
+                "selected_markets": 30,
+                "total_markets": 100,
+                "selected_market_share": 0.3,
+                "liquidity_top_fraction": 0.3,
+                "liquidity_cutoff": 1234.5,
+            },
             "edge_gate": {
                 "total_raw": 2,
                 "total_pass": 1,
@@ -71,7 +84,7 @@ class _FakeSignalEngine:
                         },
                     }
                 },
-            }
+            },
         }
         return []
 
@@ -109,6 +122,7 @@ def test_generate_signals_prints_pricing_consistency_diagnostics(
 
     assert res.exit_code == 0, res.output
     assert "generated 0 signals" in res.output
+    assert "universe selected=30/100" in res.output
     assert "Strategy pair search diagnostics" in res.output
     assert "total" in res.output
     assert "Strategy pricing consistency diagnostics" in res.output

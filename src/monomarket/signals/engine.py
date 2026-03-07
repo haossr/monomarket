@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from monomarket.config import Settings
 from monomarket.db.storage import Storage
-from monomarket.models import Signal
+from monomarket.models import MarketView, Signal
 from monomarket.signals.edge_gate import EdgeGate
 from monomarket.signals.strategies import (
     S1CrossVenueScanner,
@@ -47,12 +48,75 @@ class SignalEngine:
         }
         self.last_generation_stats: dict[str, object] = {}
 
+    @staticmethod
+    def _apply_liquidity_universe(
+        markets: list[MarketView],
+        liquidity_top_fraction: float,
+    ) -> tuple[list[MarketView], dict[str, object]]:
+        total = len(markets)
+        frac = min(1.0, max(0.0, float(liquidity_top_fraction)))
+        if total <= 0:
+            return [], {
+                "requested_liquidity_top_fraction": float(liquidity_top_fraction),
+                "liquidity_top_fraction": frac,
+                "filter_active": False,
+                "total_markets": 0,
+                "selected_markets": 0,
+                "selected_market_share": 0.0,
+                "liquidity_cutoff": 0.0,
+            }
+
+        if frac <= 0.0 or frac >= 1.0:
+            selected = list(markets)
+            cutoff = min(float(m.liquidity or 0.0) for m in selected) if selected else 0.0
+            selected_share = (len(selected) / total) if total > 0 else 0.0
+            return selected, {
+                "requested_liquidity_top_fraction": float(liquidity_top_fraction),
+                "liquidity_top_fraction": frac,
+                "filter_active": False,
+                "total_markets": total,
+                "selected_markets": len(selected),
+                "selected_market_share": selected_share,
+                "liquidity_cutoff": cutoff,
+            }
+
+        ranked = sorted(
+            markets,
+            key=lambda m: (float(m.liquidity or 0.0), m.market_id),
+            reverse=True,
+        )
+        keep_n = max(1, math.ceil(total * frac))
+        selected_top = ranked[:keep_n]
+        selected_ids = {m.market_id for m in selected_top}
+        selected = [m for m in markets if m.market_id in selected_ids]
+        cutoff = float(selected_top[-1].liquidity or 0.0)
+        selected_share = (len(selected) / total) if total > 0 else 0.0
+
+        return selected, {
+            "requested_liquidity_top_fraction": float(liquidity_top_fraction),
+            "liquidity_top_fraction": frac,
+            "filter_active": True,
+            "total_markets": total,
+            "selected_markets": len(selected),
+            "selected_market_share": selected_share,
+            "liquidity_cutoff": cutoff,
+        }
+
     def generate(
-        self, strategies: Iterable[str] | None = None, market_limit: int = 2000
+        self,
+        strategies: Iterable[str] | None = None,
+        market_limit: int = 2000,
+        liquidity_top_fraction: float | None = None,
     ) -> list[Signal]:
         started_at = datetime.now(UTC).isoformat()
         selected = [s.lower() for s in strategies] if strategies else list(self.registry.keys())
         markets = self.storage.fetch_markets(limit=market_limit, status="open")
+        universe_fraction = (
+            float(liquidity_top_fraction)
+            if liquidity_top_fraction is not None
+            else float(self.settings.universe.liquidity_top_fraction)
+        )
+        markets, universe_diag = self._apply_liquidity_universe(markets, universe_fraction)
         liquidity_by_market = {m.market_id: float(m.liquidity or 0.0) for m in markets}
 
         edge_gate = EdgeGate(self.settings.edge_gate)
@@ -122,13 +186,14 @@ class SignalEngine:
         pass_rate = (total_pass / total_raw) if total_raw > 0 else 0.0
 
         stats_payload: dict[str, object] = {
+            "universe": universe_diag,
             "edge_gate": {
                 "total_raw": total_raw,
                 "total_pass": total_pass,
                 "total_fail": total_fail,
                 "pass_rate": pass_rate,
                 "by_strategy": per_strategy,
-            }
+            },
         }
         self.last_generation_stats = stats_payload
 

@@ -463,29 +463,90 @@ class MarketDataClients:
             params["since"] = since_iso
         return params
 
+    @staticmethod
+    def _merge_request_stats(target: RequestStats, source: RequestStats) -> None:
+        target.requests += source.requests
+        target.failures += source.failures
+        target.retries += source.retries
+        target.throttled_sec += source.throttled_sec
+        target.last_error_bucket = source.last_error_bucket
+        for bucket, count in source.error_buckets.items():
+            target.error_buckets[bucket] = target.error_buckets.get(bucket, 0) + count
+
+    @staticmethod
+    def _payload_item_count(payload: Any) -> int:
+        if isinstance(payload, list):
+            return len(payload)
+        if isinstance(payload, dict):
+            for key in ("markets", "data", "items", "results"):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    return len(value)
+            return 1
+        return 0
+
     def fetch_gamma(
         self,
         limit: int = 200,
         since: datetime | None = None,
         incremental: bool = False,
     ) -> FetchBatch:
-        params = self._with_incremental_params(
-            {
-                "limit": limit,
-                "active": "true",
-                "closed": "false",
-                "archived": "false",
-            },
-            since=since,
-            incremental=incremental,
+        requested_limit = max(1, int(limit))
+        page_size = min(500, requested_limit)
+
+        merged_stats = RequestStats()
+        seen_market_ids: set[str] = set()
+        merged_rows: list[MarketView] = []
+        max_seen_dt: datetime | None = None
+        offset = 0
+        error = ""
+
+        while len(merged_rows) < requested_limit:
+            remaining = requested_limit - len(merged_rows)
+            page_limit = min(page_size, remaining)
+            params = self._with_incremental_params(
+                {
+                    "limit": page_limit,
+                    "offset": offset,
+                    "active": "true",
+                    "closed": "false",
+                    "archived": "false",
+                },
+                since=since,
+                incremental=incremental,
+            )
+            payload, stats, error = self.gamma.get_json("markets", params=params)
+            self._merge_request_stats(merged_stats, stats)
+            if error:
+                break
+
+            rows, max_timestamp = self._normalize_rows(
+                payload,
+                "gamma",
+                since=since if incremental else None,
+            )
+            for row in rows:
+                if row.market_id in seen_market_ids:
+                    continue
+                seen_market_ids.add(row.market_id)
+                merged_rows.append(row)
+                if len(merged_rows) >= requested_limit:
+                    break
+
+            if max_timestamp:
+                ts = _parse_timestamp(max_timestamp)
+                if ts is not None and (max_seen_dt is None or ts > max_seen_dt):
+                    max_seen_dt = ts
+
+            payload_count = self._payload_item_count(payload)
+            if payload_count <= 0 or payload_count < page_limit:
+                break
+            offset += payload_count
+
+        max_timestamp = max_seen_dt.isoformat() if max_seen_dt is not None else None
+        return FetchBatch(
+            rows=merged_rows, stats=merged_stats, max_timestamp=max_timestamp, error=error
         )
-        payload, stats, error = self.gamma.get_json("markets", params=params)
-        rows, max_timestamp = self._normalize_rows(
-            payload,
-            "gamma",
-            since=since if incremental else None,
-        )
-        return FetchBatch(rows=rows, stats=stats, max_timestamp=max_timestamp, error=error)
 
     def fetch_data(
         self,

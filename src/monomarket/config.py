@@ -47,6 +47,11 @@ class DataSettings:
 
 
 @dataclass(slots=True)
+class UniverseSettings:
+    liquidity_top_fraction: float = 0.30
+
+
+@dataclass(slots=True)
 class EdgeGateSettings:
     enabled: bool = True
     min_edge_bps: float = 0.0
@@ -65,6 +70,7 @@ class Settings:
     risk: RiskSettings
     data: DataSettings
     strategies: dict[str, dict[str, Any]]
+    universe: UniverseSettings = field(default_factory=UniverseSettings)
     edge_gate: EdgeGateSettings = field(default_factory=EdgeGateSettings)
 
 
@@ -126,6 +132,7 @@ def load_settings(config_path: str | None = None) -> Settings:
     trading_raw = raw.get("trading", {})
     risk_raw = raw.get("risk", {})
     data_raw = raw.get("data", {})
+    universe_raw = raw.get("universe", {})
     edge_gate_raw = raw.get("edge_gate", {})
 
     trading = TradingSettings(
@@ -176,6 +183,12 @@ def load_settings(config_path: str | None = None) -> Settings:
             breaker_cooldown_sec=max(1, _as_int(data_raw.get("breaker_cooldown_sec"), 90)),
         ),
         strategies=raw.get("strategies", {}),
+        universe=UniverseSettings(
+            liquidity_top_fraction=min(
+                1.0,
+                max(0.0, _as_float(universe_raw.get("liquidity_top_fraction"), 0.30)),
+            ),
+        ),
         edge_gate=EdgeGateSettings(
             enabled=_as_bool(edge_gate_raw.get("enabled"), True),
             min_edge_bps=_as_float(edge_gate_raw.get("min_edge_bps"), 0.0),
