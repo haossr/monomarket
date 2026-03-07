@@ -650,7 +650,7 @@ def list_markets(
 
 @app.command("generate-signals")
 def generate_signals(
-    strategies: str = typer.Option("s1,s2,s4,s8", help="Comma-separated strategy ids"),
+    strategies: str = typer.Option("s1,s2,s4,s8,s9,s10", help="Comma-separated strategy ids"),
     market_limit: int = typer.Option(2000, min=10, max=20000),
     config: str | None = typer.Option(None),
 ) -> None:
@@ -935,7 +935,7 @@ def list_signals(
 
 @app.command("backtest")
 def backtest(
-    strategies: str = typer.Option("s1,s2,s4,s8", help="Comma-separated strategy ids"),
+    strategies: str = typer.Option("s1,s2,s4,s8,s9,s10", help="Comma-separated strategy ids"),
     from_ts: str = typer.Option(..., "--from", help="Inclusive ISO timestamp"),
     to_ts: str = typer.Option(..., "--to", help="Inclusive ISO timestamp"),
     slippage_bps: float = typer.Option(5.0, min=0.0),
@@ -1174,7 +1174,7 @@ def backtest(
 
 @app.command("backtest-rolling")
 def backtest_rolling(
-    strategies: str = typer.Option("s1,s2,s4,s8", help="Comma-separated strategy ids"),
+    strategies: str = typer.Option("s1,s2,s4,s8,s9,s10", help="Comma-separated strategy ids"),
     from_ts: str = typer.Option(..., "--from", help="Inclusive ISO timestamp"),
     to_ts: str = typer.Option(..., "--to", help="Inclusive ISO timestamp"),
     window_hours: float = typer.Option(24.0, min=0.1, help="Rolling window size in hours"),
