@@ -876,12 +876,18 @@ class BacktestEngine:
         payload = row.get("payload")
         if not isinstance(payload, dict):
             return None
-        if not bool(payload.get("pair_atomic", False)):
-            return None
 
         pair_id = str(payload.get("pair_batch_id") or payload.get("pair_id") or "").strip()
         if not pair_id:
             return None
+
+        is_atomic = bool(payload.get("pair_atomic", False))
+        if not is_atomic:
+            # Legacy S9 payloads (before pair_atomic fields) still carry pair_id + partner info.
+            partner_market_id = str(payload.get("partner_market_id") or "").strip()
+            partner_token = str(payload.get("partner_token") or "").strip().upper()
+            if not partner_market_id or partner_token not in {OUTCOME_TOKEN_YES, OUTCOME_TOKEN_NO}:
+                return None
 
         created_at = str(row.get("created_at", "")).strip()
         side = str(row.get("side", "")).strip().lower()
@@ -935,6 +941,11 @@ class BacktestEngine:
         token_b, _, _ = cls._signal_execution_fields(second)
         if {token_a, token_b} != {OUTCOME_TOKEN_YES, OUTCOME_TOKEN_NO}:
             return False, "s9 pair atomic guard: legs must include YES and NO"
+
+        market_a = str(first.get("market_id", "")).strip()
+        market_b = str(second.get("market_id", "")).strip()
+        if market_a and market_b and market_a != market_b:
+            return False, "s9 pair atomic guard: pair legs must share market_id"
 
         return True, "ok"
 
