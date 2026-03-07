@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "scripts" / "sx12_dual_slice_compare.py"
 
@@ -36,6 +38,56 @@ def test_slice_default_includes_recent14d() -> None:
     specs = module.parse_slice_specs(str(args.slices))
     assert [s.label for s in specs] == ["recent24h", "recent7d", "recent14d"]
     assert [s.hours for s in specs] == [24.0, 168.0, 336.0]
+
+
+def test_prepare_isolated_config_copies_db_and_rewrites_config(tmp_path: Path) -> None:
+    module = _load_module()
+
+    source_db = tmp_path / "data" / "mono.db"
+    source_db.parent.mkdir(parents=True, exist_ok=True)
+    source_db.write_text("db-seed")
+
+    source_cfg = tmp_path / "config.yaml"
+    source_cfg.write_text("app:\n  db_path: data/mono.db\n")
+
+    run_dir = tmp_path / "run"
+    isolated_cfg = module.prepare_isolated_config(
+        source_config_path=source_cfg,
+        run_dir=run_dir,
+        config_tag="baseline",
+    )
+
+    assert isolated_cfg.exists()
+    payload = yaml.safe_load(isolated_cfg.read_text())
+    assert isinstance(payload, dict)
+    app = payload.get("app", {})
+    assert isinstance(app, dict)
+    isolated_db_path = Path(str(app.get("db_path", "")))
+    assert isolated_db_path.exists()
+    assert isolated_db_path.read_text() == "db-seed"
+    assert isolated_db_path.parent == run_dir / "db"
+
+
+def test_build_backtest_cycle_cmd_includes_rebuild_flags(tmp_path: Path) -> None:
+    module = _load_module()
+
+    cmd = module._build_backtest_cycle_cmd(
+        config_path=tmp_path / "cfg.yaml",
+        from_ts="2026-03-07T00:00:00Z",
+        to_ts="2026-03-07T01:00:00Z",
+        output_dir=tmp_path / "out",
+        rebuild_step_hours=6.0,
+        rebuild_market_limit=120,
+        rebuild_ingest_limit=40,
+    )
+
+    cmd_str = " ".join(str(x) for x in cmd)
+    assert "scripts/backtest_cycle.sh" in cmd_str
+    assert "--clear-signals-window" in cmd
+    assert "--rebuild-signals-window" in cmd
+    assert "--rebuild-step-hours" in cmd
+    assert "--ingest-limit" in cmd
+    assert "--market-limit" in cmd
 
 
 def test_summarize_strategy_normalizes_reject_reason_prefix() -> None:

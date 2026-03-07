@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 from collections import Counter
 from dataclasses import dataclass
@@ -11,7 +12,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from monomarket.backtest.reject_reason import aggregate_reject_reasons
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(slots=True, frozen=True)
@@ -71,6 +76,82 @@ def parse_slice_specs(raw: str) -> list[SliceSpec]:
     if not specs:
         raise ValueError("no valid slices provided")
     return specs
+
+
+def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+    raw = yaml.safe_load(path.read_text())
+    return raw if isinstance(raw, dict) else {}
+
+
+def _resolve_db_path(config_payload: dict[str, Any], *, config_path: Path) -> Path:
+    app = config_payload.get("app", {})
+    if not isinstance(app, dict):
+        raise ValueError(f"config app section must be a mapping: {config_path}")
+    db_raw = str(app.get("db_path") or "").strip()
+    if not db_raw:
+        raise ValueError(f"config missing app.db_path: {config_path}")
+
+    db_path = Path(db_raw)
+    if db_path.is_absolute():
+        return db_path
+    return (config_path.parent / db_path).resolve()
+
+
+def prepare_isolated_config(
+    *,
+    source_config_path: Path,
+    run_dir: Path,
+    config_tag: str,
+) -> Path:
+    cfg = _load_yaml_mapping(source_config_path)
+    source_db_path = _resolve_db_path(cfg, config_path=source_config_path)
+
+    isolated_db_dir = run_dir / "db"
+    isolated_db_dir.mkdir(parents=True, exist_ok=True)
+    isolated_db_path = isolated_db_dir / f"{config_tag}-{source_db_path.name}"
+    if source_db_path.exists():
+        shutil.copy2(source_db_path, isolated_db_path)
+
+    app = cfg.setdefault("app", {})
+    if not isinstance(app, dict):
+        raise ValueError("config app section must be a mapping")
+    app["db_path"] = str(isolated_db_path)
+
+    isolated_config_path = run_dir / f"{config_tag}.config.yaml"
+    isolated_config_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    return isolated_config_path
+
+
+def _build_backtest_cycle_cmd(
+    *,
+    config_path: Path,
+    from_ts: str,
+    to_ts: str,
+    output_dir: Path,
+    rebuild_step_hours: float,
+    rebuild_market_limit: int,
+    rebuild_ingest_limit: int,
+) -> list[str]:
+    return [
+        "bash",
+        "scripts/backtest_cycle.sh",
+        "--from-ts",
+        from_ts,
+        "--to-ts",
+        to_ts,
+        "--config",
+        str(config_path),
+        "--output-dir",
+        str(output_dir),
+        "--market-limit",
+        str(rebuild_market_limit),
+        "--ingest-limit",
+        str(rebuild_ingest_limit),
+        "--clear-signals-window",
+        "--rebuild-signals-window",
+        "--rebuild-step-hours",
+        str(rebuild_step_hours),
+    ]
 
 
 def summarize_strategy(
@@ -161,35 +242,91 @@ def _run_backtest(
     from_ts: str,
     to_ts: str,
     out_json: Path,
+    rebuild_signals_window: bool,
+    rebuild_step_hours: float,
+    rebuild_market_limit: int,
+    rebuild_ingest_limit: int,
+    isolated_run_dir: Path | None,
 ) -> dict[str, Any]:
-    cmd = [
-        "uv",
-        "run",
-        "monomarket",
-        "backtest",
-        "--strategies",
-        strategies_csv,
-        "--from",
-        from_ts,
-        "--to",
-        to_ts,
-        "--replay-limit",
-        "0",
-        "--config",
-        str(config_path),
-        "--out-json",
-        str(out_json),
-    ]
     env = os.environ.copy()
     env["ENABLE_LIVE_TRADING"] = "false"
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "backtest failed"
-            f"\ncmd: {' '.join(cmd)}"
-            f"\nstdout:\n{proc.stdout.strip()}"
-            f"\nstderr:\n{proc.stderr.strip()}"
+
+    if rebuild_signals_window:
+        if isolated_run_dir is None:
+            raise ValueError("isolated_run_dir is required when rebuild_signals_window=true")
+
+        isolated_run_dir.mkdir(parents=True, exist_ok=True)
+        isolated_config = prepare_isolated_config(
+            source_config_path=config_path,
+            run_dir=isolated_run_dir,
+            config_tag="isolated",
         )
+        cycle_output_dir = isolated_run_dir / "cycle-run"
+        cmd = _build_backtest_cycle_cmd(
+            config_path=isolated_config,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            output_dir=cycle_output_dir,
+            rebuild_step_hours=rebuild_step_hours,
+            rebuild_market_limit=rebuild_market_limit,
+            rebuild_ingest_limit=rebuild_ingest_limit,
+        )
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            cwd=PROJECT_ROOT,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "backtest cycle failed"
+                f"\ncmd: {' '.join(cmd)}"
+                f"\nstdout:\n{proc.stdout.strip()}"
+                f"\nstderr:\n{proc.stderr.strip()}"
+            )
+
+        latest_json = cycle_output_dir / "latest.json"
+        if not latest_json.exists():
+            raise RuntimeError(f"backtest cycle produced no latest.json: {cycle_output_dir}")
+        out_json.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(latest_json, out_json)
+    else:
+        cmd = [
+            "uv",
+            "run",
+            "monomarket",
+            "backtest",
+            "--strategies",
+            strategies_csv,
+            "--from",
+            from_ts,
+            "--to",
+            to_ts,
+            "--replay-limit",
+            "0",
+            "--config",
+            str(config_path),
+            "--out-json",
+            str(out_json),
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            cwd=PROJECT_ROOT,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "backtest failed"
+                f"\ncmd: {' '.join(cmd)}"
+                f"\nstdout:\n{proc.stdout.strip()}"
+                f"\nstderr:\n{proc.stderr.strip()}"
+            )
+
     if not out_json.exists():
         raise RuntimeError(f"backtest produced no json artifact: {out_json}")
 
@@ -208,6 +345,7 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- baseline_config: {result.get('baseline_config')}",
         f"- candidate_config: {result.get('candidate_config')}",
         f"- strategies: {','.join(result.get('strategies', []))}",
+        f"- rebuild_signals_window: {bool(result.get('rebuild_signals_window', False))}",
         "",
     ]
 
@@ -293,6 +431,32 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Keep raw reject reasons (disable prefix normalization)",
     )
+    parser.add_argument(
+        "--rebuild-signals-window",
+        action="store_true",
+        help=(
+            "Use backtest_cycle window rebuild path (clear + rebuild signals in slice) "
+            "for each baseline/candidate run. Runs on isolated DB copies."
+        ),
+    )
+    parser.add_argument(
+        "--rebuild-step-hours",
+        type=float,
+        default=12.0,
+        help="Step hours for rebuild-signals-window mode (default: 12)",
+    )
+    parser.add_argument(
+        "--rebuild-market-limit",
+        type=int,
+        default=2000,
+        help="Market limit passed to backtest_cycle in rebuild mode (default: 2000)",
+    )
+    parser.add_argument(
+        "--rebuild-ingest-limit",
+        type=int,
+        default=300,
+        help="Ingest limit passed to backtest_cycle in rebuild mode (default: 300)",
+    )
     return parser
 
 
@@ -331,6 +495,10 @@ def main() -> int:
         "candidate_config": str(candidate_config),
         "strategies": strategies,
         "normalize_reject_reasons": normalize_reject_reasons,
+        "rebuild_signals_window": bool(args.rebuild_signals_window),
+        "rebuild_step_hours": float(args.rebuild_step_hours),
+        "rebuild_market_limit": int(args.rebuild_market_limit),
+        "rebuild_ingest_limit": int(args.rebuild_ingest_limit),
         "slices": [],
     }
 
@@ -345,12 +513,24 @@ def main() -> int:
         baseline_out.parent.mkdir(parents=True, exist_ok=True)
         candidate_out.parent.mkdir(parents=True, exist_ok=True)
 
+        baseline_isolated_dir = (
+            out_dir / "isolated" / spec.label / "baseline" if args.rebuild_signals_window else None
+        )
+        candidate_isolated_dir = (
+            out_dir / "isolated" / spec.label / "candidate" if args.rebuild_signals_window else None
+        )
+
         baseline_report = _run_backtest(
             config_path=baseline_config,
             strategies_csv=strategies_csv,
             from_ts=from_ts,
             to_ts=to_ts,
             out_json=baseline_out,
+            rebuild_signals_window=bool(args.rebuild_signals_window),
+            rebuild_step_hours=float(args.rebuild_step_hours),
+            rebuild_market_limit=int(args.rebuild_market_limit),
+            rebuild_ingest_limit=int(args.rebuild_ingest_limit),
+            isolated_run_dir=baseline_isolated_dir,
         )
         candidate_report = _run_backtest(
             config_path=candidate_config,
@@ -358,6 +538,11 @@ def main() -> int:
             from_ts=from_ts,
             to_ts=to_ts,
             out_json=candidate_out,
+            rebuild_signals_window=bool(args.rebuild_signals_window),
+            rebuild_step_hours=float(args.rebuild_step_hours),
+            rebuild_market_limit=int(args.rebuild_market_limit),
+            rebuild_ingest_limit=int(args.rebuild_ingest_limit),
+            isolated_run_dir=candidate_isolated_dir,
         )
 
         baseline_by_strategy = {

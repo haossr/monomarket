@@ -216,6 +216,22 @@ python scripts/sx12_dual_slice_compare.py \
 
 脚本会强制 `ENABLE_LIVE_TRADING=false`。
 
+若需要在每个切片对 baseline/candidate 先重建信号（隔离 DB，避免污染主库），可开启：
+
+```bash
+python scripts/sx12_dual_slice_compare.py \
+  --baseline-config configs/config.example.yaml \
+  --candidate-config configs/config.example.yaml \
+  --strategies s9,s10 \
+  --slices recent24h:24,recent7d:168,recent14d:336 \
+  --rebuild-signals-window \
+  --rebuild-step-hours 6 \
+  --rebuild-market-limit 600 \
+  --rebuild-ingest-limit 120
+```
+
+该模式内部调用 `scripts/backtest_cycle.sh --clear-signals-window --rebuild-signals-window`，并为每次 baseline/candidate 运行复制独立 DB。
+
 S10 参数小网格（自动生成 candidate config + 多切片 compare 排名）：
 
 ```bash
