@@ -265,3 +265,40 @@ def test_s10_diagnostics_counts_excluded_events() -> None:
     assert diagnostics.get("signals_emitted") == 0
     reject_reasons = diagnostics.get("candidate_reject_reasons", {})
     assert reject_reasons.get("event_excluded") == 1
+
+    reject_by_event = diagnostics.get("candidate_reject_reasons_by_event", {})
+    blocked_event_reasons = reject_by_event.get("blocked-e", {})
+    assert blocked_event_reasons.get("event_excluded") == 1
+
+
+def test_s10_diagnostics_tracks_reject_reasons_by_event() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(51, event_id="blocked-e", canonical_id="c1", yes=0.28, liq=900),
+        _market(52, event_id="blocked-e", canonical_id="c2", yes=0.31, liq=850),
+        _market(53, event_id="blocked-e", canonical_id="c3", yes=0.34, liq=870),
+        _market(61, event_id="thin-e", canonical_id="c1", yes=0.25, liq=900),
+        _market(62, event_id="thin-e", canonical_id="c1", yes=0.27, liq=860),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "exclude_event_ids": ["blocked-e"],
+            "min_unique_canonicals": 3,
+            "min_effective_edge_bps": 10.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("event_excluded") == 1
+    assert reject_reasons.get("event_under_min_unique") == 1
+
+    reject_by_event = diagnostics.get("candidate_reject_reasons_by_event", {})
+    assert reject_by_event.get("blocked-e", {}).get("event_excluded") == 1
+    assert reject_by_event.get("thin-e", {}).get("event_under_min_unique") == 1

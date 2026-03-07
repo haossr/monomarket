@@ -45,6 +45,18 @@ def _bump_counter(bucket: dict[str, int], key: str) -> None:
     bucket[key] = int(bucket.get(key, 0)) + 1
 
 
+def _record_reject_reason(
+    *,
+    reject_reasons: dict[str, int],
+    reject_reasons_by_event: dict[str, dict[str, int]],
+    event_id: str,
+    reason: str,
+) -> None:
+    _bump_counter(reject_reasons, reason)
+    event_rejects = reject_reasons_by_event.setdefault(event_id, {})
+    _bump_counter(event_rejects, reason)
+
+
 class S10NegRiskConversionArb(Strategy):
     """
     S10: NegRisk conversion/rebalance arbitrage.
@@ -112,6 +124,7 @@ class S10NegRiskConversionArb(Strategy):
                 "direction_attempts": {"buy_conversion": 0, "sell_conversion": 0},
                 "direction_pass": {"buy_conversion": 0, "sell_conversion": 0},
                 "candidate_reject_reasons": {"strategy_disabled": 1},
+                "candidate_reject_reasons_by_event": {},
             }
             return []
 
@@ -126,6 +139,7 @@ class S10NegRiskConversionArb(Strategy):
             by_event[m.event_id].append(m)
 
         reject_reasons: dict[str, int] = {}
+        reject_reasons_by_event: dict[str, dict[str, int]] = {}
         direction_attempts: dict[str, int] = {"buy_conversion": 0, "sell_conversion": 0}
         direction_pass: dict[str, int] = {"buy_conversion": 0, "sell_conversion": 0}
 
@@ -133,10 +147,20 @@ class S10NegRiskConversionArb(Strategy):
         events_with_candidates = 0
         for event_id, event_rows in by_event.items():
             if event_id in exclude_event_ids:
-                _bump_counter(reject_reasons, "event_excluded")
+                _record_reject_reason(
+                    reject_reasons=reject_reasons,
+                    reject_reasons_by_event=reject_reasons_by_event,
+                    event_id=event_id,
+                    reason="event_excluded",
+                )
                 continue
             if len(event_rows) < min_unique_canonicals:
-                _bump_counter(reject_reasons, "event_under_min_unique")
+                _record_reject_reason(
+                    reject_reasons=reject_reasons,
+                    reject_reasons_by_event=reject_reasons_by_event,
+                    event_id=event_id,
+                    reason="event_under_min_unique",
+                )
                 continue
 
             candidates: list[list[Signal]] = []
@@ -176,14 +200,18 @@ class S10NegRiskConversionArb(Strategy):
                     direction_pass["buy_conversion"] += 1
                     candidates.append(buy_signals)
                 elif buy_emit_reject_reason:
-                    _bump_counter(
-                        reject_reasons,
-                        f"buy_conversion:{buy_emit_reject_reason}",
+                    _record_reject_reason(
+                        reject_reasons=reject_reasons,
+                        reject_reasons_by_event=reject_reasons_by_event,
+                        event_id=event_id,
+                        reason=f"buy_conversion:{buy_emit_reject_reason}",
                     )
             elif buy_candidate_reject_reason:
-                _bump_counter(
-                    reject_reasons,
-                    f"buy_conversion:{buy_candidate_reject_reason}",
+                _record_reject_reason(
+                    reject_reasons=reject_reasons,
+                    reject_reasons_by_event=reject_reasons_by_event,
+                    event_id=event_id,
+                    reason=f"buy_conversion:{buy_candidate_reject_reason}",
                 )
 
             if allow_sell_conversion:
@@ -222,18 +250,27 @@ class S10NegRiskConversionArb(Strategy):
                         direction_pass["sell_conversion"] += 1
                         candidates.append(sell_signals)
                     elif sell_emit_reject_reason:
-                        _bump_counter(
-                            reject_reasons,
-                            f"sell_conversion:{sell_emit_reject_reason}",
+                        _record_reject_reason(
+                            reject_reasons=reject_reasons,
+                            reject_reasons_by_event=reject_reasons_by_event,
+                            event_id=event_id,
+                            reason=f"sell_conversion:{sell_emit_reject_reason}",
                         )
                 elif sell_candidate_reject_reason:
-                    _bump_counter(
-                        reject_reasons,
-                        f"sell_conversion:{sell_candidate_reject_reason}",
+                    _record_reject_reason(
+                        reject_reasons=reject_reasons,
+                        reject_reasons_by_event=reject_reasons_by_event,
+                        event_id=event_id,
+                        reason=f"sell_conversion:{sell_candidate_reject_reason}",
                     )
 
             if not candidates:
-                _bump_counter(reject_reasons, "event_no_actionable_candidate")
+                _record_reject_reason(
+                    reject_reasons=reject_reasons,
+                    reject_reasons_by_event=reject_reasons_by_event,
+                    event_id=event_id,
+                    reason="event_no_actionable_candidate",
+                )
                 continue
 
             events_with_candidates += 1
@@ -253,6 +290,11 @@ class S10NegRiskConversionArb(Strategy):
             "direction_pass": direction_pass,
             "candidate_reject_reasons": {
                 key: reject_reasons[key] for key in sorted(reject_reasons)
+            },
+            "candidate_reject_reasons_by_event": {
+                event_id: {reason: reasons[reason] for reason in sorted(reasons)}
+                for event_id, reasons in sorted(reject_reasons_by_event.items())
+                if reasons
             },
         }
         return selected_signals
