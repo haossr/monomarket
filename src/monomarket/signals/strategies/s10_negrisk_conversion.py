@@ -16,6 +16,18 @@ class _LegCost:
     depth_penalty_bps: float
 
 
+@dataclass(slots=True)
+class _ConversionCandidate:
+    direction: str
+    rows: list[MarketView]
+    sum_yes: float
+    gross_edge: float
+    deviation: float
+    max_leg_weight: float
+    raw_leg_count: int
+    selection_mode: str
+
+
 def _as_bool(raw: object, default: bool) -> bool:
     if isinstance(raw, bool):
         return raw
@@ -59,12 +71,17 @@ class S10NegRiskConversionArb(Strategy):
         min_effective_edge_bps = float(cfg.get("min_effective_edge_bps", 30.0))
         fee_bps = float(cfg.get("fee_bps", 0.0))
         slippage_bps = float(cfg.get("slippage_bps", 6.0))
-        depth_reference_liquidity = max(1.0, float(cfg.get("depth_reference_liquidity", 1000.0)))
+        depth_reference_liquidity = max(
+            1.0,
+            float(cfg.get("depth_reference_liquidity", 1000.0)),
+        )
         depth_penalty_max_bps = max(0.0, float(cfg.get("depth_penalty_max_bps", 35.0)))
         liquidity_fraction = max(0.0, float(cfg.get("liquidity_fraction", 0.01)))
         min_qty = max(0.1, float(cfg.get("min_qty", 1.0)))
         max_signals = max(0, int(float(cfg.get("max_signals", 180))))
         max_legs_per_event = max(0, int(float(cfg.get("max_legs_per_event", 32))))
+        min_unique_canonicals = max(2, int(float(cfg.get("min_unique_canonicals", 3))))
+        max_leg_weight = min(1.0, max(0.0, float(cfg.get("max_leg_weight", 0.70))))
         quote_improve = max(0.0, float(cfg.get("quote_improve", 0.0)))
         allow_sell_conversion = _as_bool(cfg.get("allow_sell_conversion"), False)
 
@@ -89,59 +106,195 @@ class S10NegRiskConversionArb(Strategy):
             by_event[m.event_id].append(m)
 
         signals: list[Signal] = []
-        for event_id, rows in by_event.items():
+        for event_id, event_rows in by_event.items():
             if event_id in exclude_event_ids:
                 continue
-            if len(rows) < 2:
+            if len(event_rows) < min_unique_canonicals:
                 continue
 
-            if max_legs_per_event > 0 and len(rows) > max_legs_per_event:
-                rows = sorted(rows, key=lambda m: float(m.liquidity), reverse=True)[:max_legs_per_event]
+            candidates: list[list[Signal]] = []
 
-            sum_yes = sum(float(r.yes_price or 0.0) for r in rows)
-            if sum_yes <= 1e-9:
-                continue
-
-            deviation = sum_yes - 1.0
-            abs_deviation = abs(deviation)
-            if abs_deviation > max_abs_deviation:
-                continue
-
-            direction: str | None = None
-            gross_edge = 0.0
-            if deviation < -prob_sum_tolerance:
-                direction = "buy_conversion"
-                gross_edge = 1.0 - sum_yes
-            elif allow_sell_conversion and deviation > prob_sum_tolerance:
-                direction = "sell_conversion"
-                gross_edge = sum_yes - 1.0
-
-            if direction is None or gross_edge <= 0:
-                continue
-
-            legs = self._emit_conversion_signals(
-                event_id=event_id,
-                rows=rows,
-                sum_yes=sum_yes,
-                direction=direction,
-                gross_edge=gross_edge,
-                quote_improve=quote_improve,
-                min_effective_edge_bps=min_effective_edge_bps,
-                max_order_notional=max_order_notional,
-                fee_bps=fee_bps,
-                slippage_bps=slippage_bps,
-                depth_reference_liquidity=depth_reference_liquidity,
-                depth_penalty_max_bps=depth_penalty_max_bps,
-                liquidity_fraction=liquidity_fraction,
-                min_qty=min_qty,
+            buy_rows = self._select_rows_for_direction(
+                event_rows,
+                buy_mode=True,
+                max_legs_per_event=max_legs_per_event,
             )
-            signals.extend(legs)
+            buy_candidate = self._build_candidate(
+                rows=buy_rows,
+                direction="buy_conversion",
+                prob_sum_tolerance=prob_sum_tolerance,
+                max_abs_deviation=max_abs_deviation,
+                max_leg_weight=max_leg_weight,
+                min_unique_canonicals=min_unique_canonicals,
+                raw_leg_count=len(event_rows),
+            )
+            if buy_candidate is not None:
+                buy_signals = self._emit_conversion_signals(
+                    event_id=event_id,
+                    candidate=buy_candidate,
+                    quote_improve=quote_improve,
+                    min_effective_edge_bps=min_effective_edge_bps,
+                    max_order_notional=max_order_notional,
+                    fee_bps=fee_bps,
+                    slippage_bps=slippage_bps,
+                    depth_reference_liquidity=depth_reference_liquidity,
+                    depth_penalty_max_bps=depth_penalty_max_bps,
+                    liquidity_fraction=liquidity_fraction,
+                    min_qty=min_qty,
+                )
+                if buy_signals:
+                    candidates.append(buy_signals)
+
+            if allow_sell_conversion:
+                sell_rows = self._select_rows_for_direction(
+                    event_rows,
+                    buy_mode=False,
+                    max_legs_per_event=max_legs_per_event,
+                )
+                sell_candidate = self._build_candidate(
+                    rows=sell_rows,
+                    direction="sell_conversion",
+                    prob_sum_tolerance=prob_sum_tolerance,
+                    max_abs_deviation=max_abs_deviation,
+                    max_leg_weight=max_leg_weight,
+                    min_unique_canonicals=min_unique_canonicals,
+                    raw_leg_count=len(event_rows),
+                )
+                if sell_candidate is not None:
+                    sell_signals = self._emit_conversion_signals(
+                        event_id=event_id,
+                        candidate=sell_candidate,
+                        quote_improve=quote_improve,
+                        min_effective_edge_bps=min_effective_edge_bps,
+                        max_order_notional=max_order_notional,
+                        fee_bps=fee_bps,
+                        slippage_bps=slippage_bps,
+                        depth_reference_liquidity=depth_reference_liquidity,
+                        depth_penalty_max_bps=depth_penalty_max_bps,
+                        liquidity_fraction=liquidity_fraction,
+                        min_qty=min_qty,
+                    )
+                    if sell_signals:
+                        candidates.append(sell_signals)
+
+            if not candidates:
+                continue
+
+            best_candidate = max(candidates, key=lambda legs: float(legs[0].score))
+            signals.extend(best_candidate)
 
             if len(signals) >= max_signals:
                 break
 
         signals.sort(key=lambda s: s.score, reverse=True)
         return signals[:max_signals]
+
+    @staticmethod
+    def _select_rows_for_direction(
+        rows: list[MarketView],
+        *,
+        buy_mode: bool,
+        max_legs_per_event: int,
+    ) -> list[MarketView]:
+        by_canonical: dict[str, list[MarketView]] = defaultdict(list)
+        for row in rows:
+            by_canonical[row.canonical_id].append(row)
+
+        selected: list[MarketView] = []
+        for canonical_rows in by_canonical.values():
+            if buy_mode:
+                canonical_rows_sorted = sorted(
+                    canonical_rows,
+                    key=lambda m: (
+                        float(m.yes_price or 1.0),
+                        -float(m.liquidity),
+                        str(m.market_id),
+                    ),
+                )
+            else:
+                canonical_rows_sorted = sorted(
+                    canonical_rows,
+                    key=lambda m: (
+                        -float(m.yes_price or 0.0),
+                        -float(m.liquidity),
+                        str(m.market_id),
+                    ),
+                )
+            selected.append(canonical_rows_sorted[0])
+
+        if max_legs_per_event > 0 and len(selected) > max_legs_per_event:
+            if buy_mode:
+                selected = sorted(
+                    selected,
+                    key=lambda m: (
+                        -float(m.liquidity),
+                        float(m.yes_price or 1.0),
+                        str(m.market_id),
+                    ),
+                )[:max_legs_per_event]
+            else:
+                selected = sorted(
+                    selected,
+                    key=lambda m: (
+                        -float(m.liquidity),
+                        -float(m.yes_price or 0.0),
+                        str(m.market_id),
+                    ),
+                )[:max_legs_per_event]
+
+        selected.sort(key=lambda m: str(m.market_id))
+        return selected
+
+    @staticmethod
+    def _build_candidate(
+        *,
+        rows: list[MarketView],
+        direction: str,
+        prob_sum_tolerance: float,
+        max_abs_deviation: float,
+        max_leg_weight: float,
+        min_unique_canonicals: int,
+        raw_leg_count: int,
+    ) -> _ConversionCandidate | None:
+        if len(rows) < min_unique_canonicals:
+            return None
+
+        sum_yes = sum(float(r.yes_price or 0.0) for r in rows)
+        if sum_yes <= 1e-9:
+            return None
+
+        deviation = sum_yes - 1.0
+        if abs(deviation) > max_abs_deviation:
+            return None
+
+        if direction == "buy_conversion":
+            if deviation >= -prob_sum_tolerance:
+                return None
+            gross_edge = 1.0 - sum_yes
+            selection_mode = "min_yes_per_canonical"
+        else:
+            if deviation <= prob_sum_tolerance:
+                return None
+            gross_edge = sum_yes - 1.0
+            selection_mode = "max_yes_per_canonical"
+
+        if gross_edge <= 0:
+            return None
+
+        max_leg_weight_ratio = max(float(r.yes_price or 0.0) for r in rows) / max(sum_yes, 1e-9)
+        if max_leg_weight_ratio > max_leg_weight:
+            return None
+
+        return _ConversionCandidate(
+            direction=direction,
+            rows=rows,
+            sum_yes=sum_yes,
+            gross_edge=gross_edge,
+            deviation=deviation,
+            max_leg_weight=max_leg_weight_ratio,
+            raw_leg_count=raw_leg_count,
+            selection_mode=selection_mode,
+        )
 
     @staticmethod
     def _leg_cost(
@@ -164,10 +317,7 @@ class S10NegRiskConversionArb(Strategy):
         self,
         *,
         event_id: str,
-        rows: list[MarketView],
-        sum_yes: float,
-        direction: str,
-        gross_edge: float,
+        candidate: _ConversionCandidate,
         quote_improve: float,
         min_effective_edge_bps: float,
         max_order_notional: float,
@@ -178,7 +328,9 @@ class S10NegRiskConversionArb(Strategy):
         liquidity_fraction: float,
         min_qty: float,
     ) -> list[Signal]:
-        gross_edge_bps = (gross_edge / max(sum_yes, 1e-9)) * 10000.0
+        rows = candidate.rows
+        sum_yes = candidate.sum_yes
+        gross_edge_bps = (candidate.gross_edge / max(sum_yes, 1e-9)) * 10000.0
 
         weighted_cost_numerator = 0.0
         depth_penalties: dict[str, float] = {}
@@ -209,26 +361,27 @@ class S10NegRiskConversionArb(Strategy):
             return []
 
         basket_notional = qty * sum_yes
-        side = "buy" if direction == "buy_conversion" else "sell"
+        side = "buy" if candidate.direction == "buy_conversion" else "sell"
         confidence = min(0.99, 0.50 + max(0.0, effective_edge_bps) / 700.0)
         score = (effective_edge_bps / 10000.0) * (1.0 + min_leg_liq / depth_reference_liquidity)
         sorted_markets = sorted(str(r.market_id) for r in rows)
-        basket_id = f"{event_id}:{direction}:{'-'.join(sorted_markets)}"
+        basket_id = f"{event_id}:{candidate.direction}:{'-'.join(sorted_markets)}"
 
         if side == "buy":
             rationale = (
-                f"NegRisk转换套利({direction}): sum_yes={sum_yes:.4f}<1, "
+                f"NegRisk转换套利({candidate.direction}): sum_yes={sum_yes:.4f}<1, "
                 f"gross={gross_edge_bps:.1f}bps, eff={effective_edge_bps:.1f}bps"
             )
         else:
             rationale = (
-                f"NegRisk转换套利({direction}): sum_yes={sum_yes:.4f}>1, "
+                f"NegRisk转换套利({candidate.direction}): sum_yes={sum_yes:.4f}>1, "
                 f"gross={gross_edge_bps:.1f}bps, eff={effective_edge_bps:.1f}bps"
             )
 
         basket_markets = [
             {
                 "market_id": r.market_id,
+                "canonical_id": r.canonical_id,
                 "yes_price": float(r.yes_price or 0.0),
                 "liquidity": float(r.liquidity),
             }
@@ -252,15 +405,19 @@ class S10NegRiskConversionArb(Strategy):
                 "signal_source": "negrisk_conversion_arb",
                 "event_id": event_id,
                 "basket_id": basket_id,
-                "direction": direction,
+                "direction": candidate.direction,
+                "selection_mode": candidate.selection_mode,
                 "sum_yes": sum_yes,
-                "deviation": sum_yes - 1.0,
-                "gross_edge": gross_edge,
+                "deviation": candidate.deviation,
+                "gross_edge": candidate.gross_edge,
                 "gross_edge_bps": gross_edge_bps,
                 "effective_edge_bps": effective_edge_bps,
                 "basket_qty": qty,
                 "basket_notional": basket_notional,
                 "convert_value": 1.0,
+                "raw_leg_count": candidate.raw_leg_count,
+                "unique_canonical_count": total_legs,
+                "max_leg_weight": candidate.max_leg_weight,
                 "legs_count": total_legs,
                 "leg_index": idx,
                 "basket_markets": basket_markets,

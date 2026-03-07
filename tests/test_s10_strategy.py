@@ -104,3 +104,81 @@ def test_s10_allow_sell_conversion_emits_sell_legs() -> None:
     assert len(signals) == 3
     assert all(s.side == "sell" for s in signals)
     assert all(str(s.payload.get("direction")) == "sell_conversion" for s in signals)
+
+
+def test_s10_dedupes_per_canonical_using_min_yes_for_buy() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(1, event_id="e4", canonical_id="c1", yes=0.25, liq=500),
+        _market(2, event_id="e4", canonical_id="c1", yes=0.30, liq=900),
+        _market(3, event_id="e4", canonical_id="c2", yes=0.32, liq=860),
+        _market(4, event_id="e4", canonical_id="c3", yes=0.34, liq=840),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 10.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_order_notional": 8.0,
+            "min_unique_canonicals": 3,
+            "max_leg_weight": 0.7,
+        },
+    )
+
+    assert len(signals) == 3
+    payload = signals[0].payload
+    assert str(payload.get("selection_mode")) == "min_yes_per_canonical"
+    assert int(payload.get("raw_leg_count", 0)) == 4
+    assert int(payload.get("unique_canonical_count", 0)) == 3
+
+    selected_ids = {
+        str(row.get("market_id", ""))
+        for row in payload.get("basket_markets", [])
+        if isinstance(row, dict)
+    }
+    assert selected_ids == {"m1", "m3", "m4"}
+
+
+def test_s10_filters_by_unique_canonicals_and_leg_weight() -> None:
+    strategy = S10NegRiskConversionArb()
+
+    too_few_unique = [
+        _market(1, event_id="e5", canonical_id="c1", yes=0.25, liq=500),
+        _market(2, event_id="e5", canonical_id="c1", yes=0.28, liq=550),
+        _market(3, event_id="e5", canonical_id="c2", yes=0.36, liq=600),
+    ]
+    signals_unique = strategy.generate(
+        too_few_unique,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "min_unique_canonicals": 3,
+        },
+    )
+    assert signals_unique == []
+
+    concentrated = [
+        _market(11, event_id="e6", canonical_id="c1", yes=0.79, liq=800),
+        _market(12, event_id="e6", canonical_id="c2", yes=0.10, liq=760),
+        _market(13, event_id="e6", canonical_id="c3", yes=0.08, liq=740),
+    ]
+    signals_concentrated = strategy.generate(
+        concentrated,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_leg_weight": 0.7,
+            "min_unique_canonicals": 3,
+        },
+    )
+    assert signals_concentrated == []

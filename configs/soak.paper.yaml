@@ -101,6 +101,8 @@ strategies:
     liquidity_fraction: 0.008
     min_qty: 1.0
     max_legs_per_event: 12
+    min_unique_canonicals: 3
+    max_leg_weight: 0.70
     max_signals: 90
     quote_improve: 0.0
     allow_sell_conversion: false
