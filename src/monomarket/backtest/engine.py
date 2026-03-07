@@ -9,6 +9,7 @@ from typing import Any
 from monomarket.db.storage import Storage
 
 OUTCOME_TOKEN_YES = "YES"  # nosec B105
+OUTCOME_TOKEN_NO = "NO"  # nosec B105
 BACKTEST_ARTIFACT_SCHEMA_VERSION = "1.0"
 _METRIC_EPS = 1e-12
 
@@ -236,7 +237,22 @@ class BacktestEngine:
         rejection_streak_by_strategy: dict[str, int] = defaultdict(int)
         executed_signals = 0
 
+        execution_batches: list[list[dict[str, Any]]] = []
+        pending_s9_batches: dict[str, dict[str, Any]] = {}
         for row in rows:
+            pair_batch_key = self._s9_pair_batch_key(row)
+            if pair_batch_key is None:
+                execution_batches.append([row])
+                continue
+            pending = pending_s9_batches.pop(pair_batch_key, None)
+            if pending is None:
+                pending_s9_batches[pair_batch_key] = row
+            else:
+                execution_batches.append([pending, row])
+        execution_batches.extend([[row] for row in pending_s9_batches.values()])
+        execution_batches.sort(key=lambda batch: (str(batch[0]["created_at"]), int(batch[0]["id"])))
+
+        def _prepare_row(row: dict[str, Any]) -> dict[str, Any]:
             strategy = str(row["strategy"]).lower()
             market_id = str(row["market_id"])
             event_id = str(row["event_id"])
@@ -276,8 +292,6 @@ class BacktestEngine:
                         else 0.0
                     )
 
-            # Risk checks should use executable size when available;
-            # otherwise fallback to requested size so no-liquidity paths keep clear reasons.
             risk_qty = executed_qty if executed_qty > 1e-12 else requested_qty
             risk_decision = self._risk_check(
                 qty=risk_qty,
@@ -291,114 +305,110 @@ class BacktestEngine:
                 ts=created_at,
             )
 
-            if not risk_decision.ok:
-                rejection_count += 1
-                if self._breaker_counts_rejection_reason(risk_decision.reason):
-                    rejection_streak_by_strategy[strategy] += 1
-                else:
-                    rejection_streak_by_strategy[strategy] = 0
-                strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
-                    positions,
-                    strategy,
-                    created_at,
-                )
-                event_equity = realized_by_event[event_key] + self._event_unrealized(
-                    positions,
-                    strategy,
-                    event_id,
-                    created_at,
-                    strategy_market_event,
-                )
+            return {
+                "row": row,
+                "strategy": strategy,
+                "market_id": market_id,
+                "event_id": event_id,
+                "event_key": event_key,
+                "side": side,
+                "created_at": created_at,
+                "token_id": token_id,
+                "target_price": target_price,
+                "requested_qty": requested_qty,
+                "fill_price": fill_price,
+                "applied_slippage_bps": applied_slippage_bps,
+                "executed_qty": executed_qty,
+                "fill_ratio": fill_ratio,
+                "fill_probability": fill_probability,
+                "risk_decision": risk_decision,
+            }
 
-                equity_curve[strategy].append(strategy_equity)
-                event_equity_curve[event_key].append(event_equity)
+        def _append_rejection(
+            prep: dict[str, Any],
+            reason: str,
+            *,
+            count_for_breaker: bool,
+        ) -> None:
+            nonlocal rejection_count
+            strategy = str(prep["strategy"])
+            event_key = tuple(prep["event_key"])
+            created_at = str(prep["created_at"])
+            event_id = str(prep["event_id"])
+            risk_decision = prep["risk_decision"]
 
-                replay.append(
-                    BacktestReplayRow(
-                        ts=created_at,
-                        strategy=strategy,
-                        event_id=event_id,
-                        market_id=market_id,
-                        token_id=token_id,
-                        side=side,
-                        qty=requested_qty,
-                        executed_qty=0.0,
-                        fill_ratio=0.0,
-                        fill_probability=0.0,
-                        slippage_bps_applied=applied_slippage_bps,
-                        target_price=target_price,
-                        fill_price=fill_price,
-                        realized_change=0.0,
-                        strategy_equity=strategy_equity,
-                        event_equity=event_equity,
-                        risk_allowed=False,
-                        risk_reason=risk_decision.reason,
-                        risk_notional=risk_decision.notional,
-                        risk_realized_pnl_before=risk_decision.realized_pnl_before,
-                        risk_strategy_notional_before=risk_decision.strategy_notional_before,
-                        risk_event_notional_before=risk_decision.event_notional_before,
-                        risk_rejections_before=risk_decision.rejections_before,
-                        risk_max_daily_loss=self.risk.max_daily_loss,
-                        risk_max_strategy_notional=self.risk.max_strategy_notional,
-                        risk_max_event_notional=self.risk.max_event_notional,
-                        risk_circuit_breaker_rejections=self.risk.circuit_breaker_rejections,
-                    )
-                )
-                continue
-
-            if executed_qty <= 1e-12:
-                rejection_count += 1
-                # Liquidity misses are execution outcomes; keep breaker focused on
-                # consecutive risk-check failures.
+            rejection_count += 1
+            if count_for_breaker:
+                rejection_streak_by_strategy[strategy] += 1
+            else:
                 rejection_streak_by_strategy[strategy] = 0
-                strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
-                    positions,
-                    strategy,
-                    created_at,
-                )
-                event_equity = realized_by_event[event_key] + self._event_unrealized(
-                    positions,
-                    strategy,
-                    event_id,
-                    created_at,
-                    strategy_market_event,
-                )
 
-                equity_curve[strategy].append(strategy_equity)
-                event_equity_curve[event_key].append(event_equity)
+            strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
+                positions,
+                strategy,
+                created_at,
+            )
+            event_equity = realized_by_event[event_key] + self._event_unrealized(
+                positions,
+                strategy,
+                event_id,
+                created_at,
+                strategy_market_event,
+            )
 
-                replay.append(
-                    BacktestReplayRow(
-                        ts=created_at,
-                        strategy=strategy,
-                        event_id=event_id,
-                        market_id=market_id,
-                        token_id=token_id,
-                        side=side,
-                        qty=requested_qty,
-                        executed_qty=0.0,
-                        fill_ratio=0.0,
-                        fill_probability=0.0,
-                        slippage_bps_applied=applied_slippage_bps,
-                        target_price=target_price,
-                        fill_price=fill_price,
-                        realized_change=0.0,
-                        strategy_equity=strategy_equity,
-                        event_equity=event_equity,
-                        risk_allowed=False,
-                        risk_reason="no executable liquidity",
-                        risk_notional=risk_decision.notional,
-                        risk_realized_pnl_before=risk_decision.realized_pnl_before,
-                        risk_strategy_notional_before=risk_decision.strategy_notional_before,
-                        risk_event_notional_before=risk_decision.event_notional_before,
-                        risk_rejections_before=risk_decision.rejections_before,
-                        risk_max_daily_loss=self.risk.max_daily_loss,
-                        risk_max_strategy_notional=self.risk.max_strategy_notional,
-                        risk_max_event_notional=self.risk.max_event_notional,
-                        risk_circuit_breaker_rejections=self.risk.circuit_breaker_rejections,
-                    )
+            equity_curve[strategy].append(strategy_equity)
+            event_equity_curve[event_key].append(event_equity)
+
+            replay.append(
+                BacktestReplayRow(
+                    ts=created_at,
+                    strategy=strategy,
+                    event_id=event_id,
+                    market_id=str(prep["market_id"]),
+                    token_id=str(prep["token_id"]),
+                    side=str(prep["side"]),
+                    qty=float(prep["requested_qty"]),
+                    executed_qty=0.0,
+                    fill_ratio=0.0,
+                    fill_probability=0.0,
+                    slippage_bps_applied=float(prep["applied_slippage_bps"]),
+                    target_price=float(prep["target_price"]),
+                    fill_price=float(prep["fill_price"]),
+                    realized_change=0.0,
+                    strategy_equity=strategy_equity,
+                    event_equity=event_equity,
+                    risk_allowed=False,
+                    risk_reason=reason,
+                    risk_notional=float(risk_decision.notional),
+                    risk_realized_pnl_before=float(risk_decision.realized_pnl_before),
+                    risk_strategy_notional_before=float(risk_decision.strategy_notional_before),
+                    risk_event_notional_before=float(risk_decision.event_notional_before),
+                    risk_rejections_before=int(risk_decision.rejections_before),
+                    risk_max_daily_loss=self.risk.max_daily_loss,
+                    risk_max_strategy_notional=self.risk.max_strategy_notional,
+                    risk_max_event_notional=self.risk.max_event_notional,
+                    risk_circuit_breaker_rejections=self.risk.circuit_breaker_rejections,
                 )
-                continue
+            )
+
+        def _execute_prepared(prep: dict[str, Any]) -> None:
+            nonlocal total_realized, executed_signals
+
+            strategy = str(prep["strategy"])
+            market_id = str(prep["market_id"])
+            event_id = str(prep["event_id"])
+            side = str(prep["side"])
+            created_at = str(prep["created_at"])
+            event_key = tuple(prep["event_key"])
+            risk_decision = prep["risk_decision"]
+
+            fill_price = float(prep["fill_price"])
+            executed_qty = float(prep["executed_qty"])
+            requested_qty = float(prep["requested_qty"])
+            target_price = float(prep["target_price"])
+            applied_slippage_bps = float(prep["applied_slippage_bps"])
+            fill_ratio = float(prep["fill_ratio"])
+            fill_probability = float(prep["fill_probability"])
 
             fee = fill_price * executed_qty * max(0.0, self.execution.fee_bps) / 10000.0
 
@@ -415,7 +425,7 @@ class BacktestEngine:
                 strategy_market_event,
             )
 
-            key = (strategy, market_id, token_id)
+            key = (strategy, market_id, str(prep["token_id"]))
             pos = positions.get(key)
             if pos is None:
                 pos = _Position()
@@ -474,6 +484,7 @@ class BacktestEngine:
                 event_mtm_wins[event_key] += 1
             elif event_mtm_delta < -1e-12:
                 event_mtm_losses[event_key] += 1
+
             equity_curve[strategy].append(strategy_equity)
             event_equity_curve[event_key].append(event_equity)
 
@@ -483,7 +494,7 @@ class BacktestEngine:
                     strategy=strategy,
                     event_id=event_id,
                     market_id=market_id,
-                    token_id=token_id,
+                    token_id=str(prep["token_id"]),
                     side=side,
                     qty=requested_qty,
                     executed_qty=executed_qty,
@@ -497,17 +508,133 @@ class BacktestEngine:
                     event_equity=event_equity,
                     risk_allowed=True,
                     risk_reason="ok",
-                    risk_notional=risk_decision.notional,
-                    risk_realized_pnl_before=risk_decision.realized_pnl_before,
-                    risk_strategy_notional_before=risk_decision.strategy_notional_before,
-                    risk_event_notional_before=risk_decision.event_notional_before,
-                    risk_rejections_before=risk_decision.rejections_before,
+                    risk_notional=float(risk_decision.notional),
+                    risk_realized_pnl_before=float(risk_decision.realized_pnl_before),
+                    risk_strategy_notional_before=float(risk_decision.strategy_notional_before),
+                    risk_event_notional_before=float(risk_decision.event_notional_before),
+                    risk_rejections_before=int(risk_decision.rejections_before),
                     risk_max_daily_loss=self.risk.max_daily_loss,
                     risk_max_strategy_notional=self.risk.max_strategy_notional,
                     risk_max_event_notional=self.risk.max_event_notional,
                     risk_circuit_breaker_rejections=self.risk.circuit_breaker_rejections,
                 )
             )
+
+        for batch in execution_batches:
+            if len(batch) == 1:
+                row = batch[0]
+                prep = _prepare_row(row)
+                pair_batch_key = self._s9_pair_batch_key(row)
+                if pair_batch_key is not None:
+                    _append_rejection(
+                        prep,
+                        "s9 pair atomic guard: missing paired leg",
+                        count_for_breaker=False,
+                    )
+                    continue
+
+                risk_decision = prep["risk_decision"]
+                if not risk_decision.ok:
+                    _append_rejection(
+                        prep,
+                        str(risk_decision.reason),
+                        count_for_breaker=self._breaker_counts_rejection_reason(
+                            str(risk_decision.reason)
+                        ),
+                    )
+                    continue
+
+                if float(prep["executed_qty"]) <= 1e-12:
+                    _append_rejection(prep, "no executable liquidity", count_for_breaker=False)
+                    continue
+
+                _execute_prepared(prep)
+                continue
+
+            batch_key = self._s9_pair_batch_key(batch[0])
+            if (
+                len(batch) == 2
+                and batch_key is not None
+                and batch_key == self._s9_pair_batch_key(batch[1])
+            ):
+                ordered_rows = sorted(batch, key=lambda r: int(r["id"]))
+                consistent, reject_reason = self._s9_pair_rows_consistent(ordered_rows)
+                pair_preps = [_prepare_row(row) for row in ordered_rows]
+
+                if not consistent:
+                    for prep in pair_preps:
+                        _append_rejection(prep, reject_reason, count_for_breaker=False)
+                    continue
+
+                first_risk_failure = next(
+                    (prep for prep in pair_preps if not prep["risk_decision"].ok),
+                    None,
+                )
+                if first_risk_failure is not None:
+                    reason = str(first_risk_failure["risk_decision"].reason)
+                    count_for_breaker = self._breaker_counts_rejection_reason(reason)
+                    for prep in pair_preps:
+                        _append_rejection(prep, reason, count_for_breaker=count_for_breaker)
+                    continue
+
+                if any(float(prep["executed_qty"]) <= 1e-12 for prep in pair_preps):
+                    for prep in pair_preps:
+                        _append_rejection(
+                            prep,
+                            "s9 pair atomic guard: paired leg has no executable liquidity",
+                            count_for_breaker=False,
+                        )
+                    continue
+
+                total_pair_notional = sum(
+                    float(prep["risk_decision"].notional) for prep in pair_preps
+                )
+                strategy_notional_before = float(
+                    pair_preps[0]["risk_decision"].strategy_notional_before
+                )
+                if strategy_notional_before + total_pair_notional > self.risk.max_strategy_notional:
+                    reason = (
+                        "strategy notional limit exceeded (pair-atomic): "
+                        f"{strategy_notional_before + total_pair_notional:.2f} "
+                        f"> {self.risk.max_strategy_notional:.2f}"
+                    )
+                    for prep in pair_preps:
+                        _append_rejection(prep, reason, count_for_breaker=False)
+                    continue
+
+                if pair_preps[0]["event_id"] == pair_preps[1]["event_id"]:
+                    event_notional_before = float(
+                        pair_preps[0]["risk_decision"].event_notional_before
+                    )
+                    if event_notional_before + total_pair_notional > self.risk.max_event_notional:
+                        reason = (
+                            "event notional limit exceeded (pair-atomic): "
+                            f"{event_notional_before + total_pair_notional:.2f} "
+                            f"> {self.risk.max_event_notional:.2f}"
+                        )
+                        for prep in pair_preps:
+                            _append_rejection(prep, reason, count_for_breaker=False)
+                        continue
+
+                for prep in pair_preps:
+                    _execute_prepared(prep)
+                continue
+
+            for row in batch:
+                prep = _prepare_row(row)
+                risk_decision = prep["risk_decision"]
+                if not risk_decision.ok:
+                    _append_rejection(
+                        prep,
+                        str(risk_decision.reason),
+                        count_for_breaker=self._breaker_counts_rejection_reason(
+                            str(risk_decision.reason)
+                        ),
+                    )
+                elif float(prep["executed_qty"]) <= 1e-12:
+                    _append_rejection(prep, "no executable liquidity", count_for_breaker=False)
+                else:
+                    _execute_prepared(prep)
 
         # Guarantee selected strategies appear in report, even if no signal in the window.
         strategies_for_report = sorted(
@@ -651,6 +778,76 @@ class BacktestEngine:
                 qty = float(primary_leg.get("qty", qty))
 
         return token, target_price, qty
+
+    @staticmethod
+    def _s9_pair_batch_key(row: dict[str, Any]) -> str | None:
+        if str(row.get("strategy", "")).lower() != "s9":
+            return None
+
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        if not bool(payload.get("pair_atomic", False)):
+            return None
+
+        pair_id = str(payload.get("pair_batch_id") or payload.get("pair_id") or "").strip()
+        if not pair_id:
+            return None
+
+        created_at = str(row.get("created_at", "")).strip()
+        side = str(row.get("side", "")).strip().lower()
+        if not created_at or not side:
+            return None
+
+        return f"{created_at}|{side}|{pair_id}"
+
+    @classmethod
+    def _s9_pair_rows_consistent(cls, pair_rows: list[dict[str, Any]]) -> tuple[bool, str]:
+        if len(pair_rows) != 2:
+            return False, "s9 pair atomic guard: expected exactly 2 legs"
+
+        first, second = pair_rows
+        if (
+            str(first.get("strategy", "")).lower() != "s9"
+            or str(second.get("strategy", "")).lower() != "s9"
+        ):
+            return False, "s9 pair atomic guard: inconsistent strategy legs"
+
+        side_a = str(first.get("side", "")).lower()
+        side_b = str(second.get("side", "")).lower()
+        if not side_a or side_a != side_b:
+            return False, "s9 pair atomic guard: inconsistent pair side"
+
+        payload_a = first.get("payload") if isinstance(first.get("payload"), dict) else {}
+        payload_b = second.get("payload") if isinstance(second.get("payload"), dict) else {}
+        if not isinstance(payload_a, dict) or not isinstance(payload_b, dict):
+            return False, "s9 pair atomic guard: invalid pair payload"
+
+        pair_id_a = str(payload_a.get("pair_id") or "").strip()
+        pair_id_b = str(payload_b.get("pair_id") or "").strip()
+        if pair_id_a and pair_id_b and pair_id_a != pair_id_b:
+            return False, "s9 pair atomic guard: mismatched pair_id"
+
+        event_a = str(first.get("event_id", "")).strip()
+        event_b = str(second.get("event_id", "")).strip()
+        if event_a and event_b and event_a != event_b:
+            return False, "s9 pair atomic guard: mismatched event_id"
+
+        cond_a = str(payload_a.get("condition_key") or "").strip().lower()
+        cond_b = str(payload_b.get("condition_key") or "").strip().lower()
+        if cond_a and cond_b and cond_a != cond_b:
+            return False, "s9 pair atomic guard: mismatched condition_key"
+
+        expected_legs = int(float(payload_a.get("pair_expected_legs", 2) or 2))
+        if expected_legs != 2:
+            return False, "s9 pair atomic guard: unexpected pair_expected_legs"
+
+        token_a, _, _ = cls._signal_execution_fields(first)
+        token_b, _, _ = cls._signal_execution_fields(second)
+        if {token_a, token_b} != {OUTCOME_TOKEN_YES, OUTCOME_TOKEN_NO}:
+            return False, "s9 pair atomic guard: legs must include YES and NO"
+
+        return True, "ok"
 
     def _fill_price(
         self,

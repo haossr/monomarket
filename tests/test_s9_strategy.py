@@ -12,13 +12,14 @@ def _market(
     yes: float,
     no: float,
     liq: float,
+    question: str | None = None,
 ) -> MarketView:
     return MarketView(
         source="gamma" if i % 2 else "clob",
         market_id=f"m{i}",
         canonical_id=canonical_id,
         event_id=event_id,
-        question=f"Q{i}",
+        question=question or f"Q{i}",
         status="open",
         neg_risk=False,
         liquidity=liq,
@@ -34,8 +35,24 @@ def _market(
 def test_s9_generates_buy_carry_pair() -> None:
     strategy = S9YesNoParityArb()
     markets = [
-        _market(1, canonical_id="c1", event_id="e1", yes=0.44, no=0.58, liq=900),
-        _market(2, canonical_id="c1", event_id="e1", yes=0.49, no=0.53, liq=850),
+        _market(
+            1,
+            canonical_id="c1",
+            event_id="e1",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team A win?",
+        ),
+        _market(
+            2,
+            canonical_id="c1",
+            event_id="e1",
+            yes=0.49,
+            no=0.53,
+            liq=850,
+            question="Will Team A win?",
+        ),
     ]
 
     signals = strategy.generate(
@@ -54,6 +71,11 @@ def test_s9_generates_buy_carry_pair() -> None:
     tokens = {str(s.payload.get("primary_leg", {}).get("token", "")) for s in signals}
     assert tokens == {"YES", "NO"}
     assert all(float(s.payload.get("effective_edge_bps", 0.0)) > 0 for s in signals)
+    assert all(bool(s.payload.get("pair_atomic", False)) for s in signals)
+    pair_batch_ids = {str(s.payload.get("pair_batch_id", "")) for s in signals}
+    assert len(pair_batch_ids) == 1
+    condition_keys = {str(s.payload.get("condition_key", "")) for s in signals}
+    assert len(condition_keys) == 1
 
 
 def test_s9_cost_model_blocks_weak_edge() -> None:
@@ -103,10 +125,42 @@ def test_s9_allow_sell_parity_emits_sell_legs() -> None:
 def test_s9_event_pair_guard_limits_pairs_per_event() -> None:
     strategy = S9YesNoParityArb()
     markets = [
-        _market(1, canonical_id="c1", event_id="e1", yes=0.44, no=0.58, liq=900),
-        _market(2, canonical_id="c1", event_id="e1", yes=0.47, no=0.53, liq=880),
-        _market(3, canonical_id="c2", event_id="e1", yes=0.43, no=0.57, liq=910),
-        _market(4, canonical_id="c2", event_id="e1", yes=0.49, no=0.52, liq=860),
+        _market(
+            1,
+            canonical_id="c1",
+            event_id="e1",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team A win?",
+        ),
+        _market(
+            2,
+            canonical_id="c1",
+            event_id="e1",
+            yes=0.47,
+            no=0.53,
+            liq=880,
+            question="Will Team A win?",
+        ),
+        _market(
+            3,
+            canonical_id="c2",
+            event_id="e1",
+            yes=0.43,
+            no=0.57,
+            liq=910,
+            question="Will Team B win?",
+        ),
+        _market(
+            4,
+            canonical_id="c2",
+            event_id="e1",
+            yes=0.49,
+            no=0.52,
+            liq=860,
+            question="Will Team B win?",
+        ),
     ]
 
     signals = strategy.generate(
@@ -130,8 +184,24 @@ def test_s9_event_pair_guard_limits_pairs_per_event() -> None:
 def test_s9_event_notional_budget_caps_pair_size() -> None:
     strategy = S9YesNoParityArb()
     markets = [
-        _market(1, canonical_id="c1", event_id="e1", yes=0.44, no=0.58, liq=1200),
-        _market(2, canonical_id="c1", event_id="e1", yes=0.49, no=0.53, liq=1200),
+        _market(
+            1,
+            canonical_id="c1",
+            event_id="e1",
+            yes=0.44,
+            no=0.58,
+            liq=1200,
+            question="Will Team A win?",
+        ),
+        _market(
+            2,
+            canonical_id="c1",
+            event_id="e1",
+            yes=0.49,
+            no=0.53,
+            liq=1200,
+            question="Will Team A win?",
+        ),
     ]
 
     signals = strategy.generate(
@@ -153,7 +223,7 @@ def test_s9_event_notional_budget_caps_pair_size() -> None:
     assert all(abs(float(s.size_hint) - float(signals[0].size_hint)) < 1e-12 for s in signals)
 
 
-def test_s9_require_same_event_blocks_cross_event_pair() -> None:
+def test_s9_default_blocks_cross_event_pair() -> None:
     strategy = S9YesNoParityArb()
     markets = [
         _market(1, canonical_id="c1", event_id="e1", yes=0.44, no=0.58, liq=900),
@@ -163,7 +233,6 @@ def test_s9_require_same_event_blocks_cross_event_pair() -> None:
     signals = strategy.generate(
         markets,
         {
-            "require_same_event": True,
             "min_effective_edge_bps": 5.0,
             "fee_bps": 0.0,
             "slippage_bps": 0.0,
@@ -172,3 +241,77 @@ def test_s9_require_same_event_blocks_cross_event_pair() -> None:
     )
 
     assert signals == []
+
+
+def test_s9_default_blocks_cross_condition_pair_within_event() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="democratic party",
+            event_id="e-same",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Democrats win the Senate?",
+        ),
+        _market(
+            2,
+            canonical_id="democratic party",
+            event_id="e-same",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Democrats win the House?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+
+
+def test_s9_can_opt_out_same_condition_guard() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="democratic party",
+            event_id="e-same",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Democrats win the Senate?",
+        ),
+        _market(
+            2,
+            canonical_id="democratic party",
+            event_id="e-same",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Democrats win the House?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "require_same_condition": False,
+            "require_same_event": True,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert len(signals) == 2

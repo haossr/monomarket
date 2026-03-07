@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from collections import defaultdict
 from dataclasses import dataclass
@@ -29,6 +30,10 @@ def _as_bool(raw: object, default: bool) -> bool:
     if text in {"0", "false", "no", "n", "off"}:
         return False
     return default
+
+
+def _normalize_text(raw: str) -> str:
+    return " ".join(str(raw).strip().lower().split())
 
 
 class S9YesNoParityArb(Strategy):
@@ -64,7 +69,8 @@ class S9YesNoParityArb(Strategy):
         max_signals = max(0, int(float(cfg.get("max_signals", 120))))
         quote_improve = max(0.0, float(cfg.get("quote_improve", 0.0)))
         allow_sell_parity = _as_bool(cfg.get("allow_sell_parity"), False)
-        require_same_event = _as_bool(cfg.get("require_same_event"), False)
+        require_same_event = _as_bool(cfg.get("require_same_event"), True)
+        require_same_condition = _as_bool(cfg.get("require_same_condition"), True)
         max_pairs_per_event = max(0, int(float(cfg.get("max_pairs_per_event", 2))))
         max_event_pair_notional = float(cfg.get("max_event_pair_notional", 20.0))
 
@@ -99,6 +105,7 @@ class S9YesNoParityArb(Strategy):
                     rows,
                     buy_mode=buy_mode,
                     require_same_event=require_same_event,
+                    require_same_condition=require_same_condition,
                 )
                 if pair is None:
                     continue
@@ -110,6 +117,14 @@ class S9YesNoParityArb(Strategy):
                     require_same_event=require_same_event,
                 )
                 if event_id is None:
+                    continue
+
+                condition_key = self._resolve_pair_condition_key(
+                    yes_leg=yes_leg,
+                    no_leg=no_leg,
+                    require_same_condition=require_same_condition,
+                )
+                if condition_key is None:
                     continue
 
                 if max_pairs_per_event > 0 and event_pair_counts[event_id] >= max_pairs_per_event:
@@ -125,6 +140,7 @@ class S9YesNoParityArb(Strategy):
                 pair_signals = self._emit_pair_signals(
                     canonical_id=canonical_id,
                     event_id=event_id,
+                    condition_key=condition_key,
                     yes_leg=yes_leg,
                     no_leg=no_leg,
                     side=side,
@@ -175,12 +191,37 @@ class S9YesNoParityArb(Strategy):
             return None
         return yes_event or no_event or None
 
-    @staticmethod
+    @classmethod
+    def _condition_key_for_market(cls, market: MarketView) -> str:
+        question = _normalize_text(str(market.question or ""))
+        if question:
+            return question
+        return _normalize_text(str(market.canonical_id or ""))
+
+    @classmethod
+    def _resolve_pair_condition_key(
+        cls,
+        *,
+        yes_leg: MarketView,
+        no_leg: MarketView,
+        require_same_condition: bool,
+    ) -> str | None:
+        yes_key = cls._condition_key_for_market(yes_leg)
+        no_key = cls._condition_key_for_market(no_leg)
+        if yes_key and no_key and yes_key == no_key:
+            return yes_key
+        if require_same_condition:
+            return None
+        return yes_key or no_key or None
+
+    @classmethod
     def _best_pair(
+        cls,
         rows: list[MarketView],
         *,
         buy_mode: bool,
         require_same_event: bool,
+        require_same_condition: bool,
     ) -> tuple[MarketView, MarketView] | None:
         if buy_mode:
             yes_sorted = sorted(rows, key=lambda m: float(m.yes_price or 1.0))
@@ -192,18 +233,25 @@ class S9YesNoParityArb(Strategy):
         if not yes_sorted or not no_sorted:
             return None
 
-        # Prefer cross-market pair to avoid same-row token coupling where possible.
         for yes_leg in yes_sorted:
             for no_leg in no_sorted:
                 if yes_leg.market_id == no_leg.market_id:
                     continue
                 if require_same_event and str(yes_leg.event_id) != str(no_leg.event_id):
                     continue
+                if require_same_condition and (
+                    cls._condition_key_for_market(yes_leg) != cls._condition_key_for_market(no_leg)
+                ):
+                    continue
                 return yes_leg, no_leg
 
         for yes_leg in yes_sorted:
             for no_leg in no_sorted:
                 if require_same_event and str(yes_leg.event_id) != str(no_leg.event_id):
+                    continue
+                if require_same_condition and (
+                    cls._condition_key_for_market(yes_leg) != cls._condition_key_for_market(no_leg)
+                ):
                     continue
                 return yes_leg, no_leg
 
@@ -231,6 +279,7 @@ class S9YesNoParityArb(Strategy):
         *,
         canonical_id: str,
         event_id: str,
+        condition_key: str,
         yes_leg: MarketView,
         no_leg: MarketView,
         side: str,
@@ -311,10 +360,13 @@ class S9YesNoParityArb(Strategy):
 
         confidence = min(0.98, 0.50 + max(0.0, effective_edge_bps) / 600.0)
         score = (effective_edge_bps / 10000.0) * (1.0 + min_leg_liq / depth_reference_liquidity)
+
+        condition_fingerprint = hashlib.sha1(condition_key.encode("utf-8")).hexdigest()[:12]
         pair_id = (
-            f"{canonical_id}:{direction}:{yes_leg.market_id}:{no_leg.market_id}:"
-            f"{yes_leg.source}:{no_leg.source}"
+            f"{canonical_id}:{event_id}:{condition_fingerprint}:{direction}:"
+            f"{yes_leg.market_id}:{no_leg.market_id}:{yes_leg.source}:{no_leg.source}"
         )
+        pair_batch_id = f"{pair_id}:{event_pair_index}"
 
         if side == "buy":
             yes_target = min(0.99, yes_px + quote_improve)
@@ -339,7 +391,12 @@ class S9YesNoParityArb(Strategy):
             "signal_source": "yes_no_parity_arb",
             "event_id": event_id,
             "canonical_id": canonical_id,
+            "condition_key": condition_key,
             "pair_id": pair_id,
+            "pair_batch_id": pair_batch_id,
+            "pair_expected_legs": 2,
+            "pair_atomic": True,
+            "pair_leg_tokens": [OUTCOME_TOKEN_YES, OUTCOME_TOKEN_NO],
             "direction": direction,
             "parity_sum": parity_sum,
             "gross_edge": gross_edge,
