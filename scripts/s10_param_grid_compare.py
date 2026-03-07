@@ -115,6 +115,7 @@ def summarize_compare_payload(
     total_delta_exec = 0
     total_delta_rej = 0
     total_delta_mtm_wr = 0.0
+    total_delta_max_drawdown = 0.0
 
     by_slice: list[dict[str, Any]] = []
     slices_raw = payload.get("slices", [])
@@ -132,11 +133,13 @@ def summarize_compare_payload(
         exec_rows = _safe_int(strategy_delta.get("executed_rows"))
         rej_rows = _safe_int(strategy_delta.get("rejected_rows"))
         mtm_wr = _safe_float(strategy_delta.get("mtm_winrate"))
+        max_drawdown = _safe_float(strategy_delta.get("max_drawdown"))
 
         total_delta_pnl += pnl
         total_delta_exec += exec_rows
         total_delta_rej += rej_rows
         total_delta_mtm_wr += mtm_wr
+        total_delta_max_drawdown += max_drawdown
 
         by_slice.append(
             {
@@ -146,8 +149,12 @@ def summarize_compare_payload(
                 "delta_exec": exec_rows,
                 "delta_rej": rej_rows,
                 "delta_mtm_winrate": mtm_wr,
+                "delta_max_drawdown": max_drawdown,
             }
         )
+
+    min_slice_delta_pnl = min((item["delta_pnl"] for item in by_slice), default=0.0)
+    non_negative_slice_count = sum(1 for item in by_slice if float(item["delta_pnl"]) >= 0.0)
 
     return {
         "objective_strategy": objective,
@@ -156,6 +163,9 @@ def summarize_compare_payload(
         "total_delta_exec": total_delta_exec,
         "total_delta_rej": total_delta_rej,
         "total_delta_mtm_winrate": total_delta_mtm_wr,
+        "total_delta_max_drawdown": total_delta_max_drawdown,
+        "min_slice_delta_pnl": min_slice_delta_pnl,
+        "non_negative_slice_count": non_negative_slice_count,
         "by_slice": by_slice,
     }
 
@@ -169,11 +179,12 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- baseline_config: {result.get('baseline_config')}",
         f"- candidate_base_config: {result.get('candidate_base_config')}",
         f"- objective_strategy: {result.get('objective_strategy')}",
+        f"- min_slice_delta_pnl_threshold: {result.get('min_slice_delta_pnl_threshold')}",
         f"- total_candidates: {result.get('total_candidates')}",
         "",
         "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | "
-        "ΣΔpnl | ΣΔexec | ΣΔrej | ΣΔmtm_wr |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "min(Δpnl) | ΣΔpnl | ΣΔexec | ΣΔrej | ΣΔmaxDD | ΣΔmtm_wr | pass? |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
 
     for item in result.get("candidates", []):
@@ -189,10 +200,13 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{_safe_float(ov.get('max_abs_deviation')):.4f} | "
             f"{_safe_float(ov.get('max_tiny_price_leg_share')):.4f} | "
             f"{_safe_float(ov.get('max_floor_adjusted_leg_share')):.4f} | "
+            f"{_safe_float(item.get('min_slice_delta_pnl')):+.4f} | "
             f"{_safe_float(item.get('total_delta_pnl')):+.4f} | "
             f"{_safe_int(item.get('total_delta_exec')):+d} | "
             f"{_safe_int(item.get('total_delta_rej')):+d} | "
-            f"{_safe_float(item.get('total_delta_mtm_winrate')):+.4f} |"
+            f"{_safe_float(item.get('total_delta_max_drawdown')):+.4f} | "
+            f"{_safe_float(item.get('total_delta_mtm_winrate')):+.4f} | "
+            f"{'yes' if bool(item.get('passes_min_slice_delta_pnl')) else 'no'} |"
         )
 
     lines.append("")
@@ -275,6 +289,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--objective-strategy",
         default="s10",
         help="Strategy used for aggregate ranking objective",
+    )
+    parser.add_argument(
+        "--min-slice-delta-pnl",
+        type=float,
+        default=-1_000_000_000.0,
+        help=(
+            "Minimum per-slice Δpnl required for pass (default keeps all candidates). "
+            "Use 0 to require non-negative Δpnl on every slice."
+        ),
     )
 
     parser.add_argument(
@@ -413,21 +436,30 @@ def main() -> int:
             "compare_json": str(compare_out_dir / "compare.json"),
             **summary,
         }
+        entry["passes_min_slice_delta_pnl"] = _safe_float(
+            entry.get("min_slice_delta_pnl")
+        ) >= float(args.min_slice_delta_pnl)
         entries.append(entry)
 
         print(
             f"[{candidate_id}]"
+            f" min(Δpnl)={_safe_float(entry.get('min_slice_delta_pnl')):+.4f}"
             f" ΣΔpnl={_safe_float(entry.get('total_delta_pnl')):+.4f}"
             f" ΣΔexec={_safe_int(entry.get('total_delta_exec')):+d}"
             f" ΣΔrej={_safe_int(entry.get('total_delta_rej')):+d}"
+            f" ΣΔmaxDD={_safe_float(entry.get('total_delta_max_drawdown')):+.4f}"
+            f" pass={bool(entry.get('passes_min_slice_delta_pnl'))}"
             f" overrides={overrides}"
         )
 
     entries.sort(
         key=lambda item: (
+            -int(bool(item.get("passes_min_slice_delta_pnl"))),
+            -_safe_float(item.get("min_slice_delta_pnl")),
             -_safe_float(item.get("total_delta_pnl")),
             -_safe_int(item.get("total_delta_exec")),
             _safe_int(item.get("total_delta_rej")),
+            _safe_float(item.get("total_delta_max_drawdown")),
             str(item.get("candidate_id", "")),
         )
     )
@@ -442,6 +474,7 @@ def main() -> int:
         "objective_strategy": str(args.objective_strategy).strip().lower(),
         "strategies": [s.strip().lower() for s in str(args.strategies).split(",") if s.strip()],
         "slices": str(args.slices),
+        "min_slice_delta_pnl_threshold": float(args.min_slice_delta_pnl),
         "total_candidates": len(entries),
         "candidates": entries,
     }
@@ -459,9 +492,12 @@ def main() -> int:
         print(
             "  best: "
             f"{top.get('candidate_id')} "
+            f"min(Δpnl)={_safe_float(top.get('min_slice_delta_pnl')):+.4f} "
             f"ΣΔpnl={_safe_float(top.get('total_delta_pnl')):+.4f} "
             f"ΣΔexec={_safe_int(top.get('total_delta_exec')):+d} "
-            f"ΣΔrej={_safe_int(top.get('total_delta_rej')):+d}"
+            f"ΣΔrej={_safe_int(top.get('total_delta_rej')):+d} "
+            f"ΣΔmaxDD={_safe_float(top.get('total_delta_max_drawdown')):+.4f} "
+            f"pass={bool(top.get('passes_min_slice_delta_pnl'))}"
         )
 
     return 0
