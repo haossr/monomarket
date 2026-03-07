@@ -740,7 +740,7 @@ def _render_html(
     }}
     .chart-card {{ border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; background: #fff; }}
     .chart-title {{ margin: 0 0 8px; font-size: 14px; font-weight: 600; }}
-    canvas {{ width: 100%; height: 240px; }}
+    canvas {{ width: 100% !important; height: auto !important; display: block; }}
     ul {{ margin: 6px 0; padding-left: 18px; }}
 
     @media (max-width: 640px) {{
@@ -748,7 +748,6 @@ def _render_html(
       .cards {{ grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }}
       .value {{ font-size: 18px; }}
       .chart-grid {{ grid-template-columns: 1fr; gap: 12px; }}
-      canvas {{ height: 220px; }}
       th, td {{ font-size: 12px; padding: 6px 8px; }}
     }}
   </style>
@@ -890,7 +889,8 @@ def _render_html(
       }},
       options: {{
         responsive: true,
-        maintainAspectRatio: false,
+        maintainAspectRatio: true,
+        aspectRatio: 2,
         interaction: {{ mode: 'index', intersect: false }},
         scales: {{
           x: {{
@@ -925,7 +925,8 @@ def _render_html(
       }},
       options: {{
         responsive: true,
-        maintainAspectRatio: false,
+        maintainAspectRatio: true,
+        aspectRatio: 2,
         scales: {{ x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }} }},
       }},
     }});
@@ -942,7 +943,8 @@ def _render_html(
       }},
       options: {{
         responsive: true,
-        maintainAspectRatio: false,
+        maintainAspectRatio: true,
+        aspectRatio: 2,
         scales: {{ x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }} }},
       }},
     }});
@@ -959,7 +961,8 @@ def _render_html(
       }},
       options: {{
         responsive: true,
-        maintainAspectRatio: false,
+        maintainAspectRatio: true,
+        aspectRatio: 2,
         scales: {{
           x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }},
           y: {{ min: 0, max: 100 }},
@@ -989,7 +992,8 @@ def _render_html(
       }},
       options: {{
         responsive: true,
-        maintainAspectRatio: false,
+        maintainAspectRatio: true,
+        aspectRatio: 2,
         scales: {{ x: {{ ticks: {{ autoSkip: true, maxTicksLimit: 8, maxRotation: 0, minRotation: 0 }} }} }},
       }},
     }});
