@@ -218,6 +218,7 @@ bash scripts/backtest_cycle.sh \
 ```
 
 默认口径：`gamma full ingest(limit=5000)` + `liquidity top 30% universe`（可通过 `--ingest-mode/--ingest-limit/--liquidity-top-fraction` 覆盖）。
+仅跑 S9/S10 可加：`--strategies s9,s10`。
 
 产物目录：`artifacts/backtest/runs/<timestamp>/`
 - `latest.json`
