@@ -65,6 +65,37 @@ def test_s10_grid_default_slices_include_recent14d() -> None:
     args = parser.parse_args(["--baseline-config", "base.yaml"])
 
     assert str(args.slices) == "recent24h:24,recent7d:168,recent14d:336"
+    assert bool(args.rebuild_signals_window) is False
+    assert float(args.rebuild_step_hours) == 12.0
+    assert int(args.rebuild_market_limit) == 2000
+    assert int(args.rebuild_ingest_limit) == 300
+
+
+def test_build_dual_slice_compare_cmd_includes_rebuild_flags() -> None:
+    module = _load_module()
+
+    cmd = module._build_dual_slice_compare_cmd(
+        compare_script=Path("/tmp/sx12.py"),
+        baseline_config=Path("/tmp/base.yaml"),
+        candidate_config=Path("/tmp/cand.yaml"),
+        strategies="s9,s10",
+        slices="recent24h:24,recent7d:168",
+        out_dir=Path("/tmp/out"),
+        anchor_ts="2026-03-07T23:00:00Z",
+        rebuild_signals_window=True,
+        rebuild_step_hours=6.0,
+        rebuild_market_limit=123,
+        rebuild_ingest_limit=45,
+    )
+
+    assert cmd[:2] == [sys.executable, "/tmp/sx12.py"]
+    assert "--rebuild-signals-window" in cmd
+    assert "--rebuild-step-hours" in cmd
+    assert "6.0" in cmd
+    assert "--rebuild-market-limit" in cmd
+    assert "123" in cmd
+    assert "--rebuild-ingest-limit" in cmd
+    assert "45" in cmd
 
 
 def test_apply_s10_overrides_keeps_base_immutable() -> None:

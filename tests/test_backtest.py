@@ -303,6 +303,43 @@ def test_backtest_metrics_no_trades_are_zero(tmp_path: Path) -> None:
     assert abs(r.worst_trade_return) < 1e-9
 
 
+def test_backtest_engine_accepts_z_suffix_created_at_in_window(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=3.0,
+                rationale="z-suffix-window-check",
+            )
+        ],
+        created_at="2026-02-20T00:10:00Z",
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+    ).run(
+        ["s1"],
+        from_ts="2026-02-20T00:00:00+00:00",
+        to_ts="2026-02-20T01:00:00+00:00",
+    )
+
+    assert report.total_signals == 1
+    assert report.executed_signals == 1
+    assert report.rejected_signals == 0
+
+
 def test_backtest_s9_pair_atomic_guard_rejects_both_legs(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
