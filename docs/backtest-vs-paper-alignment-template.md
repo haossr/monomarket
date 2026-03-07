@@ -6,7 +6,7 @@
 
 - 报告时间：`<YYYY-MM-DD HH:MM TZ>`
 - 对齐窗口：`<from_ts>` ~ `<to_ts>`
-- 策略集合：`<s1,s2,s4,s8>`
+- 策略集合：`<s1,s2,s4,s8,s9,s10>`
 - 版本：
   - git commit: `<sha>`
   - backtest schema_version: `<x.y>`

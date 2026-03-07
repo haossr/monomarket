@@ -4,7 +4,7 @@ Monomarket 是一个面向二元市场（Polymarket 风格）的可运行交易 
 
 - 可稳定抓取数据（gamma/data/clob，含分级重试、source 级熔断与 half-open 探测）
 - 统一归一化存储（SQLite）
-- 信号引擎（可插拔，优先 S1/S2/S4/S8）
+- 信号引擎（可插拔，优先 S1/S2/S4/S8/S9/S10）
 - 执行路由（paper/live 双模式，默认 paper）
 - 统一风控（全局止损、单策略上限、单事件上限、熔断）
 - PnL + 指标报表
@@ -34,8 +34,8 @@ monomarket ingest --source all --limit 300 --incremental
 monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-top-movers --error-share-top-k 3 --error-share-min-share 0.05 --error-share-min-count 2 --error-share-min-runs-with-error 1 --error-share-min-total-runs 5 --error-share-min-source-bucket-total 10 --error-sample-limit 5
 # 若过滤条件过严导致 share 为空，CLI 会提示 "error share empty after filters" 并回显 active_filters（含 `first_relax=...` 首个建议放宽项与 `suggest_next=...` 推荐步进，例如 `min_total_runs=3->2`；建议先放宽 min_share/min_count，再放宽 min_total_runs 与 min_source_bucket_total）
 
-# 3) 生成策略信号（S1/S2/S4/S8）
-monomarket generate-signals --strategies s1,s2,s4,s8
+# 3) 生成策略信号（S1/S2/S4/S8/S9/S10）
+monomarket generate-signals --strategies s1,s2,s4,s8,s9,s10
 
 # 4) 查看候选信号
 monomarket list-signals --status new --limit 20
@@ -52,7 +52,7 @@ monomarket live-sync --limit 100
 monomarket live-cancel <local_order_id>
 
 # 7) 时间窗口回测（按策略/事件归因 + 回放账本）
-monomarket backtest --strategies s1,s2,s4,s8 \
+monomarket backtest --strategies s1,s2,s4,s8,s9,s10 \
   --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z \
   --partial-fill --liquidity-full-fill 1000 --min-fill-ratio 0.10 \
   --fill-probability --min-fill-probability 0.05 \
@@ -75,7 +75,7 @@ JSON 额外包含 `execution_config` / `risk_config` 快照，用于可重复回
 多样本滚动回测（用于策略稳定性观察）：
 
 ```bash
-monomarket backtest-rolling --strategies s1,s2,s4,s8 \
+monomarket backtest-rolling --strategies s1,s2,s4,s8,s9,s10 \
   --from 2026-02-20T00:00:00Z --to 2026-02-23T00:00:00Z \
   --window-hours 24 --step-hours 12 \
   --out-json artifacts/backtest/rolling-summary.json

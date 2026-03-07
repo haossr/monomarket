@@ -1827,3 +1827,14 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "${CYCLE_CLEAR_ARGS[@]-}" in content
     assert "${CYCLE_REBUILD_ARGS[@]-}" in content
     assert '--rolling-json "$ROLLING_JSON"' in content
+
+
+def test_backtest_cycle_defaults_include_s9_s10() -> None:
+    content = (ROOT / "scripts" / "backtest_cycle.sh").read_text()
+    assert 'STRATEGIES="s1,s2,s4,s8,s9,s10"' in content
+    assert "generate-signals(S1,S2,S4,S8,S9,S10)" in content
+
+
+def test_nightly_rolling_includes_s9_s10() -> None:
+    content = BASH_SCRIPT_PATH.read_text()
+    assert '--strategies "s1,s2,s4,s8,s9,s10" \\' in content

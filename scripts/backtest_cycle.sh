@@ -9,7 +9,7 @@ MARKET_LIMIT="2000"
 INGEST_LIMIT="300"
 CONFIG_PATH="configs/config.yaml"
 OUTPUT_DIR=""
-STRATEGIES="s1,s2,s4,s8"
+STRATEGIES="s1,s2,s4,s8,s9,s10"
 FROM_TS=""
 TO_TS=""
 CLEAR_SIGNALS_WINDOW="0"
@@ -21,7 +21,7 @@ usage() {
 Usage: bash scripts/backtest_cycle.sh [options]
 
 Run one reusable backtest cycle:
-  init-db -> ingest(gamma, incremental) -> generate-signals(S1,S2,S4,S8) -> backtest
+  init-db -> ingest(gamma, incremental) -> generate-signals(S1,S2,S4,S8,S9,S10) -> backtest
 
 Options:
   --lookback-hours <float>   Lookback window in hours (default: 24)

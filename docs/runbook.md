@@ -45,7 +45,7 @@ monomarket ingest-health --run-window 20 --error-trend-window 20 --error-trend-t
 ## 3) 生成与查看信号
 
 ```bash
-monomarket generate-signals --strategies s1,s2,s4,s8
+monomarket generate-signals --strategies s1,s2,s4,s8,s9,s10
 monomarket list-signals --status new --limit 30
 ```
 
@@ -131,7 +131,7 @@ bash scripts/paper_soak_status.sh
 ## 8) 回测（signals replay + 策略/事件归因）
 
 ```bash
-monomarket backtest --strategies s1,s2,s4,s8 \
+monomarket backtest --strategies s1,s2,s4,s8,s9,s10 \
   --from 2026-02-20T00:00:00Z --to 2026-02-22T23:59:59Z \
   --partial-fill --liquidity-full-fill 1000 --min-fill-ratio 0.10 \
   --fill-probability --min-fill-probability 0.05 \
@@ -164,7 +164,7 @@ monomarket backtest --strategies s1,s2,s4,s8 \
 滚动窗口多样本回测（稳定性观察）：
 
 ```bash
-monomarket backtest-rolling --strategies s1,s2,s4,s8 \
+monomarket backtest-rolling --strategies s1,s2,s4,s8,s9,s10 \
   --from 2026-02-20T00:00:00Z --to 2026-02-23T00:00:00Z \
   --window-hours 24 --step-hours 12 \
   --out-json artifacts/backtest/rolling-summary.json

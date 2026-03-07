@@ -240,7 +240,7 @@ fi
 
 echo "[nightly] rolling backtest window=${ROLLING_FROM_TS} -> ${ROLLING_TO_TS}"
 monomarket backtest-rolling \
-  --strategies "s1,s2,s4,s8" \
+  --strategies "s1,s2,s4,s8,s9,s10" \
   --from "$ROLLING_FROM_TS" \
   --to "$ROLLING_TO_TS" \
   --window-hours "$ROLLING_WINDOW_HOURS" \
