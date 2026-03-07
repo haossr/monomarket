@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -703,6 +704,7 @@ def generate_signals(
             strategy_reject_rows: list[tuple[str, str, int]] = []
             strategy_event_reject_rows: list[tuple[str, str, str, int]] = []
             strategy_event_top_k_hints: list[str] = []
+            strategy_pricing_rows: list[tuple[str, dict[str, Any]]] = []
             for strategy, diag in sorted(by_strategy_diag.items()):
                 if not isinstance(diag, dict):
                     continue
@@ -727,6 +729,10 @@ def generate_signals(
                         strategy_event_top_k_hints.append(f"{strategy}={top_k_label}")
                     except ValueError:
                         pass
+
+                pricing_consistency = strategy_diag.get("pricing_consistency")
+                if isinstance(pricing_consistency, dict):
+                    strategy_pricing_rows.append((str(strategy), pricing_consistency))
 
                 if isinstance(reject_reasons_by_event, dict):
                     for event_id, event_reasons in sorted(reject_reasons_by_event.items()):
@@ -765,6 +771,47 @@ def generate_signals(
                 for strategy_name, event_id, reason, count in strategy_event_reject_rows:
                     event_reject_tb.add_row(strategy_name, event_id, reason, str(count))
                 console.print(event_reject_tb)
+
+            if strategy_pricing_rows:
+                pricing_tb = Table(title="Strategy pricing consistency diagnostics")
+                pricing_tb.add_column("strategy")
+                pricing_tb.add_column("price_floor")
+                pricing_tb.add_column("pairs_priced")
+                pricing_tb.add_column("floor_adj_pairs")
+                pricing_tb.add_column("tiny_pairs")
+                pricing_tb.add_column("avg_pre_floor_gross(bps)")
+                pricing_tb.add_column("avg_post_floor_gross(bps)")
+                pricing_tb.add_column("avg_post_slip_gross(bps)")
+                pricing_tb.add_column("avg_post_slip_eff(bps)")
+                pricing_tb.add_column("reject_post_floor")
+                pricing_tb.add_column("reject_post_slip")
+                pricing_tb.add_column("reject_eff_below_min")
+                for strategy_name, diag in strategy_pricing_rows:
+                    pricing_tb.add_row(
+                        strategy_name,
+                        f"{float(diag.get('price_floor', 0.01) or 0.01):.3f}",
+                        str(int(float(diag.get("pair_candidates_priced", 0) or 0))),
+                        str(int(float(diag.get("pairs_with_floor_adjustment", 0) or 0))),
+                        str(int(float(diag.get("tiny_price_pairs", 0) or 0))),
+                        f"{float(diag.get('avg_pre_floor_gross_edge_bps', 0.0) or 0.0):.1f}",
+                        f"{float(diag.get('avg_post_floor_gross_edge_bps', 0.0) or 0.0):.1f}",
+                        f"{float(diag.get('avg_post_slippage_gross_edge_bps', 0.0) or 0.0):.1f}",
+                        f"{float(diag.get('avg_post_slippage_effective_edge_bps', 0.0) or 0.0):.1f}",
+                        str(int(float(diag.get("filtered_post_floor_non_positive", 0) or 0))),
+                        str(int(float(diag.get("filtered_post_slippage_non_positive", 0) or 0))),
+                        str(
+                            int(
+                                float(
+                                    diag.get(
+                                        "filtered_post_slippage_effective_edge_below_min",
+                                        0,
+                                    )
+                                    or 0
+                                )
+                            )
+                        ),
+                    )
+                console.print(pricing_tb)
 
 
 @app.command("list-signals")
