@@ -58,6 +58,34 @@ def test_s10_generates_buy_conversion_basket() -> None:
     assert all(float(s.payload.get("effective_edge_bps", 0.0)) > 0 for s in signals)
 
 
+def test_s10_emits_basket_atomic_metadata() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(1, event_id="e1", canonical_id="c1", yes=0.28, liq=900),
+        _market(2, event_id="e1", canonical_id="c2", yes=0.31, liq=850),
+        _market(3, event_id="e1", canonical_id="c3", yes=0.34, liq=870),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 10.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_order_notional": 8.0,
+        },
+    )
+
+    assert len(signals) == 3
+    batch_ids = {str(s.payload.get("basket_batch_id", "")) for s in signals}
+    assert len(batch_ids) == 1
+    assert all(bool(s.payload.get("basket_atomic", False)) for s in signals)
+    assert all(int(s.payload.get("basket_expected_legs", 0)) == 3 for s in signals)
+    assert {int(s.payload.get("leg_index", -1)) for s in signals} == {0, 1, 2}
+
+
 def test_s10_cost_model_blocks_weak_conversion() -> None:
     strategy = S10NegRiskConversionArb()
     markets = [

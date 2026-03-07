@@ -418,6 +418,283 @@ def test_backtest_s9_pair_atomic_guard_rejects_both_legs(tmp_path: Path) -> None
     assert all(not row.risk_allowed for row in report.replay)
 
 
+def test_backtest_s10_basket_atomic_guard_rejects_incomplete_legs(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    snapshot_ts = "2026-02-20T00:00:00+00:00"
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="bm1",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-basket",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.28,
+                no_price=0.72,
+                mid_price=0.28,
+            ),
+            MarketView(
+                market_id="bm2",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-basket",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=950,
+                volume=100,
+                yes_price=0.31,
+                no_price=0.69,
+                mid_price=0.31,
+            ),
+            MarketView(
+                market_id="bm3",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-basket",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=920,
+                volume=100,
+                yes_price=0.34,
+                no_price=0.66,
+                mid_price=0.34,
+            ),
+        ],
+        snapshot_at=snapshot_ts,
+    )
+
+    created_at = "2026-02-20T00:10:00+00:00"
+    basket_payload_common = {
+        "basket_atomic": True,
+        "basket_id": "basket-1",
+        "basket_batch_id": "basket-1",
+        "basket_expected_legs": 3,
+        "direction": "buy_conversion",
+    }
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s10",
+                market_id="bm1",
+                event_id="e-basket",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.28,
+                size_hint=5.0,
+                rationale="basket-leg-0",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 0,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "bm1",
+                        "price": 0.28,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+            Signal(
+                strategy="s10",
+                market_id="bm2",
+                event_id="e-basket",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.31,
+                size_hint=5.0,
+                rationale="basket-leg-1",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 1,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "bm2",
+                        "price": 0.31,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+        ],
+        created_at=created_at,
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+    ).run(["s10"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T01:00:00Z")
+
+    assert report.total_signals == 2
+    assert report.executed_signals == 0
+    assert report.rejected_signals == 2
+    assert len(report.replay) == 2
+    reasons = {row.risk_reason for row in report.replay}
+    assert "s10 basket atomic guard: incomplete basket legs (2/3)" in reasons
+    assert all(not row.risk_allowed for row in report.replay)
+
+
+def test_backtest_s10_basket_atomic_guard_rejects_when_any_leg_has_no_liquidity(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    snapshot_ts = "2026-02-20T00:00:00+00:00"
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="cm1",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-convert",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.28,
+                no_price=0.72,
+                mid_price=0.28,
+            ),
+            MarketView(
+                market_id="cm2",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-convert",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=0,
+                volume=100,
+                yes_price=0.31,
+                no_price=0.69,
+                mid_price=0.31,
+            ),
+            MarketView(
+                market_id="cm3",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-convert",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=900,
+                volume=100,
+                yes_price=0.34,
+                no_price=0.66,
+                mid_price=0.34,
+            ),
+        ],
+        snapshot_at=snapshot_ts,
+    )
+
+    created_at = "2026-02-20T00:10:00+00:00"
+    basket_payload_common = {
+        "basket_atomic": True,
+        "basket_id": "basket-2",
+        "basket_batch_id": "basket-2",
+        "basket_expected_legs": 3,
+        "direction": "buy_conversion",
+    }
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s10",
+                market_id="cm1",
+                event_id="e-convert",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.28,
+                size_hint=5.0,
+                rationale="basket-leg-0",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 0,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "cm1",
+                        "price": 0.28,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+            Signal(
+                strategy="s10",
+                market_id="cm2",
+                event_id="e-convert",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.31,
+                size_hint=5.0,
+                rationale="basket-leg-1",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 1,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "cm2",
+                        "price": 0.31,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+            Signal(
+                strategy="s10",
+                market_id="cm3",
+                event_id="e-convert",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.34,
+                size_hint=5.0,
+                rationale="basket-leg-2",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 2,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "cm3",
+                        "price": 0.34,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+        ],
+        created_at=created_at,
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(
+            slippage_bps=0.0,
+            fee_bps=0.0,
+            enable_partial_fill=True,
+            liquidity_full_fill=1000.0,
+            min_fill_ratio=0.0,
+        ),
+    ).run(["s10"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T01:00:00Z")
+
+    assert report.total_signals == 3
+    assert report.executed_signals == 0
+    assert report.rejected_signals == 3
+    assert len(report.replay) == 3
+    reasons = {row.risk_reason for row in report.replay}
+    assert "s10 basket atomic guard: basket leg has no executable liquidity" in reasons
+    assert all(not row.risk_allowed for row in report.replay)
+
+
 def test_backtest_partial_fill_model(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))

@@ -239,17 +239,26 @@ class BacktestEngine:
 
         execution_batches: list[list[dict[str, Any]]] = []
         pending_s9_batches: dict[str, dict[str, Any]] = {}
+        pending_s10_batches: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
             pair_batch_key = self._s9_pair_batch_key(row)
-            if pair_batch_key is None:
-                execution_batches.append([row])
+            if pair_batch_key is not None:
+                pending = pending_s9_batches.pop(pair_batch_key, None)
+                if pending is None:
+                    pending_s9_batches[pair_batch_key] = row
+                else:
+                    execution_batches.append([pending, row])
                 continue
-            pending = pending_s9_batches.pop(pair_batch_key, None)
-            if pending is None:
-                pending_s9_batches[pair_batch_key] = row
-            else:
-                execution_batches.append([pending, row])
+
+            basket_batch_key = self._s10_basket_batch_key(row)
+            if basket_batch_key is not None:
+                pending_s10_batches[basket_batch_key].append(row)
+                continue
+
+            execution_batches.append([row])
+
         execution_batches.extend([[row] for row in pending_s9_batches.values()])
+        execution_batches.extend(pending_s10_batches.values())
         execution_batches.sort(key=lambda batch: (str(batch[0]["created_at"]), int(batch[0]["id"])))
 
         def _prepare_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -533,6 +542,15 @@ class BacktestEngine:
                     )
                     continue
 
+                basket_batch_key = self._s10_basket_batch_key(row)
+                if basket_batch_key is not None:
+                    _append_rejection(
+                        prep,
+                        "s10 basket atomic guard: missing basket legs",
+                        count_for_breaker=False,
+                    )
+                    continue
+
                 risk_decision = prep["risk_decision"]
                 if not risk_decision.ok:
                     _append_rejection(
@@ -617,6 +635,77 @@ class BacktestEngine:
                         continue
 
                 for prep in pair_preps:
+                    _execute_prepared(prep)
+                continue
+
+            s10_batch_key = self._s10_basket_batch_key(batch[0])
+            if s10_batch_key is not None and all(
+                self._s10_basket_batch_key(row) == s10_batch_key for row in batch
+            ):
+                ordered_rows = sorted(batch, key=lambda r: int(r["id"]))
+                consistent, reject_reason = self._s10_basket_rows_consistent(ordered_rows)
+                basket_preps = [_prepare_row(row) for row in ordered_rows]
+
+                if not consistent:
+                    for prep in basket_preps:
+                        _append_rejection(prep, reject_reason, count_for_breaker=False)
+                    continue
+
+                first_risk_failure = next(
+                    (prep for prep in basket_preps if not prep["risk_decision"].ok),
+                    None,
+                )
+                if first_risk_failure is not None:
+                    reason = str(first_risk_failure["risk_decision"].reason)
+                    count_for_breaker = self._breaker_counts_rejection_reason(reason)
+                    for prep in basket_preps:
+                        _append_rejection(prep, reason, count_for_breaker=count_for_breaker)
+                    continue
+
+                if any(float(prep["executed_qty"]) <= 1e-12 for prep in basket_preps):
+                    for prep in basket_preps:
+                        _append_rejection(
+                            prep,
+                            "s10 basket atomic guard: basket leg has no executable liquidity",
+                            count_for_breaker=False,
+                        )
+                    continue
+
+                total_basket_notional = sum(
+                    float(prep["risk_decision"].notional) for prep in basket_preps
+                )
+                strategy_notional_before = float(
+                    basket_preps[0]["risk_decision"].strategy_notional_before
+                )
+                if (
+                    strategy_notional_before + total_basket_notional
+                    > self.risk.max_strategy_notional
+                ):
+                    reason = (
+                        "strategy notional limit exceeded (basket-atomic): "
+                        f"{strategy_notional_before + total_basket_notional:.2f} "
+                        f"> {self.risk.max_strategy_notional:.2f}"
+                    )
+                    for prep in basket_preps:
+                        _append_rejection(prep, reason, count_for_breaker=False)
+                    continue
+
+                event_ids = {str(prep["event_id"]) for prep in basket_preps}
+                if len(event_ids) == 1:
+                    event_notional_before = float(
+                        basket_preps[0]["risk_decision"].event_notional_before
+                    )
+                    if event_notional_before + total_basket_notional > self.risk.max_event_notional:
+                        reason = (
+                            "event notional limit exceeded (basket-atomic): "
+                            f"{event_notional_before + total_basket_notional:.2f} "
+                            f"> {self.risk.max_event_notional:.2f}"
+                        )
+                        for prep in basket_preps:
+                            _append_rejection(prep, reason, count_for_breaker=False)
+                        continue
+
+                for prep in basket_preps:
                     _execute_prepared(prep)
                 continue
 
@@ -846,6 +935,92 @@ class BacktestEngine:
         token_b, _, _ = cls._signal_execution_fields(second)
         if {token_a, token_b} != {OUTCOME_TOKEN_YES, OUTCOME_TOKEN_NO}:
             return False, "s9 pair atomic guard: legs must include YES and NO"
+
+        return True, "ok"
+
+    @staticmethod
+    def _s10_basket_batch_key(row: dict[str, Any]) -> str | None:
+        if str(row.get("strategy", "")).lower() != "s10":
+            return None
+
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        if not bool(payload.get("basket_atomic", False)):
+            return None
+
+        basket_id = str(payload.get("basket_batch_id") or payload.get("basket_id") or "").strip()
+        if not basket_id:
+            return None
+
+        created_at = str(row.get("created_at", "")).strip()
+        side = str(row.get("side", "")).strip().lower()
+        if not created_at or not side:
+            return None
+
+        return f"{created_at}|{side}|{basket_id}"
+
+    @staticmethod
+    def _s10_basket_rows_consistent(batch_rows: list[dict[str, Any]]) -> tuple[bool, str]:
+        if len(batch_rows) < 2:
+            return False, "s10 basket atomic guard: expected at least 2 basket legs"
+
+        first = batch_rows[0]
+        first_side = str(first.get("side", "")).lower()
+        first_event = str(first.get("event_id", "")).strip()
+        first_payload = first.get("payload") if isinstance(first.get("payload"), dict) else {}
+        if not isinstance(first_payload, dict):
+            return False, "s10 basket atomic guard: invalid basket payload"
+
+        first_batch_id = str(
+            first_payload.get("basket_batch_id") or first_payload.get("basket_id") or ""
+        ).strip()
+        if not first_batch_id:
+            return False, "s10 basket atomic guard: missing basket identifier"
+
+        expected_legs = int(float(first_payload.get("basket_expected_legs", len(batch_rows)) or 0))
+        if expected_legs <= 1:
+            return False, "s10 basket atomic guard: invalid basket_expected_legs"
+        if len(batch_rows) != expected_legs:
+            return (
+                False,
+                f"s10 basket atomic guard: incomplete basket legs ({len(batch_rows)}/{expected_legs})",
+            )
+
+        seen_leg_indexes: set[int] = set()
+        for row in batch_rows:
+            if str(row.get("strategy", "")).lower() != "s10":
+                return False, "s10 basket atomic guard: inconsistent strategy legs"
+
+            side = str(row.get("side", "")).lower()
+            if side != first_side:
+                return False, "s10 basket atomic guard: inconsistent basket side"
+
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            if not isinstance(payload, dict):
+                return False, "s10 basket atomic guard: invalid basket payload"
+
+            batch_id = str(payload.get("basket_batch_id") or payload.get("basket_id") or "").strip()
+            if batch_id != first_batch_id:
+                return False, "s10 basket atomic guard: mismatched basket_id"
+
+            event_id = str(row.get("event_id", "")).strip()
+            if event_id != first_event:
+                return False, "s10 basket atomic guard: mismatched event_id"
+
+            try:
+                leg_index = int(payload.get("leg_index", -1))
+            except (TypeError, ValueError):
+                return False, "s10 basket atomic guard: invalid leg_index"
+            if leg_index < 0 or leg_index >= expected_legs:
+                return False, "s10 basket atomic guard: leg_index out of expected range"
+            if leg_index in seen_leg_indexes:
+                return False, "s10 basket atomic guard: duplicated leg_index"
+            seen_leg_indexes.add(leg_index)
+
+            token, _, _ = BacktestEngine._signal_execution_fields(row)
+            if token != OUTCOME_TOKEN_YES:
+                return False, "s10 basket atomic guard: legs must target YES token"
 
         return True, "ok"
 
