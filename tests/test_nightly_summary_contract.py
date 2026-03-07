@@ -62,8 +62,12 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "experiment_reason=",
         "s9_present=",
         "s9_pnl=",
+        "s9_activity_hint=",
+        "s9_top_reject_reason=",
         "s10_present=",
         "s10_pnl=",
+        "s10_activity_hint=",
+        "s10_top_reject_reason=",
         "s9_minus_s10_pnl=",
         "negative_strategies=",
         "worst_negative_strategy=",
@@ -451,6 +455,10 @@ def test_nightly_summary_surfaces_s9_s10_focus_metrics(tmp_path: Path) -> None:
     assert "s10_present=true" in line
     assert "s10_pnl=-0.2500" in line
     assert "s10_trades=2" in line
+    assert "s9_activity_hint=active" in line
+    assert "s10_activity_hint=active" in line
+    assert "s9_top_reject_reason=none" in line
+    assert "s10_top_reject_reason=none" in line
     assert "s9_minus_s10_pnl=1.7500" in line
 
     sidecar = json.loads(summary_json.read_text())
@@ -469,6 +477,12 @@ def test_nightly_summary_surfaces_s9_s10_focus_metrics(tmp_path: Path) -> None:
     assert int(s9["trade_count"]) == 3
     assert int(s9["closed_sample_count"]) == 2
     assert int(s9["mtm_sample_count"]) == 3
+    s9_hint = s9["activity_hint"]
+    assert s9_hint["hint"] == "active"
+    assert int(s9_hint["replay_rows"]) == 0
+    assert int(s9_hint["rejected_rows"]) == 0
+    assert abs(float(s9_hint["reject_share"])) < 1e-12
+    assert s9_hint["top_reject_reason"] == "none"
 
     s10 = focus["s10"]
     assert bool(s10["present"]) is True
@@ -477,6 +491,126 @@ def test_nightly_summary_surfaces_s9_s10_focus_metrics(tmp_path: Path) -> None:
     assert int(s10["trade_count"]) == 2
     assert int(s10["closed_sample_count"]) == 2
     assert int(s10["mtm_sample_count"]) == 2
+    s10_hint = s10["activity_hint"]
+    assert s10_hint["hint"] == "active"
+    assert int(s10_hint["replay_rows"]) == 0
+    assert int(s10_hint["rejected_rows"]) == 0
+    assert abs(float(s10_hint["reject_share"])) < 1e-12
+    assert s10_hint["top_reject_reason"] == "none"
+
+
+def test_nightly_summary_surfaces_s9_s10_no_activity_hints(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T02:00:00Z",
+        "total_signals": 6,
+        "executed_signals": 0,
+        "rejected_signals": 6,
+        "results": [
+            {"strategy": "s9", "pnl": 0.0, "trade_count": 0},
+            {"strategy": "s10", "pnl": 0.0, "trade_count": 0},
+        ],
+        "replay": [
+            {
+                "strategy": "s9",
+                "risk_allowed": False,
+                "risk_reason": "strategy notional limit exceeded: 1010 > 1000",
+            },
+            {
+                "strategy": "s9",
+                "risk_allowed": False,
+                "risk_reason": "strategy notional limit exceeded: 1015 > 1000",
+            },
+            {
+                "strategy": "s10",
+                "risk_allowed": False,
+                "risk_reason": "circuit breaker open: rejected=10, threshold=5",
+            },
+            {
+                "strategy": "s10",
+                "risk_allowed": True,
+                "risk_reason": "ok",
+            },
+        ],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 0.0,
+            "positive_window_rate": 0.0,
+            "empty_window_count": 1,
+            "range_hours": 2,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "s9_activity_hint=all_rows_rejected" in line
+    assert "s9_replay_rows=2" in line
+    assert "s9_rejected_rows=2" in line
+    assert "s9_reject_share=100.00%" in line
+    assert "s9_top_reject_reason=strategy notional limit exceeded:2" in line
+
+    assert "s10_activity_hint=partial_rows_rejected" in line
+    assert "s10_replay_rows=2" in line
+    assert "s10_rejected_rows=1" in line
+    assert "s10_reject_share=50.00%" in line
+    assert "s10_top_reject_reason=circuit breaker open:1" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+
+    focus = sidecar["strategy_focus"]
+    s9_hint = focus["s9"]["activity_hint"]
+    assert s9_hint["hint"] == "all_rows_rejected"
+    assert int(s9_hint["replay_rows"]) == 2
+    assert int(s9_hint["rejected_rows"]) == 2
+    assert abs(float(s9_hint["reject_share"]) - 1.0) < 1e-12
+    assert s9_hint["top_reject_reason"] == "strategy notional limit exceeded:2"
+
+    s10_hint = focus["s10"]["activity_hint"]
+    assert s10_hint["hint"] == "partial_rows_rejected"
+    assert int(s10_hint["replay_rows"]) == 2
+    assert int(s10_hint["rejected_rows"]) == 1
+    assert abs(float(s10_hint["reject_share"]) - 0.5) < 1e-12
+    assert s10_hint["top_reject_reason"] == "circuit breaker open:1"
 
 
 def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> None:

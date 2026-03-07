@@ -265,6 +265,100 @@ def _strategy_focus_metrics(
     return summary
 
 
+def _strategy_focus_activity_hints(
+    payload: dict[str, Any],
+    *,
+    focus_metrics: dict[str, dict[str, Any]],
+    strategies: tuple[str, ...] = FOCUS_STRATEGIES,
+) -> dict[str, dict[str, Any]]:
+    replay_obj = payload.get("replay")
+    replay_rows = replay_obj if isinstance(replay_obj, list) else []
+
+    stats: dict[str, dict[str, Any]] = {
+        strategy: {
+            "replay_rows": 0,
+            "rejected_rows": 0,
+            "reason_counts": {},
+        }
+        for strategy in strategies
+    }
+
+    for row in replay_rows:
+        if not isinstance(row, dict):
+            continue
+        strategy_key = str(row.get("strategy") or "").strip().lower()
+        if not strategy_key or strategy_key not in stats:
+            continue
+
+        item = stats[strategy_key]
+        item["replay_rows"] = int(item.get("replay_rows", 0)) + 1
+
+        risk_allowed_raw = row.get("risk_allowed")
+        risk_allowed = True if risk_allowed_raw is None else bool(risk_allowed_raw)
+        risk_reason_raw = str(row.get("risk_reason") or "").strip()
+        is_rejected = (not risk_allowed) or (
+            risk_reason_raw != "" and risk_reason_raw.lower() != "ok"
+        )
+        if not is_rejected:
+            continue
+
+        item["rejected_rows"] = int(item.get("rejected_rows", 0)) + 1
+        reason = normalize_reject_reason(risk_reason_raw) if risk_reason_raw else "unknown"
+        reason_counts = item.get("reason_counts")
+        if isinstance(reason_counts, dict):
+            reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+
+    hints: dict[str, dict[str, Any]] = {}
+    for strategy in strategies:
+        metric = focus_metrics.get(strategy, {})
+        active = bool(metric.get("active", False))
+        trade_count = int(_f(metric.get("trade_count")))
+
+        item = stats.get(strategy, {})
+        replay_count = int(_f(item.get("replay_rows")))
+        rejected_count = int(_f(item.get("rejected_rows")))
+        reject_share = (rejected_count / replay_count) if replay_count > 0 else 0.0
+
+        reason_counts = item.get("reason_counts")
+        top_reject_reason = "none"
+        if isinstance(reason_counts, dict) and reason_counts:
+            top_reject_reason, _ = format_reject_top(
+                reason_counts,
+                top_k=1,
+                delimiter=ROLLING_REJECT_TOP_DELIMITER,
+                normalize=True,
+            )
+
+        if active or trade_count > 0:
+            hint = "active"
+        elif replay_count <= 0:
+            hint = "no_replay_rows"
+        elif rejected_count <= 0:
+            hint = "no_risk_rejects"
+        elif rejected_count >= replay_count:
+            hint = "all_rows_rejected"
+        else:
+            hint = "partial_rows_rejected"
+
+        hints[strategy] = {
+            "strategy": strategy,
+            "hint": hint,
+            "replay_rows": replay_count,
+            "rejected_rows": rejected_count,
+            "reject_share": reject_share,
+            "top_reject_reason": top_reject_reason,
+            "text": (
+                f"{strategy}_activity_hint={hint} "
+                f"{strategy}_replay_rows={replay_count} "
+                f"{strategy}_rejected_rows={rejected_count} "
+                f"{strategy}_reject_share={reject_share:.2%} "
+                f"{strategy}_top_reject_reason={top_reject_reason}"
+            ),
+        }
+
+    return hints
+
+
 def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
     executed_signals = int(_f(payload.get("executed_signals")))
     if executed_signals <= 0:
@@ -618,6 +712,20 @@ def build_summary_bundle(
     strategy_focus_s10 = strategy_focus_info.get("s10", {})
     strategy_focus_s9_text = str(strategy_focus_s9.get("text") or "s9_present=false s9_pnl=n/a")
     strategy_focus_s10_text = str(strategy_focus_s10.get("text") or "s10_present=false s10_pnl=n/a")
+    strategy_focus_activity_hints = _strategy_focus_activity_hints(
+        payload,
+        focus_metrics=strategy_focus_info,
+    )
+    strategy_focus_s9_activity_hint = strategy_focus_activity_hints.get("s9", {})
+    strategy_focus_s10_activity_hint = strategy_focus_activity_hints.get("s10", {})
+    strategy_focus_s9_activity_hint_text = str(
+        strategy_focus_s9_activity_hint.get("text")
+        or "s9_activity_hint=no_data s9_replay_rows=0 s9_rejected_rows=0 s9_reject_share=0.00% s9_top_reject_reason=none"
+    )
+    strategy_focus_s10_activity_hint_text = str(
+        strategy_focus_s10_activity_hint.get("text")
+        or "s10_activity_hint=no_data s10_replay_rows=0 s10_rejected_rows=0 s10_reject_share=0.00% s10_top_reject_reason=none"
+    )
     strategy_focus_pnl_diff_s9_minus_s10 = float(
         _f(strategy_focus_s9.get("pnl")) - _f(strategy_focus_s10.get("pnl"))
     )
@@ -913,8 +1021,8 @@ def build_summary_bundle(
         f"edge_gate_fail={edge_gate_total_fail} "
         f"edge_gate_pass_rate={edge_gate_pass_rate:.2%} "
         f"edge_gate_top={edge_gate_by_strategy_top} "
-        f"| {strategy_focus_s9_text} "
-        f"| {strategy_focus_s10_text} "
+        f"| {strategy_focus_s9_text} {strategy_focus_s9_activity_hint_text} "
+        f"| {strategy_focus_s10_text} {strategy_focus_s10_activity_hint_text} "
         f"s9_minus_s10_pnl={strategy_focus_pnl_diff_s9_minus_s10:.4f} "
         f"| {best_text} "
         f"best_strategy_basis={best_strategy_basis} "
@@ -961,7 +1069,7 @@ def build_summary_bundle(
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
         "schema_note_version": "1.0",
-        "schema_note": "best is structured object; strategy_focus surfaces S9/S10 snapshot metrics; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (share + temporal coverage + experiment_interpretable/reason) for machine parsing",
+        "schema_note": "best is structured object; strategy_focus surfaces S9/S10 snapshot metrics + activity_hint diagnostics; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (share + temporal coverage + experiment_interpretable/reason) for machine parsing",
         "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
@@ -1015,6 +1123,16 @@ def build_summary_bundle(
                 "closed_sample_count": int(_f(strategy_focus_s9.get("closed_sample_count"))),
                 "mtm_winrate": float(_f(strategy_focus_s9.get("mtm_winrate"))),
                 "mtm_sample_count": int(_f(strategy_focus_s9.get("mtm_sample_count"))),
+                "activity_hint": {
+                    "hint": str(strategy_focus_s9_activity_hint.get("hint", "no_data")),
+                    "replay_rows": int(_f(strategy_focus_s9_activity_hint.get("replay_rows"))),
+                    "rejected_rows": int(_f(strategy_focus_s9_activity_hint.get("rejected_rows"))),
+                    "reject_share": float(_f(strategy_focus_s9_activity_hint.get("reject_share"))),
+                    "top_reject_reason": str(
+                        strategy_focus_s9_activity_hint.get("top_reject_reason", "none")
+                    ),
+                    "text": str(strategy_focus_s9_activity_hint.get("text") or ""),
+                },
                 "text": str(strategy_focus_s9.get("text") or ""),
             },
             "s10": {
@@ -1027,6 +1145,16 @@ def build_summary_bundle(
                 "closed_sample_count": int(_f(strategy_focus_s10.get("closed_sample_count"))),
                 "mtm_winrate": float(_f(strategy_focus_s10.get("mtm_winrate"))),
                 "mtm_sample_count": int(_f(strategy_focus_s10.get("mtm_sample_count"))),
+                "activity_hint": {
+                    "hint": str(strategy_focus_s10_activity_hint.get("hint", "no_data")),
+                    "replay_rows": int(_f(strategy_focus_s10_activity_hint.get("replay_rows"))),
+                    "rejected_rows": int(_f(strategy_focus_s10_activity_hint.get("rejected_rows"))),
+                    "reject_share": float(_f(strategy_focus_s10_activity_hint.get("reject_share"))),
+                    "top_reject_reason": str(
+                        strategy_focus_s10_activity_hint.get("top_reject_reason", "none")
+                    ),
+                    "text": str(strategy_focus_s10_activity_hint.get("text") or ""),
+                },
                 "text": str(strategy_focus_s10.get("text") or ""),
             },
         },
