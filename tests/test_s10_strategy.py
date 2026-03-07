@@ -460,3 +460,33 @@ def test_s10_floor_applied_to_tiny_leg_targets_and_payload() -> None:
     assert int(float(pricing_diag.get("pair_candidates_priced", 0.0))) == 1
     assert int(float(pricing_diag.get("tiny_price_pairs", 0.0))) == 1
     assert int(float(pricing_diag.get("pairs_with_floor_adjustment", 0.0))) == 1
+
+
+def test_s10_rejects_when_tiny_price_leg_share_exceeds_cap() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(121, event_id="e-tiny-cap", canonical_id="c1", yes=0.005, liq=1000),
+        _market(122, event_id="e-tiny-cap", canonical_id="c2", yes=0.30, liq=1000),
+        _market(123, event_id="e-tiny-cap", canonical_id="c3", yes=0.33, liq=1000),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "max_abs_deviation": 0.50,
+            "min_effective_edge_bps": 1.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_order_notional": 8.0,
+            "max_tiny_price_leg_share": 0.20,
+        },
+    )
+
+    assert signals == []
+    reject_reasons = strategy.last_diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy_conversion:tiny_price_leg_share_exceeded") == 1
+
+    pricing_diag = strategy.last_diagnostics.get("pricing_consistency", {})
+    assert int(float(pricing_diag.get("filtered_tiny_price_leg_share_exceeded", 0.0))) == 1

@@ -184,6 +184,14 @@ class S10NegRiskConversionArb(Strategy):
         max_leg_total_cost_bps = max(0.0, float(cfg.get("max_leg_total_cost_bps", 95.0)))
         quote_improve = max(0.0, float(cfg.get("quote_improve", 0.0)))
         executable_price_floor = max(0.01, float(cfg.get("executable_price_floor", 0.01)))
+        max_tiny_price_leg_share = min(
+            1.0,
+            max(0.0, float(cfg.get("max_tiny_price_leg_share", 1.0))),
+        )
+        max_floor_adjusted_leg_share = min(
+            1.0,
+            max(0.0, float(cfg.get("max_floor_adjusted_leg_share", 1.0))),
+        )
         allow_sell_conversion = _as_bool(cfg.get("allow_sell_conversion"), False)
         diagnostics_event_top_k = max(0, int(float(cfg.get("diagnostics_event_top_k", 20))))
 
@@ -207,6 +215,8 @@ class S10NegRiskConversionArb(Strategy):
                 "candidate_reject_reasons_by_event_top": {},
                 "pricing_consistency": {
                     "price_floor": executable_price_floor,
+                    "max_tiny_price_leg_share": max_tiny_price_leg_share,
+                    "max_floor_adjusted_leg_share": max_floor_adjusted_leg_share,
                     "pair_candidates_priced": 0,
                     "pairs_with_floor_adjustment": 0,
                     "tiny_price_pairs": 0,
@@ -217,6 +227,8 @@ class S10NegRiskConversionArb(Strategy):
                     "filtered_post_floor_non_positive": 0,
                     "filtered_post_slippage_non_positive": 0,
                     "filtered_post_slippage_effective_edge_below_min": 0,
+                    "filtered_tiny_price_leg_share_exceeded": 0,
+                    "filtered_floor_adjusted_leg_share_exceeded": 0,
                 },
             }
             return []
@@ -254,6 +266,8 @@ class S10NegRiskConversionArb(Strategy):
         pricing_diag_filtered_post_quote_non_positive = 0
         pricing_diag_filtered_post_slippage_non_positive = 0
         pricing_diag_filtered_effective_below_min = 0
+        pricing_diag_filtered_tiny_price_leg_share_exceeded = 0
+        pricing_diag_filtered_floor_adjusted_leg_share_exceeded = 0
 
         for event_id, event_rows in by_event.items():
             if event_id in exclude_event_ids:
@@ -310,6 +324,8 @@ class S10NegRiskConversionArb(Strategy):
                     liquidity_fraction=liquidity_fraction,
                     min_qty=min_qty,
                     executable_price_floor=executable_price_floor,
+                    max_tiny_price_leg_share=max_tiny_price_leg_share,
+                    max_floor_adjusted_leg_share=max_floor_adjusted_leg_share,
                 )
                 if buy_pricing_diag is not None:
                     pricing_diag_count += 1
@@ -343,6 +359,10 @@ class S10NegRiskConversionArb(Strategy):
                     pricing_diag_filtered_post_slippage_non_positive += 1
                 elif buy_emit_reject_reason == "effective_edge_below_min":
                     pricing_diag_filtered_effective_below_min += 1
+                elif buy_emit_reject_reason == "tiny_price_leg_share_exceeded":
+                    pricing_diag_filtered_tiny_price_leg_share_exceeded += 1
+                elif buy_emit_reject_reason == "floor_adjusted_leg_share_exceeded":
+                    pricing_diag_filtered_floor_adjusted_leg_share_exceeded += 1
 
                 if buy_signals:
                     direction_pass["buy_conversion"] += 1
@@ -398,6 +418,8 @@ class S10NegRiskConversionArb(Strategy):
                         liquidity_fraction=liquidity_fraction,
                         min_qty=min_qty,
                         executable_price_floor=executable_price_floor,
+                        max_tiny_price_leg_share=max_tiny_price_leg_share,
+                        max_floor_adjusted_leg_share=max_floor_adjusted_leg_share,
                     )
                     if sell_pricing_diag is not None:
                         pricing_diag_count += 1
@@ -433,6 +455,10 @@ class S10NegRiskConversionArb(Strategy):
                         pricing_diag_filtered_post_slippage_non_positive += 1
                     elif sell_emit_reject_reason == "effective_edge_below_min":
                         pricing_diag_filtered_effective_below_min += 1
+                    elif sell_emit_reject_reason == "tiny_price_leg_share_exceeded":
+                        pricing_diag_filtered_tiny_price_leg_share_exceeded += 1
+                    elif sell_emit_reject_reason == "floor_adjusted_leg_share_exceeded":
+                        pricing_diag_filtered_floor_adjusted_leg_share_exceeded += 1
 
                     if sell_signals:
                         direction_pass["sell_conversion"] += 1
@@ -488,6 +514,8 @@ class S10NegRiskConversionArb(Strategy):
             ),
             "pricing_consistency": {
                 "price_floor": executable_price_floor,
+                "max_tiny_price_leg_share": max_tiny_price_leg_share,
+                "max_floor_adjusted_leg_share": max_floor_adjusted_leg_share,
                 "pair_candidates_priced": pricing_diag_count,
                 "pairs_with_floor_adjustment": pricing_diag_floor_adjusted_baskets,
                 "tiny_price_pairs": pricing_diag_tiny_price_baskets,
@@ -528,6 +556,12 @@ class S10NegRiskConversionArb(Strategy):
                 "filtered_post_slippage_non_positive": pricing_diag_filtered_post_slippage_non_positive,
                 "filtered_post_slippage_effective_edge_below_min": (
                     pricing_diag_filtered_effective_below_min
+                ),
+                "filtered_tiny_price_leg_share_exceeded": (
+                    pricing_diag_filtered_tiny_price_leg_share_exceeded
+                ),
+                "filtered_floor_adjusted_leg_share_exceeded": (
+                    pricing_diag_filtered_floor_adjusted_leg_share_exceeded
                 ),
             },
         }
@@ -677,6 +711,8 @@ class S10NegRiskConversionArb(Strategy):
         liquidity_fraction: float,
         min_qty: float,
         executable_price_floor: float,
+        max_tiny_price_leg_share: float,
+        max_floor_adjusted_leg_share: float,
     ) -> tuple[list[Signal], str | None, _ConversionPricingDiagnostics | None]:
         rows = candidate.rows
         side = "buy" if candidate.direction == "buy_conversion" else "sell"
@@ -784,6 +820,16 @@ class S10NegRiskConversionArb(Strategy):
             tiny_price_legs=tiny_price_legs,
         )
 
+        total_legs = len(rows)
+        tiny_price_leg_share = tiny_price_legs / max(1, total_legs)
+        floor_adjusted_leg_share = floor_adjusted_legs / max(1, total_legs)
+
+        if tiny_price_leg_share > max_tiny_price_leg_share:
+            return [], "tiny_price_leg_share_exceeded", pricing_diag
+
+        if floor_adjusted_leg_share > max_floor_adjusted_leg_share:
+            return [], "floor_adjusted_leg_share_exceeded", pricing_diag
+
         if pre_quote_gross_edge <= 0:
             return [], "non_positive_gross_edge", pricing_diag
 
@@ -877,7 +923,11 @@ class S10NegRiskConversionArb(Strategy):
                 "post_slippage_effective_edge_bps": post_slippage_effective_edge_bps,
                 "price_floor": executable_price_floor,
                 "floor_adjusted_legs": floor_adjusted_legs,
+                "floor_adjusted_leg_share": floor_adjusted_leg_share,
+                "max_floor_adjusted_leg_share": max_floor_adjusted_leg_share,
                 "tiny_price_legs": tiny_price_legs,
+                "tiny_price_leg_share": tiny_price_leg_share,
+                "max_tiny_price_leg_share": max_tiny_price_leg_share,
                 "estimated_fill_price": estimated_fill_prices.get(row.market_id, target),
                 "basket_qty": qty,
                 "basket_notional": basket_notional,

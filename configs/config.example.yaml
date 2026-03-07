@@ -111,5 +111,7 @@ strategies:
     max_signals: 180
     quote_improve: 0.0
     executable_price_floor: 0.01
+    max_tiny_price_leg_share: 0.25
+    max_floor_adjusted_leg_share: 0.35
     allow_sell_conversion: false
     exclude_event_ids: []
