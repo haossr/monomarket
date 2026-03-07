@@ -705,6 +705,7 @@ def generate_signals(
             strategy_event_reject_rows: list[tuple[str, str, str, int]] = []
             strategy_event_top_k_hints: list[str] = []
             strategy_pricing_rows: list[tuple[str, dict[str, Any]]] = []
+            strategy_pair_search_rows: list[tuple[str, str, int, int, int, int, int, int, int]] = []
             for strategy, diag in sorted(by_strategy_diag.items()):
                 if not isinstance(diag, dict):
                     continue
@@ -733,6 +734,55 @@ def generate_signals(
                 pricing_consistency = strategy_diag.get("pricing_consistency")
                 if isinstance(pricing_consistency, dict):
                     strategy_pricing_rows.append((str(strategy), pricing_consistency))
+
+                pair_search = strategy_diag.get("pair_search")
+                if isinstance(pair_search, dict):
+
+                    def _diag_int(value: object) -> int:
+                        if isinstance(value, bool):
+                            return int(value)
+                        if isinstance(value, int):
+                            return value
+                        if isinstance(value, float):
+                            return int(value)
+                        if isinstance(value, str):
+                            try:
+                                return int(float(value))
+                            except ValueError:
+                                return 0
+                        return 0
+
+                    strategy_pair_search_rows.append(
+                        (
+                            str(strategy),
+                            "total",
+                            _diag_int(pair_search.get("candidate_pairs_scanned", 0)),
+                            _diag_int(pair_search.get("market_guard_pass", 0)),
+                            _diag_int(pair_search.get("event_guard_pass", 0)),
+                            _diag_int(pair_search.get("condition_guard_pass", 0)),
+                            _diag_int(pair_search.get("rejected_by_market_guard", 0)),
+                            _diag_int(pair_search.get("rejected_by_event_guard", 0)),
+                            _diag_int(pair_search.get("rejected_by_condition_guard", 0)),
+                        )
+                    )
+                    by_side = pair_search.get("by_side")
+                    if isinstance(by_side, dict):
+                        for side_name, side_diag in sorted(by_side.items()):
+                            if not isinstance(side_diag, dict):
+                                continue
+                            strategy_pair_search_rows.append(
+                                (
+                                    str(strategy),
+                                    str(side_name),
+                                    _diag_int(side_diag.get("candidate_pairs_scanned", 0)),
+                                    _diag_int(side_diag.get("market_guard_pass", 0)),
+                                    _diag_int(side_diag.get("event_guard_pass", 0)),
+                                    _diag_int(side_diag.get("condition_guard_pass", 0)),
+                                    _diag_int(side_diag.get("rejected_by_market_guard", 0)),
+                                    _diag_int(side_diag.get("rejected_by_event_guard", 0)),
+                                    _diag_int(side_diag.get("rejected_by_condition_guard", 0)),
+                                )
+                            )
 
                 if isinstance(reject_reasons_by_event, dict):
                     for event_id, event_reasons in sorted(reject_reasons_by_event.items()):
@@ -771,6 +821,41 @@ def generate_signals(
                 for strategy_name, event_id, reason, count in strategy_event_reject_rows:
                     event_reject_tb.add_row(strategy_name, event_id, reason, str(count))
                 console.print(event_reject_tb)
+
+            if strategy_pair_search_rows:
+                pair_search_tb = Table(title="Strategy pair search diagnostics")
+                pair_search_tb.add_column("strategy")
+                pair_search_tb.add_column("scope")
+                pair_search_tb.add_column("scanned")
+                pair_search_tb.add_column("market_pass")
+                pair_search_tb.add_column("event_pass")
+                pair_search_tb.add_column("condition_pass")
+                pair_search_tb.add_column("rej_market")
+                pair_search_tb.add_column("rej_event")
+                pair_search_tb.add_column("rej_condition")
+                for (
+                    strategy_name,
+                    scope,
+                    scanned,
+                    market_pass,
+                    event_pass,
+                    condition_pass,
+                    rejected_market,
+                    rejected_event,
+                    rejected_condition,
+                ) in strategy_pair_search_rows:
+                    pair_search_tb.add_row(
+                        strategy_name,
+                        scope,
+                        str(scanned),
+                        str(market_pass),
+                        str(event_pass),
+                        str(condition_pass),
+                        str(rejected_market),
+                        str(rejected_event),
+                        str(rejected_condition),
+                    )
+                console.print(pair_search_tb)
 
             if strategy_pricing_rows:
                 pricing_tb = Table(title="Strategy pricing consistency diagnostics")

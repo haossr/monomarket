@@ -35,6 +35,26 @@ class _FakeSignalEngine:
                             "candidate_reject_reasons_by_event_top": {
                                 "e1": {"buy:effective_edge_below_min": 1},
                             },
+                            "pair_search": {
+                                "candidate_pairs_scanned": 12,
+                                "market_guard_pass": 6,
+                                "event_guard_pass": 4,
+                                "condition_guard_pass": 2,
+                                "rejected_by_market_guard": 6,
+                                "rejected_by_event_guard": 2,
+                                "rejected_by_condition_guard": 2,
+                                "by_side": {
+                                    "buy": {
+                                        "candidate_pairs_scanned": 8,
+                                        "market_guard_pass": 4,
+                                        "event_guard_pass": 3,
+                                        "condition_guard_pass": 2,
+                                        "rejected_by_market_guard": 4,
+                                        "rejected_by_event_guard": 1,
+                                        "rejected_by_condition_guard": 1,
+                                    }
+                                },
+                            },
                             "pricing_consistency": {
                                 "price_floor": 0.01,
                                 "pair_candidates_priced": 2,
@@ -89,5 +109,7 @@ def test_generate_signals_prints_pricing_consistency_diagnostics(
 
     assert res.exit_code == 0, res.output
     assert "generated 0 signals" in res.output
+    assert "Strategy pair search diagnostics" in res.output
+    assert "total" in res.output
     assert "Strategy pricing consistency diagnostics" in res.output
     assert "buy:effective_edge_below_min" in res.output
