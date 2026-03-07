@@ -70,3 +70,16 @@ strategies:
     event_notional_cap: 30.0
     inventory_decay: 0.15
     exclude_event_ids: []
+  s9:
+    min_leg_liquidity: 80.0
+    max_order_notional: 12.0
+    min_effective_edge_bps: 20.0
+    fee_bps: 0.0
+    slippage_bps: 6.0
+    depth_reference_liquidity: 1000.0
+    depth_penalty_max_bps: 30.0
+    liquidity_fraction: 0.01
+    min_qty: 1.0
+    max_signals: 120
+    quote_improve: 0.0
+    allow_sell_parity: false

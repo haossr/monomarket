@@ -75,3 +75,16 @@ strategies:
     edge_gate_budget_cap_notional: 10.0
     edge_gate_budget_penalty_bps: 80.0
     exclude_event_ids: ["25009", "23792", "21220"]
+  s9:
+    min_leg_liquidity: 120.0
+    max_order_notional: 6.0
+    min_effective_edge_bps: 45.0
+    fee_bps: 1.56
+    slippage_bps: 8.0
+    depth_reference_liquidity: 1200.0
+    depth_penalty_max_bps: 45.0
+    liquidity_fraction: 0.008
+    min_qty: 1.0
+    max_signals: 80
+    quote_improve: 0.0
+    allow_sell_parity: false

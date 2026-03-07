@@ -3,6 +3,7 @@ from monomarket.signals.strategies.s1_cross_venue import S1CrossVenueScanner
 from monomarket.signals.strategies.s2_negrisk_rebalance import S2NegRiskRebalance
 from monomarket.signals.strategies.s4_low_prob_yes import S4LowProbYesBasket
 from monomarket.signals.strategies.s8_no_carry_tailhedge import S8NoCarryTailHedge
+from monomarket.signals.strategies.s9_yes_no_parity import S9YesNoParityArb
 
 __all__ = [
     "Strategy",
@@ -10,4 +11,5 @@ __all__ = [
     "S2NegRiskRebalance",
     "S4LowProbYesBasket",
     "S8NoCarryTailHedge",
+    "S9YesNoParityArb",
 ]
