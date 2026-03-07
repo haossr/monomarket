@@ -110,6 +110,7 @@ def summarize_strategy(
     return {
         "strategy": target,
         "pnl": _safe_float(result_row.get("pnl")),
+        "max_drawdown": _safe_float(result_row.get("max_drawdown")),
         "trade_count": _safe_int(result_row.get("trade_count")),
         "closed_winrate": _safe_float(result_row.get("closed_winrate")),
         "mtm_winrate": _safe_float(result_row.get("mtm_winrate")),
@@ -138,6 +139,7 @@ def _summary_delta(
         c = candidate.get(strategy, {})
         delta[strategy] = {
             "pnl": _safe_float(c.get("pnl")) - _safe_float(b.get("pnl")),
+            "max_drawdown": _safe_float(c.get("max_drawdown")) - _safe_float(b.get("max_drawdown")),
             "trade_count": float(_safe_int(c.get("trade_count")) - _safe_int(b.get("trade_count"))),
             "executed_rows": float(
                 _safe_int(c.get("executed_rows")) - _safe_int(b.get("executed_rows"))
@@ -190,7 +192,11 @@ def _run_backtest(
         )
     if not out_json.exists():
         raise RuntimeError(f"backtest produced no json artifact: {out_json}")
-    return json.loads(out_json.read_text())
+
+    payload = json.loads(out_json.read_text())
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"invalid backtest json payload: {out_json}")
+    return payload
 
 
 def render_markdown(result: dict[str, Any]) -> str:
@@ -214,10 +220,12 @@ def render_markdown(result: dict[str, Any]) -> str:
         lines.append("")
         lines.append(
             "| strategy | base_pnl | cand_pnl | Δpnl | base_exec | cand_exec | Δexec | "
-            "base_rej | cand_rej | Δrej | base_mtm_wr | cand_mtm_wr | Δmtm_wr | "
+            "base_rej | cand_rej | Δrej | base_maxdd | cand_maxdd | Δmaxdd | base_mtm_wr | cand_mtm_wr | Δmtm_wr | "
             "base_top_reject | cand_top_reject |"
         )
-        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|")
+        lines.append(
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|"
+        )
 
         baseline = item.get("baseline", {}) if isinstance(item.get("baseline"), dict) else {}
         candidate = item.get("candidate", {}) if isinstance(item.get("candidate"), dict) else {}
@@ -242,6 +250,7 @@ def render_markdown(result: dict[str, Any]) -> str:
                 f"{_safe_float(b.get('pnl')):.4f} | {_safe_float(c.get('pnl')):.4f} | {(_safe_float(d.get('pnl'))):+.4f} | "
                 f"{_safe_int(b.get('executed_rows'))} | {_safe_int(c.get('executed_rows'))} | {(_safe_int(c.get('executed_rows')) - _safe_int(b.get('executed_rows'))):+d} | "
                 f"{_safe_int(b.get('rejected_rows'))} | {_safe_int(c.get('rejected_rows'))} | {(_safe_int(c.get('rejected_rows')) - _safe_int(b.get('rejected_rows'))):+d} | "
+                f"{_safe_float(b.get('max_drawdown')):.4f} | {_safe_float(c.get('max_drawdown')):.4f} | {(_safe_float(d.get('max_drawdown'))):+.4f} | "
                 f"{_safe_float(b.get('mtm_winrate')):.4f} | {_safe_float(c.get('mtm_winrate')):.4f} | {(_safe_float(d.get('mtm_winrate'))):+.4f} | "
                 f"{str(b.get('top_reject_reason', 'none'))} | {str(c.get('top_reject_reason', 'none'))} |"
             )

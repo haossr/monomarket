@@ -96,6 +96,7 @@ def test_summarize_compare_payload_and_markdown() -> None:
                 "delta": {
                     "s10": {
                         "pnl": 0.6,
+                        "max_drawdown": -0.2,
                         "executed_rows": 3,
                         "rejected_rows": -1,
                         "mtm_winrate": 0.1,
@@ -108,6 +109,7 @@ def test_summarize_compare_payload_and_markdown() -> None:
                 "delta": {
                     "s10": {
                         "pnl": -0.1,
+                        "max_drawdown": -0.1,
                         "executed_rows": 1,
                         "rejected_rows": -2,
                         "mtm_winrate": -0.02,
@@ -119,8 +121,11 @@ def test_summarize_compare_payload_and_markdown() -> None:
 
     summary = module.summarize_compare_payload(payload, objective_strategy="s10")
     assert abs(float(summary["total_delta_pnl"]) - 0.5) < 1e-12
+    assert abs(float(summary["min_slice_delta_pnl"]) - (-0.1)) < 1e-12
+    assert int(summary["non_negative_slice_count"]) == 1
     assert int(summary["total_delta_exec"]) == 4
     assert int(summary["total_delta_rej"]) == -3
+    assert abs(float(summary["total_delta_max_drawdown"]) - (-0.3)) < 1e-12
     assert abs(float(summary["total_delta_mtm_winrate"]) - 0.08) < 1e-12
 
     markdown = module.render_markdown(
@@ -130,6 +135,7 @@ def test_summarize_compare_payload_and_markdown() -> None:
             "baseline_config": "/tmp/base.yaml",
             "candidate_base_config": "/tmp/candidate.yaml",
             "objective_strategy": "s10",
+            "min_slice_delta_pnl_threshold": 0.0,
             "total_candidates": 1,
             "candidates": [
                 {
@@ -141,9 +147,12 @@ def test_summarize_compare_payload_and_markdown() -> None:
                         "max_tiny_price_leg_share": 0.2,
                         "max_floor_adjusted_leg_share": 0.25,
                     },
+                    "min_slice_delta_pnl": 0.1,
+                    "passes_min_slice_delta_pnl": True,
                     "total_delta_pnl": 0.5,
                     "total_delta_exec": 4,
                     "total_delta_rej": -3,
+                    "total_delta_max_drawdown": -0.2,
                     "total_delta_mtm_winrate": 0.08,
                 }
             ],
@@ -153,6 +162,10 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert "# S10 Parameter Grid Compare" in markdown
     assert "| rank | candidate | prob_tol |" in markdown
     assert (
-        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | +0.5000 | +4 | -3 | +0.0800 |"
+        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | min(Δpnl) |"
+        in markdown
+    )
+    assert (
+        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | +0.1000 | +0.5000 | +4 | -3 | -0.2000 | +0.0800 | yes |"
         in markdown
     )

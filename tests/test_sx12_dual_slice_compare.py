@@ -35,6 +35,7 @@ def test_summarize_strategy_normalizes_reject_reason_prefix() -> None:
             {
                 "strategy": "s9",
                 "pnl": -0.25,
+                "max_drawdown": 0.8,
                 "trade_count": 2,
                 "closed_winrate": 0.5,
                 "mtm_winrate": 0.25,
@@ -68,6 +69,7 @@ def test_summarize_strategy_normalizes_reject_reason_prefix() -> None:
 
     summary = module.summarize_strategy(report, strategy="s9")
     assert summary["strategy"] == "s9"
+    assert abs(float(summary["max_drawdown"]) - 0.8) < 1e-12
     assert summary["replay_rows"] == 3
     assert summary["rejected_rows"] == 2
     assert summary["executed_rows"] == 1
@@ -81,6 +83,7 @@ def test_summary_delta_and_markdown_render() -> None:
     baseline = {
         "s9": {
             "pnl": -0.5,
+            "max_drawdown": 1.2,
             "trade_count": 1,
             "executed_rows": 3,
             "rejected_rows": 2,
@@ -92,6 +95,7 @@ def test_summary_delta_and_markdown_render() -> None:
     candidate = {
         "s9": {
             "pnl": 0.1,
+            "max_drawdown": 0.9,
             "trade_count": 2,
             "executed_rows": 5,
             "rejected_rows": 1,
@@ -102,6 +106,7 @@ def test_summary_delta_and_markdown_render() -> None:
     }
     delta = module._summary_delta(baseline, candidate, strategies=["s9"])
     assert abs(float(delta["s9"]["pnl"]) - 0.6) < 1e-12
+    assert abs(float(delta["s9"]["max_drawdown"]) + 0.3) < 1e-12
     assert int(delta["s9"]["executed_rows"]) == 2
     assert int(delta["s9"]["rejected_rows"]) == -1
 
