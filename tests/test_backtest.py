@@ -527,6 +527,219 @@ def test_backtest_s9_pair_atomic_guard_rejects_cross_market_pair(tmp_path: Path)
     assert reasons == {"s9 pair atomic guard: pair legs must share market_id"}
 
 
+def test_backtest_s9_pair_atomic_executes_declared_cross_market_pair(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    snapshot_ts = "2026-02-20T00:00:00+00:00"
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="pm1",
+                canonical_id="c-s9",
+                source="gamma",
+                event_id="e-pair",
+                question="Will example event resolve yes?",
+                status="open",
+                neg_risk=False,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.40,
+                no_price=0.60,
+                mid_price=0.40,
+            ),
+            MarketView(
+                market_id="pm2",
+                canonical_id="c-s9",
+                source="clob",
+                event_id="e-pair",
+                question="Will example event resolve yes?",
+                status="open",
+                neg_risk=False,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.45,
+                no_price=0.55,
+                mid_price=0.45,
+            ),
+        ],
+        snapshot_at=snapshot_ts,
+    )
+
+    created_at = "2026-02-20T00:10:00+00:00"
+    pair_payload_common = {
+        "pair_atomic": True,
+        "pair_id": "pair-2",
+        "pair_batch_id": "pair-2:1",
+        "pair_expected_legs": 2,
+        "condition_key": "will example event resolve yes?",
+        "pair_mode": "cross_market",
+        "pair_same_market": False,
+    }
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s9",
+                market_id="pm1",
+                event_id="e-pair",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=5.0,
+                rationale="pair-leg-yes",
+                payload={
+                    **pair_payload_common,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "pm1",
+                        "price": 0.40,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+            Signal(
+                strategy="s9",
+                market_id="pm2",
+                event_id="e-pair",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.55,
+                size_hint=5.0,
+                rationale="pair-leg-no",
+                payload={
+                    **pair_payload_common,
+                    "primary_leg": {
+                        "token": "NO",
+                        "market_id": "pm2",
+                        "price": 0.55,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+        ],
+        created_at=created_at,
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+    ).run(["s9"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T01:00:00Z")
+
+    assert report.total_signals == 2
+    assert report.executed_signals == 2
+    assert report.rejected_signals == 0
+
+    strategy_result = report.results[0]
+    assert strategy_result.strategy == "s9"
+    assert strategy_result.trade_count == 2
+    assert abs(strategy_result.pnl - 0.25) < 1e-9
+
+    assert len(report.replay) == 2
+    assert all(row.risk_allowed for row in report.replay)
+    assert {row.risk_reason for row in report.replay} == {"ok"}
+    assert abs(sum(row.realized_change for row in report.replay) - 0.25) < 1e-9
+
+
+def test_backtest_s9_pair_atomic_rejects_invalid_pair_convert_value(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    snapshot_ts = "2026-02-20T00:00:00+00:00"
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="pm1",
+                canonical_id="c-s9",
+                source="gamma",
+                event_id="e-pair",
+                question="Will example event resolve yes?",
+                status="open",
+                neg_risk=False,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.40,
+                no_price=0.60,
+                mid_price=0.40,
+            ),
+        ],
+        snapshot_at=snapshot_ts,
+    )
+
+    created_at = "2026-02-20T00:10:00+00:00"
+    pair_payload_common = {
+        "pair_atomic": True,
+        "pair_id": "pair-invalid-convert",
+        "pair_batch_id": "pair-invalid-convert:1",
+        "pair_expected_legs": 2,
+        "condition_key": "will example event resolve yes?",
+        "pair_mode": "same_market",
+        "pair_same_market": True,
+        "pair_convert_value": 0,
+    }
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s9",
+                market_id="pm1",
+                event_id="e-pair",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=5.0,
+                rationale="pair-leg-yes",
+                payload={
+                    **pair_payload_common,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "pm1",
+                        "price": 0.40,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+            Signal(
+                strategy="s9",
+                market_id="pm1",
+                event_id="e-pair",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.60,
+                size_hint=5.0,
+                rationale="pair-leg-no",
+                payload={
+                    **pair_payload_common,
+                    "primary_leg": {
+                        "token": "NO",
+                        "market_id": "pm1",
+                        "price": 0.60,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+        ],
+        created_at=created_at,
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+    ).run(["s9"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T01:00:00Z")
+
+    assert report.total_signals == 2
+    assert report.executed_signals == 0
+    assert report.rejected_signals == 2
+    assert all(not row.risk_allowed for row in report.replay)
+    assert {row.risk_reason for row in report.replay} == {
+        "s9 pair atomic guard: invalid pair_convert_value"
+    }
+
+
 def test_backtest_s10_basket_atomic_guard_rejects_incomplete_legs(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
