@@ -804,6 +804,236 @@ def test_backtest_s10_basket_atomic_guard_rejects_when_any_leg_has_no_liquidity(
     assert all(not row.risk_allowed for row in report.replay)
 
 
+def test_backtest_s10_conversion_basket_realizes_intrinsic_edge(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    snapshot_ts = "2026-02-20T00:00:00+00:00"
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="cv1",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-convert-pnl",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.40,
+                no_price=0.60,
+                mid_price=0.40,
+            ),
+            MarketView(
+                market_id="cv2",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-convert-pnl",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=950,
+                volume=100,
+                yes_price=0.50,
+                no_price=0.50,
+                mid_price=0.50,
+            ),
+        ],
+        snapshot_at=snapshot_ts,
+    )
+
+    created_at = "2026-02-20T00:10:00+00:00"
+    basket_payload_common = {
+        "basket_atomic": True,
+        "basket_id": "basket-convert",
+        "basket_batch_id": "basket-convert",
+        "basket_expected_legs": 2,
+        "direction": "buy_conversion",
+        "convert_value": 1.0,
+    }
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s10",
+                market_id="cv1",
+                event_id="e-convert-pnl",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=10.0,
+                rationale="basket-leg-0",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 0,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "cv1",
+                        "price": 0.40,
+                        "qty": 10.0,
+                    },
+                },
+            ),
+            Signal(
+                strategy="s10",
+                market_id="cv2",
+                event_id="e-convert-pnl",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.50,
+                size_hint=10.0,
+                rationale="basket-leg-1",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 1,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "cv2",
+                        "price": 0.50,
+                        "qty": 10.0,
+                    },
+                },
+            ),
+        ],
+        created_at=created_at,
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(slippage_bps=0.0, fee_bps=0.0),
+    ).run(["s10"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T01:00:00Z")
+
+    assert report.total_signals == 2
+    assert report.executed_signals == 2
+    assert report.rejected_signals == 0
+    assert len(report.replay) == 2
+    assert all(row.risk_allowed for row in report.replay)
+    assert all(abs(row.executed_qty - 10.0) < 1e-9 for row in report.replay)
+    assert abs(sum(row.realized_change for row in report.replay) - 1.0) < 1e-9
+
+    strategy_result = report.results[0]
+    assert strategy_result.strategy == "s10"
+    assert abs(strategy_result.pnl - 1.0) < 1e-9
+
+
+def test_backtest_s10_basket_atomic_guard_rejects_qty_mismatch(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+
+    snapshot_ts = "2026-02-20T00:00:00+00:00"
+    storage.upsert_markets(
+        [
+            MarketView(
+                market_id="qm1",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-qty-mismatch",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=1000,
+                volume=100,
+                yes_price=0.45,
+                no_price=0.55,
+                mid_price=0.45,
+            ),
+            MarketView(
+                market_id="qm2",
+                canonical_id="c-s10",
+                source="gamma",
+                event_id="e-qty-mismatch",
+                question="Will conversion event resolve yes?",
+                status="open",
+                neg_risk=True,
+                liquidity=500,
+                volume=100,
+                yes_price=0.45,
+                no_price=0.55,
+                mid_price=0.45,
+            ),
+        ],
+        snapshot_at=snapshot_ts,
+    )
+
+    created_at = "2026-02-20T00:10:00+00:00"
+    basket_payload_common = {
+        "basket_atomic": True,
+        "basket_id": "basket-qty-mismatch",
+        "basket_batch_id": "basket-qty-mismatch",
+        "basket_expected_legs": 2,
+        "direction": "buy_conversion",
+        "convert_value": 1.0,
+    }
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s10",
+                market_id="qm1",
+                event_id="e-qty-mismatch",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.45,
+                size_hint=5.0,
+                rationale="basket-leg-0",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 0,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "qm1",
+                        "price": 0.45,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+            Signal(
+                strategy="s10",
+                market_id="qm2",
+                event_id="e-qty-mismatch",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.45,
+                size_hint=5.0,
+                rationale="basket-leg-1",
+                payload={
+                    **basket_payload_common,
+                    "leg_index": 1,
+                    "primary_leg": {
+                        "token": "YES",
+                        "market_id": "qm2",
+                        "price": 0.45,
+                        "qty": 5.0,
+                    },
+                },
+            ),
+        ],
+        created_at=created_at,
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(
+            slippage_bps=0.0,
+            fee_bps=0.0,
+            enable_partial_fill=True,
+            liquidity_full_fill=1000.0,
+            min_fill_ratio=0.0,
+        ),
+    ).run(["s10"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T01:00:00Z")
+
+    assert report.total_signals == 2
+    assert report.executed_signals == 0
+    assert report.rejected_signals == 2
+    reasons = {row.risk_reason for row in report.replay}
+    assert reasons == {"s10 basket atomic guard: basket legs must share executable qty"}
+
+
 def test_backtest_partial_fill_model(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))
