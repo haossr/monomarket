@@ -173,7 +173,7 @@ uv run --with reportlab python scripts/backtest_pdf_report.py \
   --output artifacts/backtest/runs/<timestamp>/report.pdf
 ```
 
-报告会自动包含收益图表（累计 realized PnL 曲线 + 策略 PnL 柱状图；数据不足时显示降级提示），并在 Sample Coverage 区块展示总览胜率（Closed/MTM winrate summary，来源与 nightly summary 一致：`latest.json.results`）与主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）；当 `history_limited=true` 时会额外给出谨慎解读提示。Rolling Summary 区块展示 rolling execution rate / empty windows / coverage label 与 rolling reject top 摘要（简版 `reason:count;reason:count`）。
+报告会自动包含收益图表（累计 realized PnL 曲线 + 策略 PnL 柱状图；数据不足时显示降级提示），并在 Sample Coverage 区块展示总览胜率（Closed/MTM winrate summary，来源与 nightly summary 一致：`latest.json.results`）与主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）；当 `history_limited=true` 时会额外给出谨慎解读提示。新增 `Sx12 Strategy Focus / S9-S10` 卡片：展示 S9/S10 的 present/active、PnL、trades、closed/mtm winrate，以及 activity_hint/replay_rows/rejected_rows/top_reject_reason（用于无成交窗口快速定位原因）。Rolling Summary 区块展示 rolling execution rate / empty windows / coverage label 与 rolling reject top 摘要（简版 `reason:count;reason:count`）。
 
 回测胜率口径：
 - `closed_winrate`：仅统计已闭合交易（`wins/(wins+losses)`）

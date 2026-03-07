@@ -116,6 +116,8 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Main window coverage",
         "Main history limited",
         "Main window note",
+        "Sx12 Strategy Focus / S9-S10",
+        "S9-S10 pnl diff",
         "Rolling execution rate",
         "Rolling empty windows",
         "Rolling coverage label",
@@ -125,8 +127,10 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "PDF_ROLLING_REJECT_TOP_K = 2",
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
+        "def _build_strategy_focus_metrics",
+        "def _build_strategy_focus_activity_hints",
         "def _extract_rolling_summary",
-        "from monomarket.backtest.reject_reason import format_reject_top",
+        "from monomarket.backtest.reject_reason import format_reject_top, normalize_reject_reason",
         "def _format_rolling_reject_top",
     ]
     for token in required_tokens:
@@ -177,6 +181,67 @@ def test_pdf_format_rolling_reject_top_tie_is_stable() -> None:
         }
     )
     assert actual == "a-reason:5;z-reason:5"
+
+
+def test_pdf_strategy_focus_activity_hints_from_payload() -> None:
+    module = _load_pdf_report_module()
+
+    payload = {
+        "results": [
+            {
+                "strategy": "s9",
+                "pnl": 0.0,
+                "trade_count": 0,
+                "closed_sample_count": 0,
+                "mtm_sample_count": 0,
+            },
+            {
+                "strategy": "s10",
+                "pnl": 1.2,
+                "trade_count": 3,
+                "closed_winrate": 0.5,
+                "closed_sample_count": 2,
+                "mtm_winrate": 2 / 3,
+                "mtm_sample_count": 3,
+            },
+        ],
+        "replay": [
+            {
+                "strategy": "s9",
+                "risk_allowed": False,
+                "risk_reason": "strategy notional limit exceeded: 1010 > 1000",
+            },
+            {
+                "strategy": "s9",
+                "risk_allowed": False,
+                "risk_reason": "strategy notional limit exceeded: 1020 > 1000",
+            },
+            {
+                "strategy": "s10",
+                "risk_allowed": True,
+                "risk_reason": "ok",
+            },
+        ],
+    }
+
+    focus = module._build_strategy_focus_metrics(payload)
+    assert bool(focus["s9"]["present"]) is True
+    assert bool(focus["s9"]["active"]) is False
+    assert bool(focus["s10"]["present"]) is True
+    assert bool(focus["s10"]["active"]) is True
+
+    hints = module._build_strategy_focus_activity_hints(payload, focus_metrics=focus)
+    assert hints["s9"]["hint"] == "all_rows_rejected"
+    assert int(hints["s9"]["replay_rows"]) == 2
+    assert int(hints["s9"]["rejected_rows"]) == 2
+    assert abs(float(hints["s9"]["reject_share"]) - 1.0) < 1e-12
+    assert hints["s9"]["top_reject_reason"] == "strategy notional limit exceeded:2"
+
+    assert hints["s10"]["hint"] == "active"
+    assert int(hints["s10"]["replay_rows"]) == 1
+    assert int(hints["s10"]["rejected_rows"]) == 0
+    assert abs(float(hints["s10"]["reject_share"])) < 1e-12
+    assert hints["s10"]["top_reject_reason"] == "none"
 
 
 def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> None:

@@ -10,9 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from monomarket.backtest.reject_reason import format_reject_top
+from monomarket.backtest.reject_reason import format_reject_top, normalize_reject_reason
 
 PDF_ROLLING_REJECT_TOP_K = 2
+FOCUS_STRATEGIES = ("s9", "s10")
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -281,6 +282,154 @@ def _aggregate_winrate_from_rows(strategy_rows: list[dict[str, Any]]) -> dict[st
         "mtm_samples": mtm_samples,
         "mtm_rate": mtm_rate,
     }
+
+
+def _strategy_has_activity(row: dict[str, Any]) -> bool:
+    numeric_keys = (
+        "trades",
+        "trade_count",
+        "closed_sample_count",
+        "mtm_sample_count",
+        "wins",
+        "losses",
+        "mtm_wins",
+        "mtm_losses",
+    )
+    return any(_safe_int(row.get(key)) > 0 for key in numeric_keys)
+
+
+def _build_strategy_focus_metrics(
+    payload: dict[str, Any], *, strategies: tuple[str, ...] = FOCUS_STRATEGIES
+) -> dict[str, dict[str, Any]]:
+    rows_obj = payload.get("results")
+    rows = rows_obj if isinstance(rows_obj, list) else []
+
+    by_strategy: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("strategy") or "").strip().lower()
+        if not key:
+            continue
+        by_strategy[key] = row
+
+    summary: dict[str, dict[str, Any]] = {}
+    for strategy in strategies:
+        row = by_strategy.get(strategy.lower())
+        if row is None:
+            summary[strategy] = {
+                "strategy": strategy,
+                "present": False,
+                "active": False,
+                "pnl": 0.0,
+                "trade_count": 0,
+                "closed_winrate": 0.0,
+                "closed_sample_count": 0,
+                "mtm_winrate": 0.0,
+                "mtm_sample_count": 0,
+            }
+            continue
+
+        summary[strategy] = {
+            "strategy": strategy,
+            "present": True,
+            "active": _strategy_has_activity(row),
+            "pnl": _safe_float(row.get("pnl")),
+            "trade_count": _safe_int(row.get("trade_count", row.get("trades"))),
+            "closed_winrate": _safe_float(row.get("closed_winrate", row.get("winrate"))),
+            "closed_sample_count": _safe_int(row.get("closed_sample_count")),
+            "mtm_winrate": _safe_float(row.get("mtm_winrate", row.get("winrate"))),
+            "mtm_sample_count": _safe_int(row.get("mtm_sample_count")),
+        }
+
+    return summary
+
+
+def _build_strategy_focus_activity_hints(
+    payload: dict[str, Any],
+    *,
+    focus_metrics: dict[str, dict[str, Any]],
+    strategies: tuple[str, ...] = FOCUS_STRATEGIES,
+) -> dict[str, dict[str, Any]]:
+    replay_obj = payload.get("replay")
+    replay_rows = replay_obj if isinstance(replay_obj, list) else []
+
+    stats: dict[str, dict[str, Any]] = {
+        strategy: {
+            "replay_rows": 0,
+            "rejected_rows": 0,
+            "reason_counts": {},
+        }
+        for strategy in strategies
+    }
+
+    for row in replay_rows:
+        if not isinstance(row, dict):
+            continue
+        strategy_key = str(row.get("strategy") or "").strip().lower()
+        if not strategy_key or strategy_key not in stats:
+            continue
+
+        item = stats[strategy_key]
+        item["replay_rows"] = int(item.get("replay_rows", 0)) + 1
+
+        risk_allowed_raw = row.get("risk_allowed")
+        risk_allowed = True if risk_allowed_raw is None else bool(risk_allowed_raw)
+        risk_reason_raw = str(row.get("risk_reason") or "").strip()
+        is_rejected = (not risk_allowed) or (
+            risk_reason_raw != "" and risk_reason_raw.lower() != "ok"
+        )
+        if not is_rejected:
+            continue
+
+        item["rejected_rows"] = int(item.get("rejected_rows", 0)) + 1
+        reason = normalize_reject_reason(risk_reason_raw) if risk_reason_raw else "unknown"
+        reason_counts = item.get("reason_counts")
+        if isinstance(reason_counts, dict):
+            reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+
+    hints: dict[str, dict[str, Any]] = {}
+    for strategy in strategies:
+        metric = focus_metrics.get(strategy, {})
+        active = bool(metric.get("active", False))
+        trade_count = _safe_int(metric.get("trade_count"))
+
+        item = stats.get(strategy, {})
+        replay_count = _safe_int(item.get("replay_rows"))
+        rejected_count = _safe_int(item.get("rejected_rows"))
+        reject_share = (rejected_count / replay_count) if replay_count > 0 else 0.0
+
+        reason_counts = item.get("reason_counts")
+        top_reject_reason = "none"
+        if isinstance(reason_counts, dict) and reason_counts:
+            top_reject_reason, _ = format_reject_top(
+                reason_counts,
+                top_k=1,
+                delimiter=";",
+                normalize=True,
+            )
+
+        if active or trade_count > 0:
+            hint = "active"
+        elif replay_count <= 0:
+            hint = "no_replay_rows"
+        elif rejected_count <= 0:
+            hint = "no_risk_rejects"
+        elif rejected_count >= replay_count:
+            hint = "all_rows_rejected"
+        else:
+            hint = "partial_rows_rejected"
+
+        hints[strategy] = {
+            "strategy": strategy,
+            "hint": hint,
+            "replay_rows": replay_count,
+            "rejected_rows": rejected_count,
+            "reject_share": reject_share,
+            "top_reject_reason": top_reject_reason,
+        }
+
+    return hints
 
 
 def render_pdf(
@@ -573,6 +722,43 @@ def render_pdf(
     if effective_from_ts:
         write_line(f"Effective from ts:      {effective_from_ts}")
     write_line("(winrate shown as n/a when sample count is zero)")
+    write_line("")
+
+    strategy_focus = _build_strategy_focus_metrics(payload)
+    strategy_focus_hints = _build_strategy_focus_activity_hints(
+        payload,
+        focus_metrics=strategy_focus,
+    )
+
+    write_line("Sx12 Strategy Focus / S9-S10", bold=True, size=12, leading=18)
+    for strategy in FOCUS_STRATEGIES:
+        metric = strategy_focus.get(strategy, {})
+        hint = strategy_focus_hints.get(strategy, {})
+
+        present = bool(metric.get("present", False))
+        active = bool(metric.get("active", False))
+        pnl = _safe_float(metric.get("pnl"))
+        trade_count = _safe_int(metric.get("trade_count"))
+        closed_samples = _safe_int(metric.get("closed_sample_count"))
+        mtm_samples = _safe_int(metric.get("mtm_sample_count"))
+
+        write_wrapped(
+            f"{strategy.upper()}: present={'true' if present else 'false'} "
+            f"active={'true' if active else 'false'} pnl={pnl:.4f} trades={trade_count} "
+            f"closed_winrate={_format_rate_with_samples(metric.get('closed_winrate'), closed_samples)} "
+            f"mtm_winrate={_format_rate_with_samples(metric.get('mtm_winrate'), mtm_samples)}"
+        )
+        write_wrapped(
+            f"  activity_hint={hint.get('hint', 'no_data')} "
+            f"replay_rows={_safe_int(hint.get('replay_rows'))} "
+            f"rejected_rows={_safe_int(hint.get('rejected_rows'))} "
+            f"reject_share={_safe_float(hint.get('reject_share')) * 100.0:.2f}% "
+            f"top_reject_reason={hint.get('top_reject_reason', 'none')}"
+        )
+
+    s9_pnl = _safe_float(strategy_focus.get("s9", {}).get("pnl"))
+    s10_pnl = _safe_float(strategy_focus.get("s10", {}).get("pnl"))
+    write_line(f"S9-S10 pnl diff:         {s9_pnl - s10_pnl:.4f}")
     write_line("")
 
     rolling_summary = _extract_rolling_summary(rolling_payload)
