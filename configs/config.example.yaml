@@ -78,11 +78,15 @@ strategies:
     slippage_bps: 6.0
     depth_reference_liquidity: 1000.0
     depth_penalty_max_bps: 30.0
+    max_total_cost_bps: 140.0
     liquidity_fraction: 0.01
     min_qty: 1.0
     max_signals: 120
+    max_pairs_per_event: 2
+    max_event_pair_notional: 20.0
     quote_improve: 0.0
     allow_sell_parity: false
+    require_same_event: false
   s10:
     prob_sum_tolerance: 0.02
     max_abs_deviation: 0.20
