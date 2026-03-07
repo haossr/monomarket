@@ -115,5 +115,6 @@ strategies:
     diagnostics_event_top_k: 20
     max_signals: 90
     quote_improve: 0.0
+    executable_price_floor: 0.01
     allow_sell_conversion: false
     exclude_event_ids: []

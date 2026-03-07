@@ -341,3 +341,94 @@ def test_s10_diagnostics_event_top_k_summary() -> None:
     reject_top = diagnostics.get("candidate_reject_reasons_by_event_top", {})
     assert list(reject_top.keys()) == ["expensive-e"]
     assert reject_top["expensive-e"].get("buy_conversion:weighted_cost_cap_exceeded") == 1
+
+
+def test_s10_rejects_when_post_quote_turns_negative() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(91, event_id="e-quote", canonical_id="c1", yes=0.28, liq=900),
+        _market(92, event_id="e-quote", canonical_id="c2", yes=0.31, liq=850),
+        _market(93, event_id="e-quote", canonical_id="c3", yes=0.34, liq=870),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "quote_improve": 0.03,
+            "min_effective_edge_bps": 1.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy_conversion:post_quote_non_positive_gross_edge") == 1
+
+    pricing_diag = diagnostics.get("pricing_consistency", {})
+    assert int(float(pricing_diag.get("filtered_post_floor_non_positive", 0.0))) == 1
+
+
+def test_s10_rejects_when_post_slippage_turns_negative() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(101, event_id="e-slip", canonical_id="c1", yes=0.28, liq=900),
+        _market(102, event_id="e-slip", canonical_id="c2", yes=0.31, liq=850),
+        _market(103, event_id="e-slip", canonical_id="c3", yes=0.34, liq=870),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 1.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 1000.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_weighted_total_cost_bps": 2000.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy_conversion:post_slippage_non_positive_gross_edge") == 1
+
+    pricing_diag = diagnostics.get("pricing_consistency", {})
+    assert int(float(pricing_diag.get("filtered_post_slippage_non_positive", 0.0))) == 1
+
+
+def test_s10_floor_applied_to_tiny_leg_targets_and_payload() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(111, event_id="e-floor", canonical_id="c1", yes=0.005, liq=1000),
+        _market(112, event_id="e-floor", canonical_id="c2", yes=0.30, liq=1000),
+        _market(113, event_id="e-floor", canonical_id="c3", yes=0.33, liq=1000),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "max_abs_deviation": 0.50,
+            "min_effective_edge_bps": 1.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_order_notional": 8.0,
+        },
+    )
+
+    assert len(signals) == 3
+    tiny_leg_signal = next(s for s in signals if s.market_id == "m111")
+    assert abs(float(tiny_leg_signal.target_price) - 0.01) < 1e-12
+    assert int(float(tiny_leg_signal.payload.get("tiny_price_legs", 0.0))) == 1
+    assert int(float(tiny_leg_signal.payload.get("floor_adjusted_legs", 0.0))) == 1
+
+    pricing_diag = strategy.last_diagnostics.get("pricing_consistency", {})
+    assert int(float(pricing_diag.get("pair_candidates_priced", 0.0))) == 1
+    assert int(float(pricing_diag.get("tiny_price_pairs", 0.0))) == 1
+    assert int(float(pricing_diag.get("pairs_with_floor_adjustment", 0.0))) == 1
