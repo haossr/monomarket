@@ -700,6 +700,28 @@ def generate_signals(
                 )
             console.print(tb)
 
+            strategy_reject_rows: list[tuple[str, str, int]] = []
+            for strategy, diag in sorted(by_strategy_diag.items()):
+                if not isinstance(diag, dict):
+                    continue
+                strategy_diag = diag.get("strategy_diagnostics")
+                if not isinstance(strategy_diag, dict):
+                    continue
+                reject_reasons = strategy_diag.get("candidate_reject_reasons")
+                if not isinstance(reject_reasons, dict):
+                    continue
+                for reason, count in sorted(reject_reasons.items()):
+                    strategy_reject_rows.append((str(strategy), str(reason), int(float(count))))
+
+            if strategy_reject_rows:
+                reject_tb = Table(title="Strategy candidate reject diagnostics")
+                reject_tb.add_column("strategy")
+                reject_tb.add_column("reason")
+                reject_tb.add_column("count")
+                for strategy_name, reason, count in strategy_reject_rows:
+                    reject_tb.add_row(strategy_name, reason, str(count))
+                console.print(reject_tb)
+
 
 @app.command("list-signals")
 def list_signals(

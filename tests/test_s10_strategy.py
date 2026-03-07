@@ -207,13 +207,16 @@ def test_s10_weighted_cost_cap_blocks_candidate() -> None:
     )
 
     assert signals == []
+    reject_reasons = strategy.last_diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy_conversion:weighted_cost_cap_exceeded") == 1
+    assert reject_reasons.get("event_no_actionable_candidate") == 1
 
 
 def test_s10_leg_cost_cap_blocks_single_expensive_leg() -> None:
     strategy = S10NegRiskConversionArb()
     markets = [
         _market(31, event_id="e8", canonical_id="c1", yes=0.29, liq=900),
-        _market(32, event_id="e8", canonical_id="c2", yes=0.32, liq=90),
+        _market(32, event_id="e8", canonical_id="c2", yes=0.32, liq=110),
         _market(33, event_id="e8", canonical_id="c3", yes=0.34, liq=880),
     ]
 
@@ -232,3 +235,33 @@ def test_s10_leg_cost_cap_blocks_single_expensive_leg() -> None:
     )
 
     assert signals == []
+    reject_reasons = strategy.last_diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy_conversion:leg_cost_cap_exceeded") == 1
+    assert reject_reasons.get("event_no_actionable_candidate") == 1
+
+
+def test_s10_diagnostics_counts_excluded_events() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(41, event_id="blocked-e", canonical_id="c1", yes=0.28, liq=900),
+        _market(42, event_id="blocked-e", canonical_id="c2", yes=0.31, liq=850),
+        _market(43, event_id="blocked-e", canonical_id="c3", yes=0.34, liq=870),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "exclude_event_ids": ["blocked-e"],
+            "min_effective_edge_bps": 10.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    assert diagnostics.get("events_total") == 1
+    assert diagnostics.get("signals_emitted") == 0
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("event_excluded") == 1

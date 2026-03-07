@@ -41,6 +41,10 @@ def _as_bool(raw: object, default: bool) -> bool:
     return default
 
 
+def _bump_counter(bucket: dict[str, int], key: str) -> None:
+    bucket[key] = int(bucket.get(key, 0)) + 1
+
+
 class S10NegRiskConversionArb(Strategy):
     """
     S10: NegRisk conversion/rebalance arbitrage.
@@ -53,6 +57,9 @@ class S10NegRiskConversionArb(Strategy):
     """
 
     name = "s10"
+
+    def __init__(self) -> None:
+        self.last_diagnostics: dict[str, Any] = {}
 
     def generate(
         self,
@@ -98,6 +105,14 @@ class S10NegRiskConversionArb(Strategy):
         }
 
         if max_order_notional <= 0 or max_signals <= 0:
+            self.last_diagnostics = {
+                "events_total": 0,
+                "events_with_candidates": 0,
+                "signals_emitted": 0,
+                "direction_attempts": {"buy_conversion": 0, "sell_conversion": 0},
+                "direction_pass": {"buy_conversion": 0, "sell_conversion": 0},
+                "candidate_reject_reasons": {"strategy_disabled": 1},
+            }
             return []
 
         by_event: dict[str, list[MarketView]] = defaultdict(list)
@@ -110,11 +125,18 @@ class S10NegRiskConversionArb(Strategy):
                 continue
             by_event[m.event_id].append(m)
 
+        reject_reasons: dict[str, int] = {}
+        direction_attempts: dict[str, int] = {"buy_conversion": 0, "sell_conversion": 0}
+        direction_pass: dict[str, int] = {"buy_conversion": 0, "sell_conversion": 0}
+
         signals: list[Signal] = []
+        events_with_candidates = 0
         for event_id, event_rows in by_event.items():
             if event_id in exclude_event_ids:
+                _bump_counter(reject_reasons, "event_excluded")
                 continue
             if len(event_rows) < min_unique_canonicals:
+                _bump_counter(reject_reasons, "event_under_min_unique")
                 continue
 
             candidates: list[list[Signal]] = []
@@ -124,7 +146,8 @@ class S10NegRiskConversionArb(Strategy):
                 buy_mode=True,
                 max_legs_per_event=max_legs_per_event,
             )
-            buy_candidate = self._build_candidate(
+            direction_attempts["buy_conversion"] += 1
+            buy_candidate, buy_candidate_reject_reason = self._build_candidate(
                 rows=buy_rows,
                 direction="buy_conversion",
                 prob_sum_tolerance=prob_sum_tolerance,
@@ -134,7 +157,7 @@ class S10NegRiskConversionArb(Strategy):
                 raw_leg_count=len(event_rows),
             )
             if buy_candidate is not None:
-                buy_signals = self._emit_conversion_signals(
+                buy_signals, buy_emit_reject_reason = self._emit_conversion_signals(
                     event_id=event_id,
                     candidate=buy_candidate,
                     quote_improve=quote_improve,
@@ -150,7 +173,18 @@ class S10NegRiskConversionArb(Strategy):
                     min_qty=min_qty,
                 )
                 if buy_signals:
+                    direction_pass["buy_conversion"] += 1
                     candidates.append(buy_signals)
+                elif buy_emit_reject_reason:
+                    _bump_counter(
+                        reject_reasons,
+                        f"buy_conversion:{buy_emit_reject_reason}",
+                    )
+            elif buy_candidate_reject_reason:
+                _bump_counter(
+                    reject_reasons,
+                    f"buy_conversion:{buy_candidate_reject_reason}",
+                )
 
             if allow_sell_conversion:
                 sell_rows = self._select_rows_for_direction(
@@ -158,7 +192,8 @@ class S10NegRiskConversionArb(Strategy):
                     buy_mode=False,
                     max_legs_per_event=max_legs_per_event,
                 )
-                sell_candidate = self._build_candidate(
+                direction_attempts["sell_conversion"] += 1
+                sell_candidate, sell_candidate_reject_reason = self._build_candidate(
                     rows=sell_rows,
                     direction="sell_conversion",
                     prob_sum_tolerance=prob_sum_tolerance,
@@ -168,7 +203,7 @@ class S10NegRiskConversionArb(Strategy):
                     raw_leg_count=len(event_rows),
                 )
                 if sell_candidate is not None:
-                    sell_signals = self._emit_conversion_signals(
+                    sell_signals, sell_emit_reject_reason = self._emit_conversion_signals(
                         event_id=event_id,
                         candidate=sell_candidate,
                         quote_improve=quote_improve,
@@ -184,11 +219,24 @@ class S10NegRiskConversionArb(Strategy):
                         min_qty=min_qty,
                     )
                     if sell_signals:
+                        direction_pass["sell_conversion"] += 1
                         candidates.append(sell_signals)
+                    elif sell_emit_reject_reason:
+                        _bump_counter(
+                            reject_reasons,
+                            f"sell_conversion:{sell_emit_reject_reason}",
+                        )
+                elif sell_candidate_reject_reason:
+                    _bump_counter(
+                        reject_reasons,
+                        f"sell_conversion:{sell_candidate_reject_reason}",
+                    )
 
             if not candidates:
+                _bump_counter(reject_reasons, "event_no_actionable_candidate")
                 continue
 
+            events_with_candidates += 1
             best_candidate = max(candidates, key=lambda legs: float(legs[0].score))
             signals.extend(best_candidate)
 
@@ -196,7 +244,18 @@ class S10NegRiskConversionArb(Strategy):
                 break
 
         signals.sort(key=lambda s: s.score, reverse=True)
-        return signals[:max_signals]
+        selected_signals = signals[:max_signals]
+        self.last_diagnostics = {
+            "events_total": len(by_event),
+            "events_with_candidates": events_with_candidates,
+            "signals_emitted": len(selected_signals),
+            "direction_attempts": direction_attempts,
+            "direction_pass": direction_pass,
+            "candidate_reject_reasons": {
+                key: reject_reasons[key] for key in sorted(reject_reasons)
+            },
+        }
+        return selected_signals
 
     @staticmethod
     def _select_rows_for_direction(
@@ -264,45 +323,48 @@ class S10NegRiskConversionArb(Strategy):
         max_leg_weight: float,
         min_unique_canonicals: int,
         raw_leg_count: int,
-    ) -> _ConversionCandidate | None:
+    ) -> tuple[_ConversionCandidate | None, str | None]:
         if len(rows) < min_unique_canonicals:
-            return None
+            return None, "under_min_unique_canonicals"
 
         sum_yes = sum(float(r.yes_price or 0.0) for r in rows)
         if sum_yes <= 1e-9:
-            return None
+            return None, "non_positive_sum_yes"
 
         deviation = sum_yes - 1.0
         if abs(deviation) > max_abs_deviation:
-            return None
+            return None, "deviation_above_max_abs"
 
         if direction == "buy_conversion":
             if deviation >= -prob_sum_tolerance:
-                return None
+                return None, "deviation_not_below_tolerance"
             gross_edge = 1.0 - sum_yes
             selection_mode = "min_yes_per_canonical"
         else:
             if deviation <= prob_sum_tolerance:
-                return None
+                return None, "deviation_not_above_tolerance"
             gross_edge = sum_yes - 1.0
             selection_mode = "max_yes_per_canonical"
 
         if gross_edge <= 0:
-            return None
+            return None, "non_positive_gross_edge"
 
         max_leg_weight_ratio = max(float(r.yes_price or 0.0) for r in rows) / max(sum_yes, 1e-9)
         if max_leg_weight_ratio > max_leg_weight:
-            return None
+            return None, "max_leg_weight_exceeded"
 
-        return _ConversionCandidate(
-            direction=direction,
-            rows=rows,
-            sum_yes=sum_yes,
-            gross_edge=gross_edge,
-            deviation=deviation,
-            max_leg_weight=max_leg_weight_ratio,
-            raw_leg_count=raw_leg_count,
-            selection_mode=selection_mode,
+        return (
+            _ConversionCandidate(
+                direction=direction,
+                rows=rows,
+                sum_yes=sum_yes,
+                gross_edge=gross_edge,
+                deviation=deviation,
+                max_leg_weight=max_leg_weight_ratio,
+                raw_leg_count=raw_leg_count,
+                selection_mode=selection_mode,
+            ),
+            None,
         )
 
     @staticmethod
@@ -338,7 +400,7 @@ class S10NegRiskConversionArb(Strategy):
         max_leg_total_cost_bps: float,
         liquidity_fraction: float,
         min_qty: float,
-    ) -> list[Signal]:
+    ) -> tuple[list[Signal], str | None]:
         rows = candidate.rows
         sum_yes = candidate.sum_yes
         gross_edge_bps = (candidate.gross_edge / max(sum_yes, 1e-9)) * 10000.0
@@ -364,23 +426,23 @@ class S10NegRiskConversionArb(Strategy):
             max_weighted_total_cost_bps > 0
             and weighted_total_cost_bps > max_weighted_total_cost_bps
         ):
-            return []
+            return [], "weighted_cost_cap_exceeded"
 
         if max_leg_total_cost_bps > 0 and any(
             leg_cost > max_leg_total_cost_bps for leg_cost in leg_cost_bps.values()
         ):
-            return []
+            return [], "leg_cost_cap_exceeded"
 
         effective_edge_bps = gross_edge_bps - weighted_total_cost_bps
         if effective_edge_bps < min_effective_edge_bps:
-            return []
+            return [], "effective_edge_below_min"
 
         min_leg_liq = min(float(r.liquidity) for r in rows)
         qty = max(min_qty, min_leg_liq * liquidity_fraction)
         if max_order_notional > 0:
             qty = min(qty, max_order_notional / max(sum_yes, 1e-9))
         if qty <= 1e-12:
-            return []
+            return [], "qty_non_positive"
 
         basket_notional = qty * sum_yes
         side = "buy" if candidate.direction == "buy_conversion" else "sell"
@@ -477,4 +539,7 @@ class S10NegRiskConversionArb(Strategy):
                 )
             )
 
-        return out
+        if not out:
+            return [], "non_positive_leg_price"
+
+        return out, None

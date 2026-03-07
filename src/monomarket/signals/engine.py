@@ -78,6 +78,10 @@ class SignalEngine:
                     "fail_reasons": {},
                 },
             )
+            strategy_diagnostics = getattr(impl, "last_diagnostics", None)
+            if isinstance(strategy_diagnostics, dict) and strategy_diagnostics:
+                stats["strategy_diagnostics"] = strategy_diagnostics
+
             pass_edges: list[float] = []
             fail_edges: list[float] = []
 
