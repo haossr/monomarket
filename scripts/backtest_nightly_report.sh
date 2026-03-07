@@ -6,6 +6,7 @@ cd "$ROOT"
 
 LOOKBACK_HOURS="4380"
 MARKET_LIMIT="2000"
+STRATEGIES="s1,s2,s4,s8,s9,s10"
 INGEST_LIMIT="5000"
 INGEST_MODE="full"
 LIQUIDITY_TOP_FRACTION="0.30"
@@ -30,6 +31,7 @@ Usage: bash scripts/backtest_nightly_report.sh [options]
 Options:
   --lookback-hours <float>   Backtest lookback in hours (default: 4380)
   --market-limit <int>       Market limit for signal generation (default: 2000)
+  --strategies <csv>         Strategy ids for cycle/rolling backtest (default: s1,s2,s4,s8,s9,s10)
   --liquidity-top-fraction <0..1>
                              Liquidity top-fraction universe before strategy generation (default: 0.30)
   --ingest-limit <int>       Ingest limit for gamma source (default: 5000)
@@ -61,6 +63,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --market-limit)
       MARKET_LIMIT="$2"
+      shift 2
+      ;;
+    --strategies)
+      STRATEGIES="$2"
       shift 2
       ;;
     --liquidity-top-fraction)
@@ -161,6 +167,11 @@ if [[ "$INGEST_MODE" != "full" && "$INGEST_MODE" != "incremental" ]]; then
   exit 1
 fi
 
+if [[ -z "${STRATEGIES//[[:space:],]/}" ]]; then
+  echo "[nightly] --strategies cannot be empty" >&2
+  exit 1
+fi
+
 if [[ -x ".venv/bin/python" ]]; then
   # shellcheck disable=SC1091
   source .venv/bin/activate
@@ -211,6 +222,7 @@ echo "[nightly] running cycle"
 bash scripts/backtest_cycle.sh \
   --lookback-hours "$LOOKBACK_HOURS" \
   --market-limit "$MARKET_LIMIT" \
+  --strategies "$STRATEGIES" \
   --liquidity-top-fraction "$LIQUIDITY_TOP_FRACTION" \
   --ingest-limit "$INGEST_LIMIT" \
   --ingest-mode "$INGEST_MODE" \
@@ -260,7 +272,7 @@ fi
 
 echo "[nightly] rolling backtest window=${ROLLING_FROM_TS} -> ${ROLLING_TO_TS}"
 monomarket backtest-rolling \
-  --strategies "s1,s2,s4,s8,s9,s10" \
+  --strategies "$STRATEGIES" \
   --from "$ROLLING_FROM_TS" \
   --to "$ROLLING_TO_TS" \
   --window-hours "$ROLLING_WINDOW_HOURS" \
