@@ -199,6 +199,23 @@ Nightly 输出目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 - `rolling-summary.json`
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件）
 
+Sx12（S9/S10）双切片 baseline vs candidate 对照：
+
+```bash
+python scripts/sx12_dual_slice_compare.py \
+  --baseline-config configs/config.example.yaml \
+  --candidate-config configs/config.example.yaml \
+  --strategies s9,s10 \
+  --slices recent24h:24,recent7d:168
+```
+
+输出目录：`artifacts/backtest/sx12-dual-slice-<anchor>/`
+- `baseline/<slice>.json` / `candidate/<slice>.json`：每个切片的回测报告
+- `compare.json`：结构化对照（含每策略 `pnl/trade_count/executed_rows/rejected_rows/mtm_winrate` 与 delta）
+- `compare.md`：可直接贴进进度日志的表格摘要
+
+脚本会强制 `ENABLE_LIVE_TRADING=false`。
+
 `--rolling-reject-top-k` 语义：`0=disabled`（关闭拒单原因摘要输出），`N>0` 输出前 N 个原因（无数据时为 `none`）。
 `rolling_reject_top` 使用 `;` 作为原因分隔符（如 `reasonA:3;reasonB:1`）；`rolling_reject_top_normalized` 为模板归一后的同口径摘要（如 `strategy notional limit exceeded:1088;circuit breaker open:5`）；消费端优先读取 `summary.json` 的 `reject_top_pairs` / `reject_top_pairs_normalized`。
 `summary.json` checksum 默认启用，可用 `--no-checksum` 关闭。
