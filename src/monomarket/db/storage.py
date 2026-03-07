@@ -1123,8 +1123,9 @@ class Storage:
                 SELECT id, strategy, market_id, event_id, side, score, confidence,
                        target_price, size_hint, rationale, payload_json, status, created_at, updated_at
                 FROM signals
-                WHERE created_at >= ? AND created_at <= ?
-                ORDER BY created_at ASC, id ASC
+                WHERE datetime(created_at) >= datetime(?)
+                  AND datetime(created_at) <= datetime(?)
+                ORDER BY datetime(created_at) ASC, id ASC
                 """,
                 (from_ts, to_ts),
             ).fetchall()

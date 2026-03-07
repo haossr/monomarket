@@ -199,6 +199,10 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- objective_strategy: {result.get('objective_strategy')}",
         f"- min_slice_delta_pnl_threshold: {result.get('min_slice_delta_pnl_threshold')}",
         f"- max_slice_delta_max_drawdown_threshold: {result.get('max_slice_delta_max_drawdown_threshold')}",
+        f"- rebuild_signals_window: {bool(result.get('rebuild_signals_window', False))}",
+        f"- rebuild_step_hours: {result.get('rebuild_step_hours')}",
+        f"- rebuild_market_limit: {result.get('rebuild_market_limit')}",
+        f"- rebuild_ingest_limit: {result.get('rebuild_ingest_limit')}",
         f"- total_candidates: {result.get('total_candidates')}",
         "",
         "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | "
@@ -233,7 +237,7 @@ def render_markdown(result: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _run_dual_slice_compare(
+def _build_dual_slice_compare_cmd(
     *,
     compare_script: Path,
     baseline_config: Path,
@@ -242,7 +246,11 @@ def _run_dual_slice_compare(
     slices: str,
     out_dir: Path,
     anchor_ts: str | None,
-) -> dict[str, Any]:
+    rebuild_signals_window: bool,
+    rebuild_step_hours: float,
+    rebuild_market_limit: int,
+    rebuild_ingest_limit: int,
+) -> list[str]:
     cmd = [
         sys.executable,
         str(compare_script),
@@ -259,6 +267,50 @@ def _run_dual_slice_compare(
     ]
     if anchor_ts:
         cmd.extend(["--anchor-ts", anchor_ts])
+
+    if rebuild_signals_window:
+        cmd.extend(
+            [
+                "--rebuild-signals-window",
+                "--rebuild-step-hours",
+                str(rebuild_step_hours),
+                "--rebuild-market-limit",
+                str(rebuild_market_limit),
+                "--rebuild-ingest-limit",
+                str(rebuild_ingest_limit),
+            ]
+        )
+
+    return cmd
+
+
+def _run_dual_slice_compare(
+    *,
+    compare_script: Path,
+    baseline_config: Path,
+    candidate_config: Path,
+    strategies: str,
+    slices: str,
+    out_dir: Path,
+    anchor_ts: str | None,
+    rebuild_signals_window: bool,
+    rebuild_step_hours: float,
+    rebuild_market_limit: int,
+    rebuild_ingest_limit: int,
+) -> dict[str, Any]:
+    cmd = _build_dual_slice_compare_cmd(
+        compare_script=compare_script,
+        baseline_config=baseline_config,
+        candidate_config=candidate_config,
+        strategies=strategies,
+        slices=slices,
+        out_dir=out_dir,
+        anchor_ts=anchor_ts,
+        rebuild_signals_window=rebuild_signals_window,
+        rebuild_step_hours=rebuild_step_hours,
+        rebuild_market_limit=rebuild_market_limit,
+        rebuild_ingest_limit=rebuild_ingest_limit,
+    )
 
     env = os.environ.copy()
     env["ENABLE_LIVE_TRADING"] = "false"
@@ -369,6 +421,29 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="scripts/sx12_dual_slice_compare.py",
         help="Path to sx12 dual-slice compare script",
     )
+    parser.add_argument(
+        "--rebuild-signals-window",
+        action="store_true",
+        help=("Enable per-slice signal rebuild mode in sx12 compare (isolated DB runs)."),
+    )
+    parser.add_argument(
+        "--rebuild-step-hours",
+        type=float,
+        default=12.0,
+        help="Step hours when --rebuild-signals-window is enabled (default: 12)",
+    )
+    parser.add_argument(
+        "--rebuild-market-limit",
+        type=int,
+        default=2000,
+        help="Market limit when --rebuild-signals-window is enabled (default: 2000)",
+    )
+    parser.add_argument(
+        "--rebuild-ingest-limit",
+        type=int,
+        default=300,
+        help="Ingest limit when --rebuild-signals-window is enabled (default: 300)",
+    )
     return parser
 
 
@@ -455,6 +530,10 @@ def main() -> int:
             slices=str(args.slices),
             out_dir=compare_out_dir,
             anchor_ts=str(args.anchor_ts) if args.anchor_ts else None,
+            rebuild_signals_window=bool(args.rebuild_signals_window),
+            rebuild_step_hours=float(args.rebuild_step_hours),
+            rebuild_market_limit=int(args.rebuild_market_limit),
+            rebuild_ingest_limit=int(args.rebuild_ingest_limit),
         )
         summary = summarize_compare_payload(
             compare_payload,
@@ -505,6 +584,10 @@ def main() -> int:
         "slices": str(args.slices),
         "min_slice_delta_pnl_threshold": float(args.min_slice_delta_pnl),
         "max_slice_delta_max_drawdown_threshold": float(args.max_slice_delta_max_drawdown),
+        "rebuild_signals_window": bool(args.rebuild_signals_window),
+        "rebuild_step_hours": float(args.rebuild_step_hours),
+        "rebuild_market_limit": int(args.rebuild_market_limit),
+        "rebuild_ingest_limit": int(args.rebuild_ingest_limit),
         "total_candidates": len(entries),
         "candidates": entries,
     }

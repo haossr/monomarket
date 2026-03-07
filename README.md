@@ -245,7 +245,11 @@ python scripts/s10_param_grid_compare.py \
   --prob-sum-tolerance-grid 0.015,0.02,0.03 \
   --max-abs-deviation-grid 0.15,0.20 \
   --max-tiny-price-leg-share-grid 0.20,0.25 \
-  --max-floor-adjusted-leg-share-grid 0.25,0.35
+  --max-floor-adjusted-leg-share-grid 0.25,0.35 \
+  --rebuild-signals-window \
+  --rebuild-step-hours 24 \
+  --rebuild-market-limit 600 \
+  --rebuild-ingest-limit 300
 ```
 
 输出目录：`artifacts/backtest/s10-grid-<anchor>/`
