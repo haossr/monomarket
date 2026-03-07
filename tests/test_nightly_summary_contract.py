@@ -64,10 +64,18 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "s9_pnl=",
         "s9_activity_hint=",
         "s9_top_reject_reason=",
+        "s9_generation_tiny_price_leg_rejected=",
+        "s9_generation_tiny_price_leg_reject_share=",
+        "s9_generation_floor_adjusted_leg_rejected=",
+        "s9_generation_floor_adjusted_leg_reject_share=",
         "s10_present=",
         "s10_pnl=",
         "s10_activity_hint=",
         "s10_top_reject_reason=",
+        "s10_generation_tiny_price_leg_rejected=",
+        "s10_generation_tiny_price_leg_reject_share=",
+        "s10_generation_floor_adjusted_leg_rejected=",
+        "s10_generation_floor_adjusted_leg_reject_share=",
         "s9_minus_s10_pnl=",
         "negative_strategies=",
         "worst_negative_strategy=",
@@ -120,6 +128,10 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "top_reject_reason_source=",
         "generation_rejected_candidates=",
         "generation_top_reject_reason=",
+        "generation_tiny_price_leg_rejected=",
+        "generation_tiny_price_leg_reject_share=",
+        "generation_floor_adjusted_leg_rejected=",
+        "generation_floor_adjusted_leg_reject_share=",
         "S9-S10 pnl diff",
         "Rolling execution rate",
         "Rolling empty windows",
@@ -242,6 +254,10 @@ def test_pdf_strategy_focus_activity_hints_from_payload() -> None:
     assert hints["s9"]["top_reject_reason_source"] == "replay"
     assert int(hints["s9"]["generation_rejected_candidates"]) == 0
     assert hints["s9"]["generation_top_reject_reason"] == "none"
+    assert int(hints["s9"]["generation_tiny_price_leg_rejected"]) == 0
+    assert int(hints["s9"]["generation_floor_adjusted_leg_rejected"]) == 0
+    assert abs(float(hints["s9"]["generation_tiny_price_leg_reject_share"])) < 1e-12
+    assert abs(float(hints["s9"]["generation_floor_adjusted_leg_reject_share"])) < 1e-12
 
     assert hints["s10"]["hint"] == "active"
     assert int(hints["s10"]["replay_rows"]) == 1
@@ -251,6 +267,10 @@ def test_pdf_strategy_focus_activity_hints_from_payload() -> None:
     assert hints["s10"]["top_reject_reason_source"] == "none"
     assert int(hints["s10"]["generation_rejected_candidates"]) == 0
     assert hints["s10"]["generation_top_reject_reason"] == "none"
+    assert int(hints["s10"]["generation_tiny_price_leg_rejected"]) == 0
+    assert int(hints["s10"]["generation_floor_adjusted_leg_rejected"]) == 0
+    assert abs(float(hints["s10"]["generation_tiny_price_leg_reject_share"])) < 1e-12
+    assert abs(float(hints["s10"]["generation_floor_adjusted_leg_reject_share"])) < 1e-12
 
 
 def test_pdf_strategy_focus_activity_hint_uses_signal_generation_reject_fallback() -> None:
@@ -301,6 +321,10 @@ def test_pdf_strategy_focus_activity_hint_uses_signal_generation_reject_fallback
         hints["s10"]["generation_top_reject_reason"]
         == "buy_conversion:tiny_price_leg_share_exceeded:3"
     )
+    assert int(hints["s10"]["generation_tiny_price_leg_rejected"]) == 3
+    assert int(hints["s10"]["generation_floor_adjusted_leg_rejected"]) == 1
+    assert abs(float(hints["s10"]["generation_tiny_price_leg_reject_share"]) - 0.75) < 1e-12
+    assert abs(float(hints["s10"]["generation_floor_adjusted_leg_reject_share"]) - 0.25) < 1e-12
 
 
 def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> None:
@@ -834,6 +858,10 @@ def test_nightly_summary_activity_hint_uses_signal_generation_reject_fallback(
     assert "s10_top_reject_reason_source=signal_generation" in line
     assert "s10_generation_rejected_candidates=4" in line
     assert "s10_generation_top_reject_reason=buy_conversion:tiny_price_leg_share_exceeded:3" in line
+    assert "s10_generation_tiny_price_leg_rejected=3" in line
+    assert "s10_generation_tiny_price_leg_reject_share=75.00%" in line
+    assert "s10_generation_floor_adjusted_leg_rejected=1" in line
+    assert "s10_generation_floor_adjusted_leg_reject_share=25.00%" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -844,6 +872,10 @@ def test_nightly_summary_activity_hint_uses_signal_generation_reject_fallback(
     assert (
         s10_hint["generation_top_reject_reason"] == "buy_conversion:tiny_price_leg_share_exceeded:3"
     )
+    assert int(s10_hint["generation_tiny_price_leg_rejected"]) == 3
+    assert int(s10_hint["generation_floor_adjusted_leg_rejected"]) == 1
+    assert abs(float(s10_hint["generation_tiny_price_leg_reject_share"]) - 0.75) < 1e-12
+    assert abs(float(s10_hint["generation_floor_adjusted_leg_reject_share"]) - 0.25) < 1e-12
     assert s10_hint["top_reject_reason"] == "buy_conversion:tiny_price_leg_share_exceeded:3"
     assert s10_hint["top_reject_reason_source"] == "signal_generation"
 

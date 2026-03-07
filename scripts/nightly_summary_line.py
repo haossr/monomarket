@@ -33,6 +33,25 @@ def _event_id_str(raw: object) -> str:
         return text.strip()
 
 
+def _generation_reason_sum_by_suffix(
+    reason_counts: dict[str, Any],
+    *,
+    suffix: str,
+) -> int:
+    target = str(suffix).strip().lower()
+    if not target:
+        return 0
+
+    total = 0
+    for raw_reason, raw_count in reason_counts.items():
+        reason = str(raw_reason or "").strip().lower()
+        if not reason:
+            continue
+        if reason == target or reason.endswith(f":{target}"):
+            total += int(_f(raw_count))
+    return total
+
+
 def _negative_strategy_summary(payload: dict[str, Any]) -> dict[str, Any]:
     rows = payload.get("results")
     negatives: list[tuple[str, float]] = []
@@ -387,6 +406,8 @@ def _strategy_focus_activity_hints(
         generation_rejected_candidates = int(_f(item.get("generation_rejected_candidates")))
         generation_reason_counts = item.get("generation_reason_counts")
         generation_top_reject_reason = "none"
+        generation_tiny_price_leg_rejected = 0
+        generation_floor_adjusted_leg_rejected = 0
         if isinstance(generation_reason_counts, dict) and generation_reason_counts:
             generation_top_reject_reason, _ = format_reject_top(
                 generation_reason_counts,
@@ -394,6 +415,25 @@ def _strategy_focus_activity_hints(
                 delimiter=ROLLING_REJECT_TOP_DELIMITER,
                 normalize=True,
             )
+            generation_tiny_price_leg_rejected = _generation_reason_sum_by_suffix(
+                generation_reason_counts,
+                suffix="tiny_price_leg_share_exceeded",
+            )
+            generation_floor_adjusted_leg_rejected = _generation_reason_sum_by_suffix(
+                generation_reason_counts,
+                suffix="floor_adjusted_leg_share_exceeded",
+            )
+
+        generation_tiny_price_leg_reject_share = (
+            float(generation_tiny_price_leg_rejected) / float(generation_rejected_candidates)
+            if generation_rejected_candidates > 0
+            else 0.0
+        )
+        generation_floor_adjusted_leg_reject_share = (
+            float(generation_floor_adjusted_leg_rejected) / float(generation_rejected_candidates)
+            if generation_rejected_candidates > 0
+            else 0.0
+        )
 
         if (
             top_reject_reason == "none"
@@ -425,6 +465,10 @@ def _strategy_focus_activity_hints(
             "top_reject_reason_source": top_reject_reason_source,
             "generation_rejected_candidates": generation_rejected_candidates,
             "generation_top_reject_reason": generation_top_reject_reason,
+            "generation_tiny_price_leg_rejected": generation_tiny_price_leg_rejected,
+            "generation_floor_adjusted_leg_rejected": generation_floor_adjusted_leg_rejected,
+            "generation_tiny_price_leg_reject_share": generation_tiny_price_leg_reject_share,
+            "generation_floor_adjusted_leg_reject_share": generation_floor_adjusted_leg_reject_share,
             "text": (
                 f"{strategy}_activity_hint={hint} "
                 f"{strategy}_replay_rows={replay_count} "
@@ -433,7 +477,11 @@ def _strategy_focus_activity_hints(
                 f"{strategy}_top_reject_reason={top_reject_reason} "
                 f"{strategy}_top_reject_reason_source={top_reject_reason_source} "
                 f"{strategy}_generation_rejected_candidates={generation_rejected_candidates} "
-                f"{strategy}_generation_top_reject_reason={generation_top_reject_reason}"
+                f"{strategy}_generation_top_reject_reason={generation_top_reject_reason} "
+                f"{strategy}_generation_tiny_price_leg_rejected={generation_tiny_price_leg_rejected} "
+                f"{strategy}_generation_tiny_price_leg_reject_share={generation_tiny_price_leg_reject_share:.2%} "
+                f"{strategy}_generation_floor_adjusted_leg_rejected={generation_floor_adjusted_leg_rejected} "
+                f"{strategy}_generation_floor_adjusted_leg_reject_share={generation_floor_adjusted_leg_reject_share:.2%}"
             ),
         }
 
@@ -802,11 +850,25 @@ def build_summary_bundle(
     strategy_focus_s10_activity_hint = strategy_focus_activity_hints.get("s10", {})
     strategy_focus_s9_activity_hint_text = str(
         strategy_focus_s9_activity_hint.get("text")
-        or "s9_activity_hint=no_data s9_replay_rows=0 s9_rejected_rows=0 s9_reject_share=0.00% s9_top_reject_reason=none"
+        or (
+            "s9_activity_hint=no_data s9_replay_rows=0 s9_rejected_rows=0 "
+            "s9_reject_share=0.00% s9_top_reject_reason=none "
+            "s9_generation_tiny_price_leg_rejected=0 "
+            "s9_generation_tiny_price_leg_reject_share=0.00% "
+            "s9_generation_floor_adjusted_leg_rejected=0 "
+            "s9_generation_floor_adjusted_leg_reject_share=0.00%"
+        )
     )
     strategy_focus_s10_activity_hint_text = str(
         strategy_focus_s10_activity_hint.get("text")
-        or "s10_activity_hint=no_data s10_replay_rows=0 s10_rejected_rows=0 s10_reject_share=0.00% s10_top_reject_reason=none"
+        or (
+            "s10_activity_hint=no_data s10_replay_rows=0 s10_rejected_rows=0 "
+            "s10_reject_share=0.00% s10_top_reject_reason=none "
+            "s10_generation_tiny_price_leg_rejected=0 "
+            "s10_generation_tiny_price_leg_reject_share=0.00% "
+            "s10_generation_floor_adjusted_leg_rejected=0 "
+            "s10_generation_floor_adjusted_leg_reject_share=0.00%"
+        )
     )
     strategy_focus_pnl_diff_s9_minus_s10 = float(
         _f(strategy_focus_s9.get("pnl")) - _f(strategy_focus_s10.get("pnl"))
@@ -1151,7 +1213,7 @@ def build_summary_bundle(
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
         "schema_note_version": "1.0",
-        "schema_note": "best is structured object; strategy_focus surfaces S9/S10 snapshot metrics + activity_hint diagnostics (with signal_generation fallback); prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (share + temporal coverage + experiment_interpretable/reason) for machine parsing",
+        "schema_note": "best is structured object; strategy_focus surfaces S9/S10 snapshot metrics + activity_hint diagnostics (with signal_generation fallback + tiny/floor reject shares); prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (share + temporal coverage + experiment_interpretable/reason) for machine parsing",
         "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
@@ -1222,6 +1284,34 @@ def build_summary_bundle(
                     "generation_top_reject_reason": str(
                         strategy_focus_s9_activity_hint.get("generation_top_reject_reason", "none")
                     ),
+                    "generation_tiny_price_leg_rejected": int(
+                        _f(
+                            strategy_focus_s9_activity_hint.get(
+                                "generation_tiny_price_leg_rejected"
+                            )
+                        )
+                    ),
+                    "generation_floor_adjusted_leg_rejected": int(
+                        _f(
+                            strategy_focus_s9_activity_hint.get(
+                                "generation_floor_adjusted_leg_rejected"
+                            )
+                        )
+                    ),
+                    "generation_tiny_price_leg_reject_share": float(
+                        _f(
+                            strategy_focus_s9_activity_hint.get(
+                                "generation_tiny_price_leg_reject_share"
+                            )
+                        )
+                    ),
+                    "generation_floor_adjusted_leg_reject_share": float(
+                        _f(
+                            strategy_focus_s9_activity_hint.get(
+                                "generation_floor_adjusted_leg_reject_share"
+                            )
+                        )
+                    ),
                     "text": str(strategy_focus_s9_activity_hint.get("text") or ""),
                 },
                 "text": str(strategy_focus_s9.get("text") or ""),
@@ -1252,6 +1342,34 @@ def build_summary_bundle(
                     ),
                     "generation_top_reject_reason": str(
                         strategy_focus_s10_activity_hint.get("generation_top_reject_reason", "none")
+                    ),
+                    "generation_tiny_price_leg_rejected": int(
+                        _f(
+                            strategy_focus_s10_activity_hint.get(
+                                "generation_tiny_price_leg_rejected"
+                            )
+                        )
+                    ),
+                    "generation_floor_adjusted_leg_rejected": int(
+                        _f(
+                            strategy_focus_s10_activity_hint.get(
+                                "generation_floor_adjusted_leg_rejected"
+                            )
+                        )
+                    ),
+                    "generation_tiny_price_leg_reject_share": float(
+                        _f(
+                            strategy_focus_s10_activity_hint.get(
+                                "generation_tiny_price_leg_reject_share"
+                            )
+                        )
+                    ),
+                    "generation_floor_adjusted_leg_reject_share": float(
+                        _f(
+                            strategy_focus_s10_activity_hint.get(
+                                "generation_floor_adjusted_leg_reject_share"
+                            )
+                        )
                     ),
                     "text": str(strategy_focus_s10_activity_hint.get("text") or ""),
                 },

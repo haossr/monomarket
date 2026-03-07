@@ -30,6 +30,25 @@ def _safe_int(value: object, default: int = 0) -> int:
         return default
 
 
+def _generation_reason_sum_by_suffix(
+    reason_counts: dict[str, Any],
+    *,
+    suffix: str,
+) -> int:
+    target = str(suffix).strip().lower()
+    if not target:
+        return 0
+
+    total = 0
+    for raw_reason, raw_count in reason_counts.items():
+        reason = str(raw_reason or "").strip().lower()
+        if not reason:
+            continue
+        if reason == target or reason.endswith(f":{target}"):
+            total += _safe_int(raw_count)
+    return total
+
+
 def _nice_step(span: float, target_ticks: int = 5) -> float:
     if span <= 0:
         return 1.0
@@ -467,6 +486,8 @@ def _build_strategy_focus_activity_hints(
         generation_rejected_candidates = _safe_int(item.get("generation_rejected_candidates"))
         generation_reason_counts = item.get("generation_reason_counts")
         generation_top_reject_reason = "none"
+        generation_tiny_price_leg_rejected = 0
+        generation_floor_adjusted_leg_rejected = 0
         if isinstance(generation_reason_counts, dict) and generation_reason_counts:
             generation_top_reject_reason, _ = format_reject_top(
                 generation_reason_counts,
@@ -474,6 +495,25 @@ def _build_strategy_focus_activity_hints(
                 delimiter=";",
                 normalize=True,
             )
+            generation_tiny_price_leg_rejected = _generation_reason_sum_by_suffix(
+                generation_reason_counts,
+                suffix="tiny_price_leg_share_exceeded",
+            )
+            generation_floor_adjusted_leg_rejected = _generation_reason_sum_by_suffix(
+                generation_reason_counts,
+                suffix="floor_adjusted_leg_share_exceeded",
+            )
+
+        generation_tiny_price_leg_reject_share = (
+            float(generation_tiny_price_leg_rejected) / float(generation_rejected_candidates)
+            if generation_rejected_candidates > 0
+            else 0.0
+        )
+        generation_floor_adjusted_leg_reject_share = (
+            float(generation_floor_adjusted_leg_rejected) / float(generation_rejected_candidates)
+            if generation_rejected_candidates > 0
+            else 0.0
+        )
 
         if (
             top_reject_reason == "none"
@@ -505,6 +545,10 @@ def _build_strategy_focus_activity_hints(
             "top_reject_reason_source": top_reject_reason_source,
             "generation_rejected_candidates": generation_rejected_candidates,
             "generation_top_reject_reason": generation_top_reject_reason,
+            "generation_tiny_price_leg_rejected": generation_tiny_price_leg_rejected,
+            "generation_floor_adjusted_leg_rejected": generation_floor_adjusted_leg_rejected,
+            "generation_tiny_price_leg_reject_share": generation_tiny_price_leg_reject_share,
+            "generation_floor_adjusted_leg_reject_share": generation_floor_adjusted_leg_reject_share,
         }
 
     return hints
@@ -837,7 +881,11 @@ def render_pdf(
         )
         write_wrapped(
             f"  generation_rejected_candidates={_safe_int(hint.get('generation_rejected_candidates'))} "
-            f"generation_top_reject_reason={hint.get('generation_top_reject_reason', 'none')}"
+            f"generation_top_reject_reason={hint.get('generation_top_reject_reason', 'none')} "
+            f"generation_tiny_price_leg_rejected={_safe_int(hint.get('generation_tiny_price_leg_rejected'))} "
+            f"generation_tiny_price_leg_reject_share={_safe_float(hint.get('generation_tiny_price_leg_reject_share')) * 100.0:.2f}% "
+            f"generation_floor_adjusted_leg_rejected={_safe_int(hint.get('generation_floor_adjusted_leg_rejected'))} "
+            f"generation_floor_adjusted_leg_reject_share={_safe_float(hint.get('generation_floor_adjusted_leg_reject_share')) * 100.0:.2f}%"
         )
 
     s9_pnl = _safe_float(strategy_focus.get("s9", {}).get("pnl"))

@@ -238,7 +238,7 @@ uv run --with reportlab python scripts/backtest_pdf_report.py \
 
 > 若环境已安装 reportlab，也可直接 `python scripts/backtest_pdf_report.py ...`。
 >
-> PDF 会展示收益图表，同时在 Sample Coverage 区块展示总览胜率（Closed/MTM winrate summary，来源与 nightly summary 一致：`latest.json.results`）与主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）；当 `history_limited=true` 时会额外给出谨慎解读提示。新增 `Sx12 Strategy Focus / S9-S10` 卡片：展示 S9/S10 的 present/active、PnL、trades、closed/mtm winrate，以及 activity_hint/replay_rows/rejected_rows/top_reject_reason；并在同卡片展示 `top_reject_reason_source` 与 `generation_rejected_candidates/generation_top_reject_reason`（无 replay 时回退到 signal-generation 诊断）。Rolling Summary 区块展示 rolling execution rate / empty windows / coverage label 与 rolling reject top 摘要（简版 `reason:count;reason:count`）。
+> PDF 会展示收益图表，同时在 Sample Coverage 区块展示总览胜率（Closed/MTM winrate summary，来源与 nightly summary 一致：`latest.json.results`）与主窗口样本覆盖注记（Main window coverage / Main history limited / Main window note）；当 `history_limited=true` 时会额外给出谨慎解读提示。新增 `Sx12 Strategy Focus / S9-S10` 卡片：展示 S9/S10 的 present/active、PnL、trades、closed/mtm winrate，以及 activity_hint/replay_rows/rejected_rows/top_reject_reason；并在同卡片展示 `top_reject_reason_source` 与 `generation_rejected_candidates/generation_top_reject_reason`，以及 tiny/floor reject count+share（`generation_tiny_price_leg_*`、`generation_floor_adjusted_leg_*`，无 replay 时回退到 signal-generation 诊断）。Rolling Summary 区块展示 rolling execution rate / empty windows / coverage label 与 rolling reject top 摘要（简版 `reason:count;reason:count`）。
 
 ## 12) Nightly 一键产出（回测 + PDF）
 
@@ -265,7 +265,7 @@ bash scripts/backtest_nightly_report.sh \
 夜间目录：`artifacts/backtest/nightly/<YYYY-MM-DD>/`
 - `report.pdf`
 - `summary.txt`（含总览 `closed_winrate/mtm_winrate` + sample 数、主窗口样本覆盖 `main_coverage/history_limited/window_note`（`no_replay_rows` 时 `main_coverage=0.00%`）、S9/S10 快照指标（`s9_* / s10_* / s9_minus_s10_pnl`）、rolling `pos_win_rate/empty_windows` 与 canonical 别名 `positive_window_rate/empty_window_count`，以及 `range_h/coverage/overlap` 与 canonical 别名 `range_hours/coverage_ratio/overlap_ratio`、`coverage_label`、`rolling_reject_top_k`、主要拒单原因摘要）
-- `summary.json`（结构化 sidecar，便于机器解析；含 `best` 对象、`strategy_focus`（S9/S10 指标快照 + `activity_hint` 无成交原因提示；`top_reject_reason_source` 与 `generation_*` 字段可在无 replay 时回退到 signal-generation 诊断）、`best_version`、`schema_note_version`、`schema_note`、`winrate` 汇总对象、`window_coverage` 覆盖注记对象、rolling 指标与 `checksum_algo/checksum_sha256`；当 `executed_signals=0` 时 `best.available=false` 且 `best_strategy=n/a`）
+- `summary.json`（结构化 sidecar，便于机器解析；含 `best` 对象、`strategy_focus`（S9/S10 指标快照 + `activity_hint` 无成交原因提示；`top_reject_reason_source` 与 `generation_*` 字段可在无 replay 时回退到 signal-generation 诊断，并含 tiny/floor reject count+share 字段）、`best_version`、`schema_note_version`、`schema_note`、`winrate` 汇总对象、`window_coverage` 覆盖注记对象、rolling 指标与 `checksum_algo/checksum_sha256`；当 `executed_signals=0` 时 `best.available=false` 且 `best_strategy=n/a`）
 - `rolling-summary.json`（滚动窗口多样本回测汇总）
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件；含 `cycle-meta.json`，记录 fixed-window 模式、是否清窗、清窗数量，以及“本轮新生成信号是否落入回放窗口”）
 
