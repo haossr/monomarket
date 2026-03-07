@@ -162,6 +162,7 @@ bash scripts/backtest_cycle.sh \
 ```
 
 默认 universe 策略：**先全量抓取（gamma full, limit=5000）再按流动性筛选 top 30%**（可通过 `--liquidity-top-fraction` / `--ingest-mode` / `--ingest-limit` 覆盖）。
+如需仅评估 S9/S10，可追加 `--strategies s9,s10`。
 
 输出：`artifacts/backtest/runs/<timestamp>/latest.json|replay.csv|strategy.csv|event.csv|summary.md`
 （并为各 CSV 生成 `.sha256` sidecar）。
