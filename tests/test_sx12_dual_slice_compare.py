@@ -27,6 +27,17 @@ def test_parse_slice_specs() -> None:
     assert [s.hours for s in specs] == [24.0, 168.0]
 
 
+def test_slice_default_includes_recent14d() -> None:
+    module = _load_module()
+
+    parser = module._build_arg_parser()
+    args = parser.parse_args(["--baseline-config", "base.yaml", "--candidate-config", "cand.yaml"])
+
+    specs = module.parse_slice_specs(str(args.slices))
+    assert [s.label for s in specs] == ["recent24h", "recent7d", "recent14d"]
+    assert [s.hours for s in specs] == [24.0, 168.0, 336.0]
+
+
 def test_summarize_strategy_normalizes_reject_reason_prefix() -> None:
     module = _load_module()
 

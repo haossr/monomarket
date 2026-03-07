@@ -301,8 +301,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--slices",
-        default="recent24h:24,recent7d:168",
-        help="Slice specs passed to sx12 compare",
+        default="recent24h:24,recent7d:168,recent14d:336",
+        help=(
+            "Slice specs passed to sx12 compare "
+            "(default: recent24h:24,recent7d:168,recent14d:336)"
+        ),
     )
     parser.add_argument("--anchor-ts", default=None, help="Anchor ISO timestamp (UTC)")
     parser.add_argument(
