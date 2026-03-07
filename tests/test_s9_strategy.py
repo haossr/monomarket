@@ -40,7 +40,7 @@ def test_s9_generates_buy_carry_pair() -> None:
             canonical_id="c1",
             event_id="e1",
             yes=0.44,
-            no=0.58,
+            no=0.53,
             liq=900,
             question="Will Team A win?",
         ),
@@ -49,7 +49,7 @@ def test_s9_generates_buy_carry_pair() -> None:
             canonical_id="c1",
             event_id="e1",
             yes=0.49,
-            no=0.53,
+            no=0.58,
             liq=850,
             question="Will Team A win?",
         ),
@@ -76,6 +76,10 @@ def test_s9_generates_buy_carry_pair() -> None:
     assert len(pair_batch_ids) == 1
     condition_keys = {str(s.payload.get("condition_key", "")) for s in signals}
     assert len(condition_keys) == 1
+    market_ids = {str(s.market_id) for s in signals}
+    assert len(market_ids) == 1
+    assert all(bool(s.payload.get("pair_same_market", False)) for s in signals)
+    assert all(str(s.payload.get("pair_mode", "")) == "same_market" for s in signals)
 
 
 def test_s9_cost_model_blocks_weak_edge() -> None:
@@ -130,7 +134,7 @@ def test_s9_event_pair_guard_limits_pairs_per_event() -> None:
             canonical_id="c1",
             event_id="e1",
             yes=0.44,
-            no=0.58,
+            no=0.53,
             liq=900,
             question="Will Team A win?",
         ),
@@ -139,7 +143,7 @@ def test_s9_event_pair_guard_limits_pairs_per_event() -> None:
             canonical_id="c1",
             event_id="e1",
             yes=0.47,
-            no=0.53,
+            no=0.58,
             liq=880,
             question="Will Team A win?",
         ),
@@ -148,7 +152,7 @@ def test_s9_event_pair_guard_limits_pairs_per_event() -> None:
             canonical_id="c2",
             event_id="e1",
             yes=0.43,
-            no=0.57,
+            no=0.55,
             liq=910,
             question="Will Team B win?",
         ),
@@ -189,7 +193,7 @@ def test_s9_event_notional_budget_caps_pair_size() -> None:
             canonical_id="c1",
             event_id="e1",
             yes=0.44,
-            no=0.58,
+            no=0.53,
             liq=1200,
             question="Will Team A win?",
         ),
@@ -198,7 +202,7 @@ def test_s9_event_notional_budget_caps_pair_size() -> None:
             canonical_id="c1",
             event_id="e1",
             yes=0.49,
-            no=0.53,
+            no=0.58,
             liq=1200,
             question="Will Team A win?",
         ),
@@ -241,6 +245,57 @@ def test_s9_default_blocks_cross_event_pair() -> None:
     )
 
     assert signals == []
+
+
+def test_s9_default_same_market_guard_blocks_cross_market_only_edge() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-cross-only",
+            event_id="e-cross",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team X win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-cross-only",
+            event_id="e-cross",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Team X win?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+
+    cross_market_signals = strategy.generate(
+        markets,
+        {
+            "require_same_market": False,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert len(cross_market_signals) == 2
+    assert len({str(s.market_id) for s in cross_market_signals}) == 2
+    assert all(not bool(s.payload.get("pair_same_market", True)) for s in cross_market_signals)
 
 
 def test_s9_default_blocks_cross_condition_pair_within_event() -> None:
@@ -307,6 +362,7 @@ def test_s9_can_opt_out_same_condition_guard() -> None:
         {
             "require_same_condition": False,
             "require_same_event": True,
+            "require_same_market": False,
             "min_effective_edge_bps": 5.0,
             "fee_bps": 0.0,
             "slippage_bps": 0.0,
@@ -410,11 +466,11 @@ def test_s9_diagnostics_event_top_k_summary() -> None:
 
     reject_reasons = diagnostics.get("candidate_reject_reasons", {})
     assert reject_reasons.get("canonical_under_two_legs") == 1
-    assert reject_reasons.get("buy:effective_edge_below_min") == 1
+    assert reject_reasons.get("buy:non_positive_gross_edge") == 1
     assert reject_reasons.get("sell:effective_edge_below_min") == 1
 
     reject_by_event = diagnostics.get("candidate_reject_reasons_by_event", {})
-    assert reject_by_event.get("e1", {}).get("buy:effective_edge_below_min") == 1
+    assert reject_by_event.get("e1", {}).get("buy:non_positive_gross_edge") == 1
     assert reject_by_event.get("e1", {}).get("sell:effective_edge_below_min") == 1
     assert reject_by_event.get("e2", {}).get("canonical_under_two_legs") == 1
 
@@ -481,7 +537,7 @@ def test_s9_rejects_when_post_floor_parity_turns_negative() -> None:
             canonical_id="c-floor-reject",
             event_id="e-floor-reject",
             yes=0.0005,
-            no=0.95,
+            no=0.995,
             liq=1000,
             question="Will Team D win?",
         ),
@@ -490,7 +546,7 @@ def test_s9_rejects_when_post_floor_parity_turns_negative() -> None:
             canonical_id="c-floor-reject",
             event_id="e-floor-reject",
             yes=0.85,
-            no=0.995,
+            no=0.60,
             liq=1000,
             question="Will Team D win?",
         ),

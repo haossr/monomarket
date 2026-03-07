@@ -97,9 +97,11 @@ class S9YesNoParityArb(Strategy):
     S9: same-condition YES/NO parity arbitrage.
 
     Signal construction:
-      - buy carry: buy cheapest YES + cheapest NO when yes+no < 1
-      - sell overround: sell richest YES + richest NO when yes+no > 1
+      - buy carry: buy YES + NO parity leg when yes+no < 1
+      - sell overround: sell YES + NO parity leg when yes+no > 1
 
+    Default leg matching is same-market (`require_same_market=true`),
+    with optional cross-market pairing for experiments.
     Effective edge is local and depth/fee/slippage aware.
     """
 
@@ -167,6 +169,7 @@ class S9YesNoParityArb(Strategy):
         allow_sell_parity = _as_bool(cfg.get("allow_sell_parity"), False)
         require_same_event = _as_bool(cfg.get("require_same_event"), True)
         require_same_condition = _as_bool(cfg.get("require_same_condition"), True)
+        require_same_market = _as_bool(cfg.get("require_same_market"), True)
         max_pairs_per_event = max(0, int(float(cfg.get("max_pairs_per_event", 2))))
         max_event_pair_notional = float(cfg.get("max_event_pair_notional", 20.0))
         diagnostics_event_top_k = max(0, int(float(cfg.get("diagnostics_event_top_k", 20))))
@@ -263,6 +266,7 @@ class S9YesNoParityArb(Strategy):
                     buy_mode=buy_mode,
                     require_same_event=require_same_event,
                     require_same_condition=require_same_condition,
+                    require_same_market=require_same_market,
                 )
                 if pair is None:
                     _record_reject_reason(
@@ -552,6 +556,7 @@ class S9YesNoParityArb(Strategy):
         buy_mode: bool,
         require_same_event: bool,
         require_same_condition: bool,
+        require_same_market: bool,
     ) -> tuple[MarketView, MarketView] | None:
         if buy_mode:
             yes_sorted = sorted(rows, key=lambda m: float(m.yes_price or 1.0))
@@ -565,18 +570,12 @@ class S9YesNoParityArb(Strategy):
 
         for yes_leg in yes_sorted:
             for no_leg in no_sorted:
-                if yes_leg.market_id == no_leg.market_id:
+                if require_same_market:
+                    if yes_leg.market_id != no_leg.market_id:
+                        continue
+                elif yes_leg.market_id == no_leg.market_id:
                     continue
-                if require_same_event and str(yes_leg.event_id) != str(no_leg.event_id):
-                    continue
-                if require_same_condition and (
-                    cls._condition_key_for_market(yes_leg) != cls._condition_key_for_market(no_leg)
-                ):
-                    continue
-                return yes_leg, no_leg
 
-        for yes_leg in yes_sorted:
-            for no_leg in no_sorted:
                 if require_same_event and str(yes_leg.event_id) != str(no_leg.event_id):
                     continue
                 if require_same_condition and (
@@ -797,6 +796,10 @@ class S9YesNoParityArb(Strategy):
             "pair_batch_id": pair_batch_id,
             "pair_expected_legs": 2,
             "pair_atomic": True,
+            "pair_mode": (
+                "same_market" if str(yes_leg.market_id) == str(no_leg.market_id) else "cross_market"
+            ),
+            "pair_same_market": str(yes_leg.market_id) == str(no_leg.market_id),
             "pair_leg_tokens": [OUTCOME_TOKEN_YES, OUTCOME_TOKEN_NO],
             "direction": direction,
             "parity_sum": post_floor_parity_sum,
