@@ -182,3 +182,53 @@ def test_s10_filters_by_unique_canonicals_and_leg_weight() -> None:
         },
     )
     assert signals_concentrated == []
+
+
+def test_s10_weighted_cost_cap_blocks_candidate() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(21, event_id="e7", canonical_id="c1", yes=0.29, liq=150),
+        _market(22, event_id="e7", canonical_id="c2", yes=0.32, liq=140),
+        _market(23, event_id="e7", canonical_id="c3", yes=0.34, liq=130),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 20.0,
+            "slippage_bps": 12.0,
+            "depth_reference_liquidity": 1000.0,
+            "depth_penalty_max_bps": 40.0,
+            "max_weighted_total_cost_bps": 60.0,
+            "max_leg_total_cost_bps": 200.0,
+        },
+    )
+
+    assert signals == []
+
+
+def test_s10_leg_cost_cap_blocks_single_expensive_leg() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(31, event_id="e8", canonical_id="c1", yes=0.29, liq=900),
+        _market(32, event_id="e8", canonical_id="c2", yes=0.32, liq=90),
+        _market(33, event_id="e8", canonical_id="c3", yes=0.34, liq=880),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 8.0,
+            "slippage_bps": 6.0,
+            "depth_reference_liquidity": 1000.0,
+            "depth_penalty_max_bps": 70.0,
+            "max_weighted_total_cost_bps": 200.0,
+            "max_leg_total_cost_bps": 70.0,
+        },
+    )
+
+    assert signals == []

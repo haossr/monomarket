@@ -82,6 +82,11 @@ class S10NegRiskConversionArb(Strategy):
         max_legs_per_event = max(0, int(float(cfg.get("max_legs_per_event", 32))))
         min_unique_canonicals = max(2, int(float(cfg.get("min_unique_canonicals", 3))))
         max_leg_weight = min(1.0, max(0.0, float(cfg.get("max_leg_weight", 0.70))))
+        max_weighted_total_cost_bps = max(
+            0.0,
+            float(cfg.get("max_weighted_total_cost_bps", 120.0)),
+        )
+        max_leg_total_cost_bps = max(0.0, float(cfg.get("max_leg_total_cost_bps", 95.0)))
         quote_improve = max(0.0, float(cfg.get("quote_improve", 0.0)))
         allow_sell_conversion = _as_bool(cfg.get("allow_sell_conversion"), False)
 
@@ -139,6 +144,8 @@ class S10NegRiskConversionArb(Strategy):
                     slippage_bps=slippage_bps,
                     depth_reference_liquidity=depth_reference_liquidity,
                     depth_penalty_max_bps=depth_penalty_max_bps,
+                    max_weighted_total_cost_bps=max_weighted_total_cost_bps,
+                    max_leg_total_cost_bps=max_leg_total_cost_bps,
                     liquidity_fraction=liquidity_fraction,
                     min_qty=min_qty,
                 )
@@ -171,6 +178,8 @@ class S10NegRiskConversionArb(Strategy):
                         slippage_bps=slippage_bps,
                         depth_reference_liquidity=depth_reference_liquidity,
                         depth_penalty_max_bps=depth_penalty_max_bps,
+                        max_weighted_total_cost_bps=max_weighted_total_cost_bps,
+                        max_leg_total_cost_bps=max_leg_total_cost_bps,
                         liquidity_fraction=liquidity_fraction,
                         min_qty=min_qty,
                     )
@@ -325,6 +334,8 @@ class S10NegRiskConversionArb(Strategy):
         slippage_bps: float,
         depth_reference_liquidity: float,
         depth_penalty_max_bps: float,
+        max_weighted_total_cost_bps: float,
+        max_leg_total_cost_bps: float,
         liquidity_fraction: float,
         min_qty: float,
     ) -> list[Signal]:
@@ -349,6 +360,17 @@ class S10NegRiskConversionArb(Strategy):
             leg_cost_bps[row.market_id] = cost.total_bps
 
         weighted_total_cost_bps = weighted_cost_numerator / max(sum_yes, 1e-9)
+        if (
+            max_weighted_total_cost_bps > 0
+            and weighted_total_cost_bps > max_weighted_total_cost_bps
+        ):
+            return []
+
+        if max_leg_total_cost_bps > 0 and any(
+            leg_cost > max_leg_total_cost_bps for leg_cost in leg_cost_bps.values()
+        ):
+            return []
+
         effective_edge_bps = gross_edge_bps - weighted_total_cost_bps
         if effective_edge_bps < min_effective_edge_bps:
             return []
@@ -427,7 +449,9 @@ class S10NegRiskConversionArb(Strategy):
                     "depth_reference_liquidity": depth_reference_liquidity,
                     "depth_penalty_max_bps_per_leg": depth_penalty_max_bps,
                     "weighted_total_cost_bps": weighted_total_cost_bps,
+                    "max_weighted_total_cost_bps": max_weighted_total_cost_bps,
                     "leg_total_cost_bps": leg_cost_bps.get(row.market_id, 0.0),
+                    "max_leg_total_cost_bps": max_leg_total_cost_bps,
                     "leg_depth_penalty_bps": depth_penalties.get(row.market_id, 0.0),
                 },
                 "primary_leg": {
