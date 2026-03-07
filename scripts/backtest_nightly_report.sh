@@ -169,6 +169,8 @@ PDF_PATH="${NIGHTLY_DIR}/report.pdf"
 SUMMARY_TXT="${NIGHTLY_DIR}/summary.txt"
 SUMMARY_JSON="${NIGHTLY_DIR}/summary.json"
 ROLLING_JSON="${NIGHTLY_DIR}/rolling-summary.json"
+ANALYSIS_DIR="${NIGHTLY_DIR}/analysis"
+ANALYSIS_JSON="${ANALYSIS_DIR}/topic-analysis.json"
 
 mkdir -p "$NIGHTLY_DIR"
 
@@ -197,6 +199,24 @@ bash scripts/backtest_cycle.sh \
   ${CYCLE_WINDOW_ARGS[@]-} \
   ${CYCLE_CLEAR_ARGS[@]-} \
   ${CYCLE_REBUILD_ARGS[@]-}
+
+echo "[nightly] generate topic analysis charts"
+mkdir -p "$ANALYSIS_DIR"
+if command -v uv >/dev/null 2>&1; then
+  uv run --with pandas --with matplotlib --with numpy "$PYTHON_BIN" scripts/backtest_topic_analysis.py \
+    --backtest-json "$RUN_DIR/latest.json" \
+    --replay-csv "$RUN_DIR/replay.csv" \
+    --event-csv "$RUN_DIR/event.csv" \
+    --config "$CONFIG_PATH" \
+    --output-dir "$ANALYSIS_DIR"
+else
+  "$PYTHON_BIN" scripts/backtest_topic_analysis.py \
+    --backtest-json "$RUN_DIR/latest.json" \
+    --replay-csv "$RUN_DIR/replay.csv" \
+    --event-csv "$RUN_DIR/event.csv" \
+    --config "$CONFIG_PATH" \
+    --output-dir "$ANALYSIS_DIR"
+fi
 
 ROLLING_FROM_TO="$($PYTHON_BIN - "$RUN_DIR/latest.json" <<'PY'
 from __future__ import annotations
@@ -236,6 +256,7 @@ if command -v uv >/dev/null 2>&1; then
     --event-csv "$RUN_DIR/event.csv" \
     --rolling-json "$ROLLING_JSON" \
     --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
+    --analysis-json "$ANALYSIS_JSON" \
     --output "$PDF_PATH" \
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 else
@@ -246,6 +267,7 @@ else
     --event-csv "$RUN_DIR/event.csv" \
     --rolling-json "$ROLLING_JSON" \
     --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
+    --analysis-json "$ANALYSIS_JSON" \
     --output "$PDF_PATH" \
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 fi
@@ -260,11 +282,12 @@ fi
   --pdf-path "$PDF_PATH" \
   --rolling-json "$ROLLING_JSON" \
   --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
+  --analysis-json "$ANALYSIS_JSON" \
   --summary-path "$SUMMARY_TXT" \
   --summary-json-path "$SUMMARY_JSON" \
   --nightly-date "$NIGHTLY_DATE" \
   --rolling-reject-top-k "$ROLLING_REJECT_TOP_K" \
-  "${SUMMARY_CHECKSUM_ARGS[@]}"
+  ${SUMMARY_CHECKSUM_ARGS[@]+"${SUMMARY_CHECKSUM_ARGS[@]}"}
 
 if [[ "$REQUIRE_INTERPRETABLE" == "1" ]]; then
   "$PYTHON_BIN" - "$SUMMARY_JSON" <<'PY'
@@ -294,6 +317,7 @@ fi
 echo "[nightly] done"
 echo "- run_dir: $RUN_DIR"
 echo "- rolling_json: $ROLLING_JSON"
+echo "- analysis_json: $ANALYSIS_JSON"
 echo "- pdf: $PDF_PATH"
 echo "- summary: $SUMMARY_TXT"
 echo "- summary_json: $SUMMARY_JSON"

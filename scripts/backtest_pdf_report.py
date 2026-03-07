@@ -290,6 +290,7 @@ def render_pdf(
     event_rows: list[dict[str, Any]],
     rolling_payload: dict[str, Any] | None,
     cycle_meta_payload: dict[str, Any] | None,
+    analysis_payload: dict[str, Any] | None,
     output_path: Path,
     title: str,
 ) -> None:
@@ -300,6 +301,7 @@ def render_pdf(
         from reportlab.graphics.shapes import Drawing, Line, String
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
+        from reportlab.lib.utils import ImageReader
         from reportlab.pdfgen import canvas
     except Exception as exc:  # pragma: no cover - runtime dependency guidance
         raise SystemExit(
@@ -342,6 +344,29 @@ def render_pdf(
         draw_y = y - float(drawing.height)
         renderPDF.draw(drawing, pdf, margin_x, draw_y)
         y = draw_y - 8
+
+    def draw_image(path: Path, caption: str, *, max_height: float = 250.0) -> None:
+        nonlocal y
+        if not path.exists():
+            write_line(f"(Missing image: {path.name})")
+            return
+
+        reader = ImageReader(str(path))
+        raw_w, raw_h = reader.getSize()
+        if raw_w <= 0 or raw_h <= 0:
+            write_line(f"(Invalid image: {path.name})")
+            return
+
+        scale = min(content_width / float(raw_w), max_height / float(raw_h))
+        draw_w = float(raw_w) * scale
+        draw_h = float(raw_h) * scale
+
+        ensure_space(draw_h + 26)
+        draw_y = y - draw_h
+        draw_x = margin_x + (content_width - draw_w) / 2
+        pdf.drawImage(reader, draw_x, draw_y, width=draw_w, height=draw_h, preserveAspectRatio=True)
+        y = draw_y - 6
+        write_line(caption, size=9, leading=12)
 
     def make_cumulative_chart() -> tuple[Any | None, str | None]:
         points = _build_cumulative_realized_points(payload)
@@ -715,6 +740,58 @@ def render_pdf(
                 + f"closed_winrate={closed_wr}, mtm_winrate={mtm_wr}, trades={trades}"
             )
 
+    write_line("")
+    write_line("Topic Distribution / 热门Topic", bold=True, size=12, leading=18)
+    if not isinstance(analysis_payload, dict):
+        write_line("(Topic analysis unavailable)")
+    else:
+        topic_dist_obj = analysis_payload.get("topic_distribution")
+        topic_dist = topic_dist_obj if isinstance(topic_dist_obj, list) else []
+        if topic_dist:
+            write_line("Topic distribution (by executed signals):")
+            for row in topic_dist:
+                if not isinstance(row, dict):
+                    continue
+                category = str(row.get("category", "unknown"))
+                executed_signals = _safe_int(row.get("executed_signals"))
+                topic_count = _safe_int(row.get("topic_count"))
+                pnl = _safe_float(row.get("pnl"))
+                write_line(
+                    f" - {category}: executed_signals={executed_signals}, topics={topic_count}, pnl={pnl:.4f}"
+                )
+        else:
+            write_line("(No topic distribution rows)")
+
+        hot_topics_obj = analysis_payload.get("hot_topics")
+        hot_topics = hot_topics_obj if isinstance(hot_topics_obj, list) else []
+        if hot_topics:
+            write_line("Hot topic examples:")
+            for row in hot_topics[:8]:
+                if not isinstance(row, dict):
+                    continue
+                event_id = str(row.get("event_id", ""))
+                topic = str(row.get("topic", ""))
+                category = str(row.get("category", ""))
+                executed = _safe_int(row.get("executed_signals"))
+                pnl = _safe_float(row.get("pnl"))
+                write_wrapped(
+                    f" - {event_id} [{category}] executed={executed} pnl={pnl:.4f} topic={topic}"
+                )
+        else:
+            write_line("(No hot-topic rows)")
+
+        files_obj = analysis_payload.get("files")
+        files = files_obj if isinstance(files_obj, dict) else {}
+
+        perf_img = Path(str(files.get("perf_dashboard_png", ""))).expanduser()
+        topic_dist_img = Path(str(files.get("topic_distribution_png", ""))).expanduser()
+        top_topics_img = Path(str(files.get("top_topics_png", ""))).expanduser()
+
+        write_line("")
+        draw_image(perf_img, "Performance dashboard (PnL / Drawdown / Sharpe / Beta-Alpha)")
+        draw_image(topic_dist_img, "Topic distribution chart")
+        draw_image(top_topics_img, "Top topic examples chart")
+
     pdf.save()
 
 
@@ -725,6 +802,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--event-csv", help="Optional event attribution CSV")
     parser.add_argument("--rolling-json", help="Optional rolling summary JSON")
     parser.add_argument("--cycle-meta-json", help="Optional cycle-meta JSON")
+    parser.add_argument("--analysis-json", help="Optional topic/performance analysis JSON")
     parser.add_argument("--output", required=True, help="Output PDF path")
     parser.add_argument("--title", default="Monomarket Backtest Report", help="PDF title")
     return parser.parse_args()
@@ -737,6 +815,7 @@ def main() -> None:
     event_csv = Path(args.event_csv) if args.event_csv else None
     rolling_json = Path(args.rolling_json) if args.rolling_json else None
     cycle_meta_json = Path(args.cycle_meta_json) if args.cycle_meta_json else None
+    analysis_json = Path(args.analysis_json) if args.analysis_json else None
     output = Path(args.output)
 
     payload = _load_payload(backtest_json)
@@ -750,12 +829,17 @@ def main() -> None:
     if cycle_meta_json and cycle_meta_json.exists():
         cycle_meta_payload = _load_payload(cycle_meta_json)
 
+    analysis_payload: dict[str, Any] | None = None
+    if analysis_json and analysis_json.exists():
+        analysis_payload = _load_payload(analysis_json)
+
     render_pdf(
         payload=payload,
         strategy_rows=strategy_rows,
         event_rows=event_rows,
         rolling_payload=rolling_payload,
         cycle_meta_payload=cycle_meta_payload,
+        analysis_payload=analysis_payload,
         output_path=output,
         title=args.title,
     )

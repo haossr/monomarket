@@ -480,6 +480,7 @@ def build_summary_bundle(
     payload: dict[str, Any],
     rolling_payload: dict[str, Any] | None,
     cycle_meta_payload: dict[str, Any] | None,
+    analysis_payload: dict[str, Any] | None,
     pdf_path: Path,
     rolling_path: Path,
     nightly_date: str,
@@ -717,6 +718,36 @@ def build_summary_bundle(
     rolling_reject_top_effective_primary_reason = "disabled" if k_norm <= 0 else "none"
     rolling_reject_top_effective_primary_count = 0
 
+    topic_distribution_rows: list[dict[str, Any]] = []
+    hot_topic_rows: list[dict[str, Any]] = []
+    topic_analysis_files: dict[str, str] = {}
+    topic_dist_top = "none"
+    hot_topic_example = "none"
+    if isinstance(analysis_payload, dict):
+        dist_obj = analysis_payload.get("topic_distribution")
+        if isinstance(dist_obj, list):
+            topic_distribution_rows = [row for row in dist_obj if isinstance(row, dict)]
+        hot_obj = analysis_payload.get("hot_topics")
+        if isinstance(hot_obj, list):
+            hot_topic_rows = [row for row in hot_obj if isinstance(row, dict)]
+        files_obj = analysis_payload.get("files")
+        if isinstance(files_obj, dict):
+            topic_analysis_files = {
+                str(k): str(v) for k, v in files_obj.items() if isinstance(k, str)
+            }
+
+        if topic_distribution_rows:
+            top_dist = topic_distribution_rows[0]
+            top_cat = str(top_dist.get("category", "unknown"))
+            top_sig = int(_f(top_dist.get("executed_signals")))
+            topic_dist_top = f"{top_cat}:{top_sig}"
+
+        if hot_topic_rows:
+            top_hot = hot_topic_rows[0]
+            hot_event_id = _event_id_str(top_hot.get("event_id"))
+            hot_count = int(_f(top_hot.get("executed_signals")))
+            hot_topic_example = f"{hot_event_id}:{hot_count}"
+
     rolling_summary = None
     if isinstance(rolling_payload, dict):
         rolling_summary = rolling_payload.get("summary")
@@ -843,6 +874,9 @@ def build_summary_bundle(
         f"reject_strategy_top_rejected={reject_strategy_top_rejected} "
         f"reject_strategy_non_top_rejected={reject_strategy_non_top_rejected} "
         f"reject_strategy_top_share={reject_strategy_top_share:.2%} "
+        f"topic_dist_top={topic_dist_top} "
+        f"hot_topic_example={hot_topic_example} "
+        f"hot_topic_count={len(hot_topic_rows)} "
         f"| pdf={pdf_path.resolve()} | rolling_json={rolling_path.resolve()}"
     )
 
@@ -1034,6 +1068,33 @@ def build_summary_bundle(
             "top": edge_gate_by_strategy_top,
             "rows": edge_gate_by_strategy_rows,
         },
+        "topic_analysis": {
+            "available": isinstance(analysis_payload, dict),
+            "distribution_top": topic_dist_top,
+            "hot_topic_example": hot_topic_example,
+            "distribution": [
+                {
+                    "category": str(row.get("category", "")),
+                    "executed_signals": int(_f(row.get("executed_signals"))),
+                    "topic_count": int(_f(row.get("topic_count"))),
+                    "pnl": float(_f(row.get("pnl"))),
+                }
+                for row in topic_distribution_rows
+                if isinstance(row, dict)
+            ],
+            "hot_topics_preview": [
+                {
+                    "event_id": _event_id_str(row.get("event_id")),
+                    "topic": str(row.get("topic", "")),
+                    "category": str(row.get("category", "")),
+                    "executed_signals": int(_f(row.get("executed_signals"))),
+                    "pnl": float(_f(row.get("pnl"))),
+                }
+                for row in hot_topic_rows[:8]
+                if isinstance(row, dict)
+            ],
+            "files": topic_analysis_files,
+        },
         "paths": {
             "pdf": str(pdf_path.resolve()),
             "rolling_json": str(rolling_path.resolve()),
@@ -1048,6 +1109,7 @@ def build_summary_line(
     payload: dict[str, Any],
     rolling_payload: dict[str, Any] | None,
     cycle_meta_payload: dict[str, Any] | None = None,
+    analysis_payload: dict[str, Any] | None = None,
     pdf_path: Path,
     rolling_path: Path,
     nightly_date: str,
@@ -1057,6 +1119,7 @@ def build_summary_line(
         payload=payload,
         rolling_payload=rolling_payload,
         cycle_meta_payload=cycle_meta_payload,
+        analysis_payload=analysis_payload,
         pdf_path=pdf_path,
         rolling_path=rolling_path,
         nightly_date=nightly_date,
@@ -1071,6 +1134,7 @@ def main() -> None:
     parser.add_argument("--pdf-path", required=True)
     parser.add_argument("--rolling-json", required=True)
     parser.add_argument("--cycle-meta-json", default=None)
+    parser.add_argument("--analysis-json", default=None)
     parser.add_argument("--summary-path", required=True)
     parser.add_argument("--summary-json-path", default=None)
     parser.add_argument("--nightly-date", required=True)
@@ -1090,10 +1154,17 @@ def main() -> None:
         if cycle_meta_path.exists():
             cycle_meta_payload = json.loads(cycle_meta_path.read_text())
 
+    analysis_payload: dict[str, Any] | None = None
+    if args.analysis_json:
+        analysis_path = Path(args.analysis_json)
+        if analysis_path.exists():
+            analysis_payload = json.loads(analysis_path.read_text())
+
     line, sidecar = build_summary_bundle(
         payload=payload,
         rolling_payload=rolling_payload,
         cycle_meta_payload=cycle_meta_payload,
+        analysis_payload=analysis_payload,
         pdf_path=Path(args.pdf_path),
         rolling_path=rolling_path,
         nightly_date=args.nightly_date,
