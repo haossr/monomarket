@@ -678,6 +678,117 @@ def test_nightly_summary_surfaces_s9_s10_no_activity_hints(tmp_path: Path) -> No
     assert s10_hint["top_reject_reason"] == "circuit breaker open:1"
 
 
+def test_nightly_summary_activity_hint_uses_signal_generation_reject_fallback(
+    tmp_path: Path,
+) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    cycle_meta_json = tmp_path / "cycle-meta.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T02:00:00Z",
+        "total_signals": 0,
+        "executed_signals": 0,
+        "rejected_signals": 0,
+        "results": [
+            {"strategy": "s9", "pnl": 0.0, "trade_count": 0},
+            {"strategy": "s10", "pnl": 0.0, "trade_count": 0},
+        ],
+        "replay": [],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 0.0,
+            "positive_window_rate": 0.0,
+            "empty_window_count": 1,
+            "range_hours": 2,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    cycle_meta_payload = {
+        "fixed_window_mode": True,
+        "signal_generation": {
+            "new_signals_total": 0,
+            "new_signals_in_window": 0,
+            "edge_gate": {
+                "total_raw": 0,
+                "total_pass": 0,
+                "total_fail": 0,
+                "pass_rate": 0.0,
+                "by_strategy": {
+                    "s10": {
+                        "strategy_diagnostics": {
+                            "candidate_reject_reasons": {
+                                "buy_conversion:tiny_price_leg_share_exceeded": 3,
+                                "buy_conversion:floor_adjusted_leg_share_exceeded": 1,
+                            }
+                        }
+                    }
+                },
+            },
+        },
+    }
+    cycle_meta_json.write_text(json.dumps(cycle_meta_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--cycle-meta-json",
+            str(cycle_meta_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "s10_activity_hint=no_replay_rows" in line
+    assert "s10_top_reject_reason=buy_conversion:tiny_price_leg_share_exceeded:3" in line
+    assert "s10_top_reject_reason_source=signal_generation" in line
+    assert "s10_generation_rejected_candidates=4" in line
+    assert "s10_generation_top_reject_reason=buy_conversion:tiny_price_leg_share_exceeded:3" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+
+    s10_hint = sidecar["strategy_focus"]["s10"]["activity_hint"]
+    assert s10_hint["hint"] == "no_replay_rows"
+    assert int(s10_hint["generation_rejected_candidates"]) == 4
+    assert (
+        s10_hint["generation_top_reject_reason"] == "buy_conversion:tiny_price_leg_share_exceeded:3"
+    )
+    assert s10_hint["top_reject_reason"] == "buy_conversion:tiny_price_leg_share_exceeded:3"
+    assert s10_hint["top_reject_reason_source"] == "signal_generation"
+
+
 def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> None:
     backtest_json = tmp_path / "latest.json"
     rolling_json = tmp_path / "rolling.json"
