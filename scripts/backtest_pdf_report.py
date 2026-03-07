@@ -349,19 +349,72 @@ def _build_strategy_focus_activity_hints(
     payload: dict[str, Any],
     *,
     focus_metrics: dict[str, dict[str, Any]],
+    cycle_meta_payload: dict[str, Any] | None = None,
     strategies: tuple[str, ...] = FOCUS_STRATEGIES,
 ) -> dict[str, dict[str, Any]]:
     replay_obj = payload.get("replay")
     replay_rows = replay_obj if isinstance(replay_obj, list) else []
+
+    generation_by_strategy: dict[str, dict[str, Any]] = {}
+    if isinstance(cycle_meta_payload, dict):
+        signal_generation = cycle_meta_payload.get("signal_generation")
+        if isinstance(signal_generation, dict):
+            edge_gate = signal_generation.get("edge_gate")
+            if isinstance(edge_gate, dict):
+                by_strategy = edge_gate.get("by_strategy")
+                if isinstance(by_strategy, dict):
+                    generation_by_strategy = {
+                        str(key).strip().lower(): value
+                        for key, value in by_strategy.items()
+                        if isinstance(value, dict)
+                    }
 
     stats: dict[str, dict[str, Any]] = {
         strategy: {
             "replay_rows": 0,
             "rejected_rows": 0,
             "reason_counts": {},
+            "generation_rejected_candidates": 0,
+            "generation_reason_counts": {},
         }
         for strategy in strategies
     }
+
+    for strategy in strategies:
+        generation_row = generation_by_strategy.get(strategy)
+        if not isinstance(generation_row, dict):
+            continue
+        strategy_diag = generation_row.get("strategy_diagnostics")
+        if not isinstance(strategy_diag, dict):
+            continue
+
+        candidate_rejects = strategy_diag.get("candidate_reject_reasons")
+        if not isinstance(candidate_rejects, dict):
+            continue
+
+        item = stats.get(strategy)
+        if not isinstance(item, dict):
+            continue
+
+        generation_reason_counts = item.get("generation_reason_counts")
+        if not isinstance(generation_reason_counts, dict):
+            generation_reason_counts = {}
+            item["generation_reason_counts"] = generation_reason_counts
+
+        total_generation_rejects = 0
+        for raw_reason, raw_count in candidate_rejects.items():
+            reason = normalize_reject_reason(str(raw_reason or "").strip())
+            if not reason:
+                reason = "unknown"
+            count = _safe_int(raw_count)
+            if count <= 0:
+                continue
+            generation_reason_counts[reason] = int(generation_reason_counts.get(reason, 0)) + count
+            total_generation_rejects += count
+
+        item["generation_rejected_candidates"] = (
+            int(item.get("generation_rejected_candidates", 0)) + total_generation_rejects
+        )
 
     for row in replay_rows:
         if not isinstance(row, dict):
@@ -401,6 +454,7 @@ def _build_strategy_focus_activity_hints(
 
         reason_counts = item.get("reason_counts")
         top_reject_reason = "none"
+        top_reject_reason_source = "none"
         if isinstance(reason_counts, dict) and reason_counts:
             top_reject_reason, _ = format_reject_top(
                 reason_counts,
@@ -408,6 +462,27 @@ def _build_strategy_focus_activity_hints(
                 delimiter=";",
                 normalize=True,
             )
+            top_reject_reason_source = "replay"
+
+        generation_rejected_candidates = _safe_int(item.get("generation_rejected_candidates"))
+        generation_reason_counts = item.get("generation_reason_counts")
+        generation_top_reject_reason = "none"
+        if isinstance(generation_reason_counts, dict) and generation_reason_counts:
+            generation_top_reject_reason, _ = format_reject_top(
+                generation_reason_counts,
+                top_k=1,
+                delimiter=";",
+                normalize=True,
+            )
+
+        if (
+            top_reject_reason == "none"
+            and generation_top_reject_reason != "none"
+            and (not active)
+            and trade_count <= 0
+        ):
+            top_reject_reason = generation_top_reject_reason
+            top_reject_reason_source = "signal_generation"
 
         if active or trade_count > 0:
             hint = "active"
@@ -427,6 +502,9 @@ def _build_strategy_focus_activity_hints(
             "rejected_rows": rejected_count,
             "reject_share": reject_share,
             "top_reject_reason": top_reject_reason,
+            "top_reject_reason_source": top_reject_reason_source,
+            "generation_rejected_candidates": generation_rejected_candidates,
+            "generation_top_reject_reason": generation_top_reject_reason,
         }
 
     return hints
@@ -728,6 +806,7 @@ def render_pdf(
     strategy_focus_hints = _build_strategy_focus_activity_hints(
         payload,
         focus_metrics=strategy_focus,
+        cycle_meta_payload=cycle_meta_payload,
     )
 
     write_line("Sx12 Strategy Focus / S9-S10", bold=True, size=12, leading=18)
@@ -753,7 +832,12 @@ def render_pdf(
             f"replay_rows={_safe_int(hint.get('replay_rows'))} "
             f"rejected_rows={_safe_int(hint.get('rejected_rows'))} "
             f"reject_share={_safe_float(hint.get('reject_share')) * 100.0:.2f}% "
-            f"top_reject_reason={hint.get('top_reject_reason', 'none')}"
+            f"top_reject_reason={hint.get('top_reject_reason', 'none')} "
+            f"top_reject_reason_source={hint.get('top_reject_reason_source', 'none')}"
+        )
+        write_wrapped(
+            f"  generation_rejected_candidates={_safe_int(hint.get('generation_rejected_candidates'))} "
+            f"generation_top_reject_reason={hint.get('generation_top_reject_reason', 'none')}"
         )
 
     s9_pnl = _safe_float(strategy_focus.get("s9", {}).get("pnl"))

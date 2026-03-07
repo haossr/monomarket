@@ -117,6 +117,9 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Main history limited",
         "Main window note",
         "Sx12 Strategy Focus / S9-S10",
+        "top_reject_reason_source=",
+        "generation_rejected_candidates=",
+        "generation_top_reject_reason=",
         "S9-S10 pnl diff",
         "Rolling execution rate",
         "Rolling empty windows",
@@ -236,12 +239,68 @@ def test_pdf_strategy_focus_activity_hints_from_payload() -> None:
     assert int(hints["s9"]["rejected_rows"]) == 2
     assert abs(float(hints["s9"]["reject_share"]) - 1.0) < 1e-12
     assert hints["s9"]["top_reject_reason"] == "strategy notional limit exceeded:2"
+    assert hints["s9"]["top_reject_reason_source"] == "replay"
+    assert int(hints["s9"]["generation_rejected_candidates"]) == 0
+    assert hints["s9"]["generation_top_reject_reason"] == "none"
 
     assert hints["s10"]["hint"] == "active"
     assert int(hints["s10"]["replay_rows"]) == 1
     assert int(hints["s10"]["rejected_rows"]) == 0
     assert abs(float(hints["s10"]["reject_share"])) < 1e-12
     assert hints["s10"]["top_reject_reason"] == "none"
+    assert hints["s10"]["top_reject_reason_source"] == "none"
+    assert int(hints["s10"]["generation_rejected_candidates"]) == 0
+    assert hints["s10"]["generation_top_reject_reason"] == "none"
+
+
+def test_pdf_strategy_focus_activity_hint_uses_signal_generation_reject_fallback() -> None:
+    module = _load_pdf_report_module()
+
+    payload = {
+        "results": [
+            {
+                "strategy": "s10",
+                "pnl": 0.0,
+                "trade_count": 0,
+                "closed_sample_count": 0,
+                "mtm_sample_count": 0,
+            }
+        ],
+        "replay": [],
+    }
+
+    cycle_meta_payload = {
+        "signal_generation": {
+            "edge_gate": {
+                "by_strategy": {
+                    "s10": {
+                        "strategy_diagnostics": {
+                            "candidate_reject_reasons": {
+                                "buy_conversion:tiny_price_leg_share_exceeded": 3,
+                                "buy_conversion:floor_adjusted_leg_share_exceeded": 1,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    focus = module._build_strategy_focus_metrics(payload)
+    hints = module._build_strategy_focus_activity_hints(
+        payload,
+        focus_metrics=focus,
+        cycle_meta_payload=cycle_meta_payload,
+    )
+
+    assert hints["s10"]["hint"] == "no_replay_rows"
+    assert hints["s10"]["top_reject_reason"] == "buy_conversion:tiny_price_leg_share_exceeded:3"
+    assert hints["s10"]["top_reject_reason_source"] == "signal_generation"
+    assert int(hints["s10"]["generation_rejected_candidates"]) == 4
+    assert (
+        hints["s10"]["generation_top_reject_reason"]
+        == "buy_conversion:tiny_price_leg_share_exceeded:3"
+    )
 
 
 def test_nightly_best_strategy_na_when_no_executed_signals(tmp_path: Path) -> None:
