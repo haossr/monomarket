@@ -58,6 +58,15 @@ def test_build_s10_param_grid_cartesian_size() -> None:
     }
 
 
+def test_s10_grid_default_slices_include_recent14d() -> None:
+    module = _load_module()
+
+    parser = module._build_arg_parser()
+    args = parser.parse_args(["--baseline-config", "base.yaml"])
+
+    assert str(args.slices) == "recent24h:24,recent7d:168,recent14d:336"
+
+
 def test_apply_s10_overrides_keeps_base_immutable() -> None:
     module = _load_module()
 

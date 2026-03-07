@@ -269,14 +269,14 @@ bash scripts/backtest_nightly_report.sh \
 - `rolling-summary.json`（滚动窗口多样本回测汇总）
 - `run-<timestamp>/`（本轮 JSON/CSV/summary.md 工件；含 `cycle-meta.json`，记录 fixed-window 模式、是否清窗、清窗数量，以及“本轮新生成信号是否落入回放窗口”）
 
-Sx12（S9/S10）双切片 baseline vs candidate 对照：
+Sx12（S9/S10）多切片 baseline vs candidate 对照：
 
 ```bash
 python scripts/sx12_dual_slice_compare.py \
   --baseline-config configs/config.example.yaml \
   --candidate-config configs/config.example.yaml \
   --strategies s9,s10 \
-  --slices recent24h:24,recent7d:168
+  --slices recent24h:24,recent7d:168,recent14d:336
 ```
 
 输出目录：`artifacts/backtest/sx12-dual-slice-<anchor>/`
@@ -286,14 +286,14 @@ python scripts/sx12_dual_slice_compare.py \
 
 脚本会强制 `ENABLE_LIVE_TRADING=false`。
 
-S10 参数小网格（自动生成 candidate config + 双切片 compare 排名）：
+S10 参数小网格（自动生成 candidate config + 多切片 compare 排名）：
 
 ```bash
 python scripts/s10_param_grid_compare.py \
   --baseline-config configs/config.example.yaml \
   --candidate-base-config configs/config.example.yaml \
   --strategies s9,s10 \
-  --slices recent24h:24,recent7d:168 \
+  --slices recent24h:24,recent7d:168,recent14d:336 \
   --min-slice-delta-pnl 0 \
   --max-slice-delta-max-drawdown 0 \
   --prob-sum-tolerance-grid 0.015,0.02,0.03 \
