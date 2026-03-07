@@ -13,6 +13,7 @@ from typing import Any
 
 RAW_REQUIRED_FILENAMES = ("latest.json", "strategy.csv", "event.csv", "replay.csv")
 RAW_OPTIONAL_FILENAMES = ("cycle-meta.json",)
+MAX_REPLAY_CHART_POINTS = 120
 
 
 @dataclass
@@ -185,12 +186,35 @@ def _collect_replay_timeline(payload: dict[str, Any], run_dir: Path) -> list[dic
                     points.append((_parse_iso_maybe(ts), ts, cumulative))
 
     points.sort(key=lambda x: (x[0] or datetime.min.replace(tzinfo=UTC), x[1]))
+
+    # Collapse identical timestamps (keep latest cumulative at that ts) to reduce clutter.
+    collapsed: list[tuple[datetime | None, str, float]] = []
+    for dt, ts, cumulative in points:
+        key = ts.strip()
+        if collapsed and collapsed[-1][1] == key:
+            collapsed[-1] = (dt, key, cumulative)
+        else:
+            collapsed.append((dt, key, cumulative))
+
+    # Downsample very dense timelines for mobile readability.
+    if len(collapsed) > MAX_REPLAY_CHART_POINTS:
+        target = MAX_REPLAY_CHART_POINTS
+        span = len(collapsed) - 1
+        idxs = sorted({round(i * span / (target - 1)) for i in range(target)})
+        collapsed = [collapsed[i] for i in idxs]
+
     out: list[dict[str, Any]] = []
-    for idx, (_, ts, cumulative) in enumerate(points, start=1):
-        label = ts or f"#{idx}"
+    for idx, (_, ts, cumulative) in enumerate(collapsed, start=1):
+        short_label = ts
+        dt = _parse_iso_maybe(ts)
+        if dt is not None:
+            short_label = dt.strftime("%m-%d %H:%M")
+        elif not short_label:
+            short_label = f"#{idx}"
         out.append(
             {
-                "label": label,
+                "label": short_label,
+                "full_label": ts or short_label,
                 "index": idx,
                 "cumulative_realized_pnl": cumulative,
             }
@@ -556,6 +580,7 @@ def _build_chart_data(
     return {
         "cumulative_pnl": {
             "labels": [row["label"] for row in replay_timeline],
+            "full_labels": [row.get("full_label", row["label"]) for row in replay_timeline],
             "values": [row["cumulative_realized_pnl"] for row in replay_timeline],
         },
         "strategy_pnl": {
@@ -691,7 +716,7 @@ def _render_html(
   <meta name='viewport' content='width=device-width, initial-scale=1' />
   <title>Monomarket Backtest Report</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; margin: 24px; color: #111; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; margin: 16px; color: #111; }}
     h1, h2 {{ margin: 0 0 12px; }}
     .meta {{ color: #555; margin-bottom: 18px; line-height: 1.6; }}
     .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 18px; }}
@@ -699,23 +724,33 @@ def _render_html(
     .label {{ font-size: 12px; color: #666; }}
     .value {{ font-size: 20px; font-weight: 700; margin-top: 4px; }}
     .muted {{ color: #666; font-size: 12px; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
+    .table-wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+    table {{ border-collapse: collapse; width: 100%; margin-top: 10px; min-width: 640px; }}
     th, td {{ border: 1px solid #e5e7eb; padding: 8px 10px; font-size: 14px; vertical-align: top; }}
     th {{ background: #f5f5f5; text-align: left; }}
     td.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
     a {{ color: #2563eb; text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
-    code {{ background: #f3f4f6; border-radius: 4px; padding: 2px 4px; }}
+    code {{ background: #f3f4f6; border-radius: 4px; padding: 2px 4px; word-break: break-all; }}
     .chart-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 16px;
       margin: 16px 0 24px;
     }}
     .chart-card {{ border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; background: #fff; }}
     .chart-title {{ margin: 0 0 8px; font-size: 14px; font-weight: 600; }}
-    canvas {{ width: 100%; height: 260px; }}
+    canvas {{ width: 100%; height: 240px; }}
     ul {{ margin: 6px 0; padding-left: 18px; }}
+
+    @media (max-width: 640px) {{
+      body {{ margin: 10px; }}
+      .cards {{ grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }}
+      .value {{ font-size: 18px; }}
+      .chart-grid {{ grid-template-columns: 1fr; gap: 12px; }}
+      canvas {{ height: 220px; }}
+      th, td {{ font-size: 12px; padding: 6px 8px; }}
+    }}
   </style>
 </head>
 <body>
@@ -734,18 +769,20 @@ def _render_html(
   </div>
 
   <h2>Backtest Assumptions</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Item</th>
-        <th>Value</th>
-        <th>Source</th>
-      </tr>
-    </thead>
-    <tbody>
-      {assumption_rows}
-    </tbody>
-  </table>
+  <div class='table-wrap'>
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Value</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {assumption_rows}
+      </tbody>
+    </table>
+  </div>
 
   <h2>Charts</h2>
   <div class='chart-grid'>
@@ -772,37 +809,41 @@ def _render_html(
   </div>
 
   <h2>Per-strategy</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>strategy</th>
-        <th>pnl</th>
-        <th>trade_count</th>
-        <th>winrate</th>
-        <th>winrate_source</th>
-      </tr>
-    </thead>
-    <tbody>
-      {table_rows}
-    </tbody>
-  </table>
+  <div class='table-wrap'>
+    <table>
+      <thead>
+        <tr>
+          <th>strategy</th>
+          <th>pnl</th>
+          <th>trade_count</th>
+          <th>winrate</th>
+          <th>winrate_source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {table_rows}
+      </tbody>
+    </table>
+  </div>
 
   <h2>Strategy Catalog</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Strategy</th>
-        <th>策略核心逻辑</th>
-        <th>信号方向/触发条件</th>
-        <th>主要约束（关键阈值配置项名）</th>
-        <th>已知风险或常见拒因</th>
-        <th>来源</th>
-      </tr>
-    </thead>
-    <tbody>
-      {''.join(catalog_rows)}
-    </tbody>
-  </table>
+  <div class='table-wrap'>
+    <table>
+      <thead>
+        <tr>
+          <th>Strategy</th>
+          <th>策略核心逻辑</th>
+          <th>信号方向/触发条件</th>
+          <th>主要约束（关键阈值配置项名）</th>
+          <th>已知风险或常见拒因</th>
+          <th>来源</th>
+        </tr>
+      </thead>
+      <tbody>
+        {''.join(catalog_rows)}
+      </tbody>
+    </table>
+  </div>
 
   <h2>Raw Artifacts</h2>
   <ul>
@@ -847,7 +888,29 @@ def _render_html(
           pointRadius: 0,
         }}],
       }},
-      options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ display: true }} }} }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {{ mode: 'index', intersect: false }},
+        scales: {{
+          x: {{
+            ticks: {{ autoSkip: true, maxTicksLimit: 8, maxRotation: 0, minRotation: 0 }},
+            grid: {{ display: false }},
+          }},
+        }},
+        plugins: {{
+          legend: {{ display: true }},
+          tooltip: {{
+            callbacks: {{
+              title: (items) => {{
+                if (!items || items.length === 0) return '';
+                const idx = items[0].dataIndex;
+                return REPORT_DATA.cumulative_pnl.full_labels[idx] || REPORT_DATA.cumulative_pnl.labels[idx] || '';
+              }},
+            }},
+          }},
+        }},
+      }},
     }});
 
     _mkChart('chart-strategy-pnl', {{
@@ -860,7 +923,11 @@ def _render_html(
           backgroundColor: REPORT_DATA.strategy_pnl.values.map((v) => v >= 0 ? '#16a34a' : '#dc2626'),
         }}],
       }},
-      options: {{ responsive: true, maintainAspectRatio: false }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {{ x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }} }},
+      }},
     }});
 
     _mkChart('chart-strategy-trades', {{
@@ -873,7 +940,11 @@ def _render_html(
           backgroundColor: '#7c3aed',
         }}],
       }},
-      options: {{ responsive: true, maintainAspectRatio: false }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {{ x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }} }},
+      }},
     }});
 
     _mkChart('chart-strategy-winrate', {{
@@ -889,7 +960,10 @@ def _render_html(
       options: {{
         responsive: true,
         maintainAspectRatio: false,
-        scales: {{ y: {{ min: 0, max: 100 }} }},
+        scales: {{
+          x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }},
+          y: {{ min: 0, max: 100 }},
+        }},
         plugins: {{
           tooltip: {{
             callbacks: {{
@@ -913,7 +987,11 @@ def _render_html(
           fill: true,
         }}],
       }},
-      options: {{ responsive: true, maintainAspectRatio: false }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {{ x: {{ ticks: {{ autoSkip: true, maxTicksLimit: 8, maxRotation: 0, minRotation: 0 }} }} }},
+      }},
     }});
   </script>
 </body>
