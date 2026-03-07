@@ -33,6 +33,38 @@ class _PairPricingDiagnostics:
     tiny_price_legs: int
 
 
+@dataclass(slots=True)
+class _PairSearchDiagnostics:
+    candidate_pairs_scanned: int = 0
+    market_guard_pass: int = 0
+    event_guard_pass: int = 0
+    condition_guard_pass: int = 0
+    rejected_by_market_guard: int = 0
+    rejected_by_event_guard: int = 0
+    rejected_by_condition_guard: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "candidate_pairs_scanned": int(self.candidate_pairs_scanned),
+            "market_guard_pass": int(self.market_guard_pass),
+            "event_guard_pass": int(self.event_guard_pass),
+            "condition_guard_pass": int(self.condition_guard_pass),
+            "rejected_by_market_guard": int(self.rejected_by_market_guard),
+            "rejected_by_event_guard": int(self.rejected_by_event_guard),
+            "rejected_by_condition_guard": int(self.rejected_by_condition_guard),
+        }
+
+
+def _merge_pair_search_diag(target: _PairSearchDiagnostics, source: _PairSearchDiagnostics) -> None:
+    target.candidate_pairs_scanned += int(source.candidate_pairs_scanned)
+    target.market_guard_pass += int(source.market_guard_pass)
+    target.event_guard_pass += int(source.event_guard_pass)
+    target.condition_guard_pass += int(source.condition_guard_pass)
+    target.rejected_by_market_guard += int(source.rejected_by_market_guard)
+    target.rejected_by_event_guard += int(source.rejected_by_event_guard)
+    target.rejected_by_condition_guard += int(source.rejected_by_condition_guard)
+
+
 def _as_bool(raw: object, default: bool) -> bool:
     if isinstance(raw, bool):
         return raw
@@ -187,6 +219,35 @@ class S9YesNoParityArb(Strategy):
                 "candidate_reject_reasons_by_event": {},
                 "candidate_reject_reasons_by_event_top_k": diagnostics_event_top_k,
                 "candidate_reject_reasons_by_event_top": {},
+                "pair_search": {
+                    "candidate_pairs_scanned": 0,
+                    "market_guard_pass": 0,
+                    "event_guard_pass": 0,
+                    "condition_guard_pass": 0,
+                    "rejected_by_market_guard": 0,
+                    "rejected_by_event_guard": 0,
+                    "rejected_by_condition_guard": 0,
+                    "by_side": {
+                        "buy": {
+                            "candidate_pairs_scanned": 0,
+                            "market_guard_pass": 0,
+                            "event_guard_pass": 0,
+                            "condition_guard_pass": 0,
+                            "rejected_by_market_guard": 0,
+                            "rejected_by_event_guard": 0,
+                            "rejected_by_condition_guard": 0,
+                        },
+                        "sell": {
+                            "candidate_pairs_scanned": 0,
+                            "market_guard_pass": 0,
+                            "event_guard_pass": 0,
+                            "condition_guard_pass": 0,
+                            "rejected_by_market_guard": 0,
+                            "rejected_by_event_guard": 0,
+                            "rejected_by_condition_guard": 0,
+                        },
+                    },
+                },
                 "pricing_consistency": {
                     "price_floor": executable_price_floor,
                     "pair_candidates_priced": 0,
@@ -243,6 +304,11 @@ class S9YesNoParityArb(Strategy):
         pricing_diag_filtered_post_slippage_non_positive = 0
         pricing_diag_filtered_effective_below_min = 0
 
+        pair_search_by_side: dict[str, _PairSearchDiagnostics] = {
+            "buy": _PairSearchDiagnostics(),
+            "sell": _PairSearchDiagnostics(),
+        }
+
         for canonical_id in sorted(by_canonical):
             rows = by_canonical[canonical_id]
             event_hint = self._event_hint_for_rows(rows)
@@ -261,19 +327,29 @@ class S9YesNoParityArb(Strategy):
 
             for side, buy_mode in candidate_sides:
                 direction_attempts[side] = int(direction_attempts.get(side, 0)) + 1
-                pair = self._best_pair(
+                pair, pair_search_diag = self._best_pair(
                     rows,
                     buy_mode=buy_mode,
                     require_same_event=require_same_event,
                     require_same_condition=require_same_condition,
                     require_same_market=require_same_market,
                 )
+                side_pair_search_diag = pair_search_by_side.setdefault(
+                    side, _PairSearchDiagnostics()
+                )
+                _merge_pair_search_diag(side_pair_search_diag, pair_search_diag)
+
                 if pair is None:
+                    pair_not_found_reason = self._pair_not_found_reason(
+                        search_diag=pair_search_diag,
+                        require_same_event=require_same_event,
+                        require_same_condition=require_same_condition,
+                    )
                     _record_reject_reason(
                         reject_reasons=reject_reasons,
                         reject_reasons_by_event=reject_reasons_by_event,
                         event_id=event_hint,
-                        reason=f"{side}:pair_not_found",
+                        reason=f"{side}:{pair_not_found_reason}",
                     )
                     continue
 
@@ -425,6 +501,10 @@ class S9YesNoParityArb(Strategy):
                 if str(row.event_id).strip()
             }
         )
+        pair_search_total = _PairSearchDiagnostics()
+        for side_diag in pair_search_by_side.values():
+            _merge_pair_search_diag(pair_search_total, side_diag)
+
         self.last_diagnostics = {
             "canonical_groups_total": len(by_canonical),
             "events_total": events_total,
@@ -442,6 +522,12 @@ class S9YesNoParityArb(Strategy):
                 reject_by_event,
                 top_k=diagnostics_event_top_k,
             ),
+            "pair_search": {
+                **pair_search_total.as_dict(),
+                "by_side": {
+                    side: diag.as_dict() for side, diag in sorted(pair_search_by_side.items())
+                },
+            },
             "pricing_consistency": {
                 "price_floor": executable_price_floor,
                 "pair_candidates_priced": pricing_diag_count,
@@ -548,6 +634,31 @@ class S9YesNoParityArb(Strategy):
             return None
         return yes_key or no_key or None
 
+    @staticmethod
+    def _pair_not_found_reason(
+        *,
+        search_diag: _PairSearchDiagnostics,
+        require_same_event: bool,
+        require_same_condition: bool,
+    ) -> str:
+        if search_diag.candidate_pairs_scanned <= 0:
+            return "pair_not_found_no_candidates"
+        if search_diag.market_guard_pass <= 0 and search_diag.rejected_by_market_guard > 0:
+            return "pair_not_found_market_guard"
+        if (
+            require_same_event
+            and search_diag.event_guard_pass <= 0
+            and search_diag.rejected_by_event_guard > 0
+        ):
+            return "pair_not_found_event_guard"
+        if (
+            require_same_condition
+            and search_diag.condition_guard_pass <= 0
+            and search_diag.rejected_by_condition_guard > 0
+        ):
+            return "pair_not_found_condition_guard"
+        return "pair_not_found"
+
     @classmethod
     def _best_pair(
         cls,
@@ -557,7 +668,9 @@ class S9YesNoParityArb(Strategy):
         require_same_event: bool,
         require_same_condition: bool,
         require_same_market: bool,
-    ) -> tuple[MarketView, MarketView] | None:
+    ) -> tuple[tuple[MarketView, MarketView] | None, _PairSearchDiagnostics]:
+        stats = _PairSearchDiagnostics()
+
         if buy_mode:
             yes_sorted = sorted(rows, key=lambda m: float(m.yes_price or 1.0))
             no_sorted = sorted(rows, key=lambda m: float(m.no_price or 1.0))
@@ -566,25 +679,36 @@ class S9YesNoParityArb(Strategy):
             no_sorted = sorted(rows, key=lambda m: float(m.no_price or 0.0), reverse=True)
 
         if not yes_sorted or not no_sorted:
-            return None
+            return None, stats
 
         for yes_leg in yes_sorted:
             for no_leg in no_sorted:
+                stats.candidate_pairs_scanned += 1
+
                 if require_same_market:
                     if yes_leg.market_id != no_leg.market_id:
+                        stats.rejected_by_market_guard += 1
                         continue
                 elif yes_leg.market_id == no_leg.market_id:
+                    stats.rejected_by_market_guard += 1
                     continue
+                stats.market_guard_pass += 1
 
                 if require_same_event and str(yes_leg.event_id) != str(no_leg.event_id):
+                    stats.rejected_by_event_guard += 1
                     continue
+                stats.event_guard_pass += 1
+
                 if require_same_condition and (
                     cls._condition_key_for_market(yes_leg) != cls._condition_key_for_market(no_leg)
                 ):
+                    stats.rejected_by_condition_guard += 1
                     continue
-                return yes_leg, no_leg
+                stats.condition_guard_pass += 1
 
-        return None
+                return (yes_leg, no_leg), stats
+
+        return None, stats
 
     @staticmethod
     def _leg_cost(

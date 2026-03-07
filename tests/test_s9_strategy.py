@@ -281,7 +281,6 @@ def test_s9_default_same_market_guard_blocks_cross_market_only_edge() -> None:
     )
 
     assert signals == []
-
     cross_market_signals = strategy.generate(
         markets,
         {
@@ -332,6 +331,101 @@ def test_s9_default_blocks_cross_condition_pair_within_event() -> None:
     )
 
     assert signals == []
+
+
+def test_s9_pair_not_found_market_guard_reason_when_cross_market_required() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-market-guard",
+            event_id="e-market-guard",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team X win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-market-guard",
+            event_id="e-market-guard",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Team X win?",
+        ),
+    ]
+    markets[1].market_id = markets[0].market_id
+
+    signals = strategy.generate(
+        markets,
+        {
+            "require_same_market": False,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy:pair_not_found_market_guard") == 1
+
+    pair_search = diagnostics.get("pair_search", {})
+    assert int(float(pair_search.get("candidate_pairs_scanned", 0.0))) == 4
+    assert int(float(pair_search.get("market_guard_pass", 0.0))) == 0
+    assert int(float(pair_search.get("rejected_by_market_guard", 0.0))) == 4
+
+
+def test_s9_pair_not_found_condition_guard_reason_when_cross_market_pairing_used() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-condition-guard",
+            event_id="e-condition-guard",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team X win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-condition-guard",
+            event_id="e-condition-guard",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Team Y win?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "require_same_market": False,
+            "require_same_condition": True,
+            "require_same_event": True,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy:pair_not_found_condition_guard") == 1
+
+    pair_search = diagnostics.get("pair_search", {})
+    assert int(float(pair_search.get("candidate_pairs_scanned", 0.0))) == 4
+    assert int(float(pair_search.get("market_guard_pass", 0.0))) == 2
+    assert int(float(pair_search.get("event_guard_pass", 0.0))) == 2
+    assert int(float(pair_search.get("condition_guard_pass", 0.0))) == 0
+    assert int(float(pair_search.get("rejected_by_condition_guard", 0.0))) == 2
 
 
 def test_s9_can_opt_out_same_condition_guard() -> None:
