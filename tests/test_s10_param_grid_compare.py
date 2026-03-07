@@ -85,6 +85,46 @@ def test_apply_s10_overrides_keeps_base_immutable() -> None:
     assert updated["strategies"]["s10"]["max_tiny_price_leg_share"] == 0.2
 
 
+def test_candidate_sort_key_prefers_constraint_pass_then_slice_stability() -> None:
+    module = _load_module()
+
+    rows = [
+        {
+            "candidate_id": "cand-b",
+            "passes_constraints": True,
+            "min_slice_delta_pnl": 0.0,
+            "max_slice_delta_max_drawdown": 0.03,
+            "total_delta_pnl": 0.2,
+            "total_delta_exec": 1,
+            "total_delta_rej": 0,
+            "total_delta_max_drawdown": 0.03,
+        },
+        {
+            "candidate_id": "cand-a",
+            "passes_constraints": True,
+            "min_slice_delta_pnl": 0.0,
+            "max_slice_delta_max_drawdown": 0.01,
+            "total_delta_pnl": 0.2,
+            "total_delta_exec": 1,
+            "total_delta_rej": 0,
+            "total_delta_max_drawdown": 0.01,
+        },
+        {
+            "candidate_id": "cand-c",
+            "passes_constraints": False,
+            "min_slice_delta_pnl": 0.5,
+            "max_slice_delta_max_drawdown": -0.2,
+            "total_delta_pnl": 1.0,
+            "total_delta_exec": 3,
+            "total_delta_rej": -1,
+            "total_delta_max_drawdown": -0.3,
+        },
+    ]
+
+    ranked = sorted(rows, key=module.candidate_sort_key)
+    assert [row["candidate_id"] for row in ranked] == ["cand-a", "cand-b", "cand-c"]
+
+
 def test_summarize_compare_payload_and_markdown() -> None:
     module = _load_module()
 
@@ -126,6 +166,7 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert int(summary["total_delta_exec"]) == 4
     assert int(summary["total_delta_rej"]) == -3
     assert abs(float(summary["total_delta_max_drawdown"]) - (-0.3)) < 1e-12
+    assert abs(float(summary["max_slice_delta_max_drawdown"]) - (-0.1)) < 1e-12
     assert abs(float(summary["total_delta_mtm_winrate"]) - 0.08) < 1e-12
 
     markdown = module.render_markdown(
@@ -136,6 +177,7 @@ def test_summarize_compare_payload_and_markdown() -> None:
             "candidate_base_config": "/tmp/candidate.yaml",
             "objective_strategy": "s10",
             "min_slice_delta_pnl_threshold": 0.0,
+            "max_slice_delta_max_drawdown_threshold": 0.0,
             "total_candidates": 1,
             "candidates": [
                 {
@@ -148,7 +190,8 @@ def test_summarize_compare_payload_and_markdown() -> None:
                         "max_floor_adjusted_leg_share": 0.25,
                     },
                     "min_slice_delta_pnl": 0.1,
-                    "passes_min_slice_delta_pnl": True,
+                    "max_slice_delta_max_drawdown": -0.1,
+                    "passes_constraints": True,
                     "total_delta_pnl": 0.5,
                     "total_delta_exec": 4,
                     "total_delta_rej": -3,
@@ -162,10 +205,10 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert "# S10 Parameter Grid Compare" in markdown
     assert "| rank | candidate | prob_tol |" in markdown
     assert (
-        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | min(Δpnl) |"
+        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | min(Δpnl) | max(ΔmaxDD) |"
         in markdown
     )
     assert (
-        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | +0.1000 | +0.5000 | +4 | -3 | -0.2000 | +0.0800 | yes |"
+        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | -0.2000 | +0.0800 | yes |"
         in markdown
     )
