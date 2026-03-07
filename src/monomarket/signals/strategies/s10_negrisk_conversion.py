@@ -57,6 +57,32 @@ def _record_reject_reason(
     _bump_counter(event_rejects, reason)
 
 
+def _normalize_reject_reasons_by_event(
+    reject_reasons_by_event: dict[str, dict[str, int]],
+) -> dict[str, dict[str, int]]:
+    return {
+        event_id: {reason: reasons[reason] for reason in sorted(reasons)}
+        for event_id, reasons in sorted(reject_reasons_by_event.items())
+        if reasons
+    }
+
+
+def _top_k_reject_reasons_by_event(
+    reject_reasons_by_event: dict[str, dict[str, int]],
+    *,
+    top_k: int,
+) -> dict[str, dict[str, int]]:
+    normalized = _normalize_reject_reasons_by_event(reject_reasons_by_event)
+    if top_k <= 0:
+        return normalized
+
+    ranked = sorted(
+        normalized.items(),
+        key=lambda item: (-sum(int(v) for v in item[1].values()), item[0]),
+    )
+    return {event_id: reasons for event_id, reasons in ranked[:top_k]}
+
+
 class S10NegRiskConversionArb(Strategy):
     """
     S10: NegRisk conversion/rebalance arbitrage.
@@ -108,6 +134,7 @@ class S10NegRiskConversionArb(Strategy):
         max_leg_total_cost_bps = max(0.0, float(cfg.get("max_leg_total_cost_bps", 95.0)))
         quote_improve = max(0.0, float(cfg.get("quote_improve", 0.0)))
         allow_sell_conversion = _as_bool(cfg.get("allow_sell_conversion"), False)
+        diagnostics_event_top_k = max(0, int(float(cfg.get("diagnostics_event_top_k", 20))))
 
         exclude_event_ids_raw = cfg.get("exclude_event_ids", [])
         if isinstance(exclude_event_ids_raw, str | bytes):
@@ -282,6 +309,7 @@ class S10NegRiskConversionArb(Strategy):
 
         signals.sort(key=lambda s: s.score, reverse=True)
         selected_signals = signals[:max_signals]
+        reject_by_event = _normalize_reject_reasons_by_event(reject_reasons_by_event)
         self.last_diagnostics = {
             "events_total": len(by_event),
             "events_with_candidates": events_with_candidates,
@@ -291,11 +319,12 @@ class S10NegRiskConversionArb(Strategy):
             "candidate_reject_reasons": {
                 key: reject_reasons[key] for key in sorted(reject_reasons)
             },
-            "candidate_reject_reasons_by_event": {
-                event_id: {reason: reasons[reason] for reason in sorted(reasons)}
-                for event_id, reasons in sorted(reject_reasons_by_event.items())
-                if reasons
-            },
+            "candidate_reject_reasons_by_event": reject_by_event,
+            "candidate_reject_reasons_by_event_top_k": diagnostics_event_top_k,
+            "candidate_reject_reasons_by_event_top": _top_k_reject_reasons_by_event(
+                reject_by_event,
+                top_k=diagnostics_event_top_k,
+            ),
         }
         return selected_signals
 

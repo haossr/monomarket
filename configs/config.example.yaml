@@ -105,6 +105,7 @@ strategies:
     max_leg_weight: 0.70
     max_weighted_total_cost_bps: 120.0
     max_leg_total_cost_bps: 95.0
+    diagnostics_event_top_k: 20
     max_signals: 180
     quote_improve: 0.0
     allow_sell_conversion: false

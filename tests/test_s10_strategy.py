@@ -302,3 +302,42 @@ def test_s10_diagnostics_tracks_reject_reasons_by_event() -> None:
     reject_by_event = diagnostics.get("candidate_reject_reasons_by_event", {})
     assert reject_by_event.get("blocked-e", {}).get("event_excluded") == 1
     assert reject_by_event.get("thin-e", {}).get("event_under_min_unique") == 1
+
+
+def test_s10_diagnostics_event_top_k_summary() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(71, event_id="expensive-e", canonical_id="c1", yes=0.29, liq=150),
+        _market(72, event_id="expensive-e", canonical_id="c2", yes=0.32, liq=140),
+        _market(73, event_id="expensive-e", canonical_id="c3", yes=0.34, liq=130),
+        _market(81, event_id="blocked-e", canonical_id="c1", yes=0.28, liq=900),
+        _market(82, event_id="blocked-e", canonical_id="c2", yes=0.31, liq=850),
+        _market(83, event_id="blocked-e", canonical_id="c3", yes=0.34, liq=870),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "exclude_event_ids": ["blocked-e"],
+            "diagnostics_event_top_k": 1,
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 20.0,
+            "slippage_bps": 12.0,
+            "depth_reference_liquidity": 1000.0,
+            "depth_penalty_max_bps": 40.0,
+            "max_weighted_total_cost_bps": 60.0,
+            "max_leg_total_cost_bps": 200.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+
+    reject_by_event = diagnostics.get("candidate_reject_reasons_by_event", {})
+    assert set(reject_by_event.keys()) == {"blocked-e", "expensive-e"}
+
+    assert diagnostics.get("candidate_reject_reasons_by_event_top_k") == 1
+    reject_top = diagnostics.get("candidate_reject_reasons_by_event_top", {})
+    assert list(reject_top.keys()) == ["expensive-e"]
+    assert reject_top["expensive-e"].get("buy_conversion:weighted_cost_cap_exceeded") == 1

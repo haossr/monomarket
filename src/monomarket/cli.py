@@ -702,6 +702,7 @@ def generate_signals(
 
             strategy_reject_rows: list[tuple[str, str, int]] = []
             strategy_event_reject_rows: list[tuple[str, str, str, int]] = []
+            strategy_event_top_k_hints: list[str] = []
             for strategy, diag in sorted(by_strategy_diag.items()):
                 if not isinstance(diag, dict):
                     continue
@@ -714,7 +715,19 @@ def generate_signals(
                     for reason, count in sorted(reject_reasons.items()):
                         strategy_reject_rows.append((str(strategy), str(reason), int(float(count))))
 
-                reject_reasons_by_event = strategy_diag.get("candidate_reject_reasons_by_event")
+                reject_reasons_by_event = strategy_diag.get("candidate_reject_reasons_by_event_top")
+                if not isinstance(reject_reasons_by_event, dict):
+                    reject_reasons_by_event = strategy_diag.get("candidate_reject_reasons_by_event")
+
+                top_k_raw = strategy_diag.get("candidate_reject_reasons_by_event_top_k")
+                if isinstance(top_k_raw, int | float | str):
+                    try:
+                        top_k = int(float(top_k_raw))
+                        top_k_label = "all" if top_k <= 0 else str(top_k)
+                        strategy_event_top_k_hints.append(f"{strategy}={top_k_label}")
+                    except ValueError:
+                        pass
+
                 if isinstance(reject_reasons_by_event, dict):
                     for event_id, event_reasons in sorted(reject_reasons_by_event.items()):
                         if not isinstance(event_reasons, dict):
@@ -739,7 +752,12 @@ def generate_signals(
                 console.print(reject_tb)
 
             if strategy_event_reject_rows:
-                event_reject_tb = Table(title="Strategy candidate reject diagnostics by event")
+                title = "Strategy candidate reject diagnostics by event"
+                unique_top_k_hints = sorted(set(strategy_event_top_k_hints))
+                if unique_top_k_hints:
+                    title = f"{title} (top_k: {', '.join(unique_top_k_hints)})"
+
+                event_reject_tb = Table(title=title)
                 event_reject_tb.add_column("strategy")
                 event_reject_tb.add_column("event_id")
                 event_reject_tb.add_column("reason")
