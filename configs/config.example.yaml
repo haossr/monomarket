@@ -90,6 +90,8 @@ strategies:
     require_same_event: true
     require_same_condition: true
     require_same_market: true
+    cross_market_require_same_source: true
+    cross_market_extra_edge_bps: 150.0
     diagnostics_event_top_k: 20
   s10:
     prob_sum_tolerance: 0.02
