@@ -37,9 +37,11 @@ class _PairPricingDiagnostics:
 class _PairSearchDiagnostics:
     candidate_pairs_scanned: int = 0
     market_guard_pass: int = 0
+    source_guard_pass: int = 0
     event_guard_pass: int = 0
     condition_guard_pass: int = 0
     rejected_by_market_guard: int = 0
+    rejected_by_source_guard: int = 0
     rejected_by_event_guard: int = 0
     rejected_by_condition_guard: int = 0
 
@@ -47,9 +49,11 @@ class _PairSearchDiagnostics:
         return {
             "candidate_pairs_scanned": int(self.candidate_pairs_scanned),
             "market_guard_pass": int(self.market_guard_pass),
+            "source_guard_pass": int(self.source_guard_pass),
             "event_guard_pass": int(self.event_guard_pass),
             "condition_guard_pass": int(self.condition_guard_pass),
             "rejected_by_market_guard": int(self.rejected_by_market_guard),
+            "rejected_by_source_guard": int(self.rejected_by_source_guard),
             "rejected_by_event_guard": int(self.rejected_by_event_guard),
             "rejected_by_condition_guard": int(self.rejected_by_condition_guard),
         }
@@ -58,9 +62,11 @@ class _PairSearchDiagnostics:
 def _merge_pair_search_diag(target: _PairSearchDiagnostics, source: _PairSearchDiagnostics) -> None:
     target.candidate_pairs_scanned += int(source.candidate_pairs_scanned)
     target.market_guard_pass += int(source.market_guard_pass)
+    target.source_guard_pass += int(source.source_guard_pass)
     target.event_guard_pass += int(source.event_guard_pass)
     target.condition_guard_pass += int(source.condition_guard_pass)
     target.rejected_by_market_guard += int(source.rejected_by_market_guard)
+    target.rejected_by_source_guard += int(source.rejected_by_source_guard)
     target.rejected_by_event_guard += int(source.rejected_by_event_guard)
     target.rejected_by_condition_guard += int(source.rejected_by_condition_guard)
 
@@ -134,6 +140,7 @@ class S9YesNoParityArb(Strategy):
 
     Default leg matching is same-market (`require_same_market=true`),
     with optional cross-market pairing for experiments.
+    Cross-market mode can require same source and extra edge buffer.
     Effective edge is local and depth/fee/slippage aware.
     """
 
@@ -202,6 +209,11 @@ class S9YesNoParityArb(Strategy):
         require_same_event = _as_bool(cfg.get("require_same_event"), True)
         require_same_condition = _as_bool(cfg.get("require_same_condition"), True)
         require_same_market = _as_bool(cfg.get("require_same_market"), True)
+        cross_market_require_same_source = _as_bool(
+            cfg.get("cross_market_require_same_source"),
+            True,
+        )
+        cross_market_extra_edge_bps = max(0.0, float(cfg.get("cross_market_extra_edge_bps", 0.0)))
         max_pairs_per_event = max(0, int(float(cfg.get("max_pairs_per_event", 2))))
         max_event_pair_notional = float(cfg.get("max_event_pair_notional", 20.0))
         diagnostics_event_top_k = max(0, int(float(cfg.get("diagnostics_event_top_k", 20))))
@@ -222,27 +234,33 @@ class S9YesNoParityArb(Strategy):
                 "pair_search": {
                     "candidate_pairs_scanned": 0,
                     "market_guard_pass": 0,
+                    "source_guard_pass": 0,
                     "event_guard_pass": 0,
                     "condition_guard_pass": 0,
                     "rejected_by_market_guard": 0,
+                    "rejected_by_source_guard": 0,
                     "rejected_by_event_guard": 0,
                     "rejected_by_condition_guard": 0,
                     "by_side": {
                         "buy": {
                             "candidate_pairs_scanned": 0,
                             "market_guard_pass": 0,
+                            "source_guard_pass": 0,
                             "event_guard_pass": 0,
                             "condition_guard_pass": 0,
                             "rejected_by_market_guard": 0,
+                            "rejected_by_source_guard": 0,
                             "rejected_by_event_guard": 0,
                             "rejected_by_condition_guard": 0,
                         },
                         "sell": {
                             "candidate_pairs_scanned": 0,
                             "market_guard_pass": 0,
+                            "source_guard_pass": 0,
                             "event_guard_pass": 0,
                             "condition_guard_pass": 0,
                             "rejected_by_market_guard": 0,
+                            "rejected_by_source_guard": 0,
                             "rejected_by_event_guard": 0,
                             "rejected_by_condition_guard": 0,
                         },
@@ -333,6 +351,7 @@ class S9YesNoParityArb(Strategy):
                     require_same_event=require_same_event,
                     require_same_condition=require_same_condition,
                     require_same_market=require_same_market,
+                    require_same_source_when_cross_market=cross_market_require_same_source,
                 )
                 side_pair_search_diag = pair_search_by_side.setdefault(
                     side, _PairSearchDiagnostics()
@@ -342,6 +361,8 @@ class S9YesNoParityArb(Strategy):
                 if pair is None:
                     pair_not_found_reason = self._pair_not_found_reason(
                         search_diag=pair_search_diag,
+                        require_same_market=require_same_market,
+                        require_same_source_when_cross_market=cross_market_require_same_source,
                         require_same_event=require_same_event,
                         require_same_condition=require_same_condition,
                     )
@@ -415,6 +436,7 @@ class S9YesNoParityArb(Strategy):
                     quote_improve=quote_improve,
                     min_effective_edge_bps=min_effective_edge_bps,
                     max_order_notional=max_order_notional,
+                    cross_market_extra_edge_bps=cross_market_extra_edge_bps,
                     fee_bps=fee_bps,
                     slippage_bps=slippage_bps,
                     depth_reference_liquidity=depth_reference_liquidity,
@@ -638,6 +660,8 @@ class S9YesNoParityArb(Strategy):
     def _pair_not_found_reason(
         *,
         search_diag: _PairSearchDiagnostics,
+        require_same_market: bool,
+        require_same_source_when_cross_market: bool,
         require_same_event: bool,
         require_same_condition: bool,
     ) -> str:
@@ -645,6 +669,13 @@ class S9YesNoParityArb(Strategy):
             return "pair_not_found_no_candidates"
         if search_diag.market_guard_pass <= 0 and search_diag.rejected_by_market_guard > 0:
             return "pair_not_found_market_guard"
+        if (
+            not require_same_market
+            and require_same_source_when_cross_market
+            and search_diag.source_guard_pass <= 0
+            and search_diag.rejected_by_source_guard > 0
+        ):
+            return "pair_not_found_source_guard"
         if (
             require_same_event
             and search_diag.event_guard_pass <= 0
@@ -668,6 +699,7 @@ class S9YesNoParityArb(Strategy):
         require_same_event: bool,
         require_same_condition: bool,
         require_same_market: bool,
+        require_same_source_when_cross_market: bool,
     ) -> tuple[tuple[MarketView, MarketView] | None, _PairSearchDiagnostics]:
         stats = _PairSearchDiagnostics()
 
@@ -693,6 +725,15 @@ class S9YesNoParityArb(Strategy):
                     stats.rejected_by_market_guard += 1
                     continue
                 stats.market_guard_pass += 1
+
+                if (
+                    not require_same_market
+                    and require_same_source_when_cross_market
+                    and str(yes_leg.source) != str(no_leg.source)
+                ):
+                    stats.rejected_by_source_guard += 1
+                    continue
+                stats.source_guard_pass += 1
 
                 if require_same_event and str(yes_leg.event_id) != str(no_leg.event_id):
                     stats.rejected_by_event_guard += 1
@@ -739,6 +780,7 @@ class S9YesNoParityArb(Strategy):
         quote_improve: float,
         min_effective_edge_bps: float,
         max_order_notional: float,
+        cross_market_extra_edge_bps: float,
         fee_bps: float,
         slippage_bps: float,
         depth_reference_liquidity: float,
@@ -862,7 +904,14 @@ class S9YesNoParityArb(Strategy):
         if max_total_cost_bps > 0 and total_cost_bps > max_total_cost_bps:
             return [], "total_cost_cap_exceeded", pricing_diag
 
-        if effective_edge_bps < min_effective_edge_bps:
+        is_cross_market_pair = str(yes_leg.market_id) != str(no_leg.market_id)
+        required_effective_edge_bps = min_effective_edge_bps
+        if is_cross_market_pair:
+            required_effective_edge_bps += max(0.0, cross_market_extra_edge_bps)
+
+        if effective_edge_bps < required_effective_edge_bps:
+            if is_cross_market_pair and cross_market_extra_edge_bps > 0:
+                return [], "effective_edge_below_cross_market_min", pricing_diag
             return [], "effective_edge_below_min", pricing_diag
 
         pricing_parity_ref = max(1e-9, post_floor_parity_sum)
@@ -930,6 +979,8 @@ class S9YesNoParityArb(Strategy):
             "gross_edge": post_floor_gross_edge,
             "gross_edge_bps": post_floor_gross_edge_bps,
             "effective_edge_bps": effective_edge_bps,
+            "required_effective_edge_bps": required_effective_edge_bps,
+            "cross_market_extra_edge_bps": max(0.0, cross_market_extra_edge_bps),
             "pre_floor_parity_sum": pre_floor_parity_sum,
             "post_floor_parity_sum": post_floor_parity_sum,
             "post_slippage_parity_sum": post_slippage_parity_sum,

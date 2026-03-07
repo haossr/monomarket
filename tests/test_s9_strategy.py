@@ -285,6 +285,7 @@ def test_s9_default_same_market_guard_blocks_cross_market_only_edge() -> None:
         markets,
         {
             "require_same_market": False,
+            "cross_market_require_same_source": False,
             "min_effective_edge_bps": 5.0,
             "fee_bps": 0.0,
             "slippage_bps": 0.0,
@@ -406,6 +407,7 @@ def test_s9_pair_not_found_condition_guard_reason_when_cross_market_pairing_used
         markets,
         {
             "require_same_market": False,
+            "cross_market_require_same_source": False,
             "require_same_condition": True,
             "require_same_event": True,
             "min_effective_edge_bps": 5.0,
@@ -426,6 +428,113 @@ def test_s9_pair_not_found_condition_guard_reason_when_cross_market_pairing_used
     assert int(float(pair_search.get("event_guard_pass", 0.0))) == 2
     assert int(float(pair_search.get("condition_guard_pass", 0.0))) == 0
     assert int(float(pair_search.get("rejected_by_condition_guard", 0.0))) == 2
+
+
+def test_s9_pair_not_found_source_guard_reason_when_cross_market_sources_mismatch() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-source-guard",
+            event_id="e-source-guard",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team X win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-source-guard",
+            event_id="e-source-guard",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Team X win?",
+        ),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "require_same_market": False,
+            "cross_market_require_same_source": True,
+            "require_same_event": True,
+            "require_same_condition": True,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy:pair_not_found_source_guard") == 1
+
+    pair_search = diagnostics.get("pair_search", {})
+    assert int(float(pair_search.get("candidate_pairs_scanned", 0.0))) == 4
+    assert int(float(pair_search.get("market_guard_pass", 0.0))) == 2
+    assert int(float(pair_search.get("source_guard_pass", 0.0))) == 0
+    assert int(float(pair_search.get("rejected_by_source_guard", 0.0))) == 2
+
+
+def test_s9_cross_market_extra_edge_gate_applies() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-cross-edge",
+            event_id="e-cross-edge",
+            yes=0.44,
+            no=0.58,
+            liq=900,
+            question="Will Team X win?",
+        ),
+        _market(
+            2,
+            canonical_id="c-cross-edge",
+            event_id="e-cross-edge",
+            yes=0.49,
+            no=0.53,
+            liq=900,
+            question="Will Team X win?",
+        ),
+    ]
+    markets[1].source = markets[0].source
+
+    relaxed_signals = strategy.generate(
+        markets,
+        {
+            "require_same_market": False,
+            "cross_market_require_same_source": True,
+            "cross_market_extra_edge_bps": 0.0,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert len(relaxed_signals) == 2
+
+    gated_signals = strategy.generate(
+        markets,
+        {
+            "require_same_market": False,
+            "cross_market_require_same_source": True,
+            "cross_market_extra_edge_bps": 400.0,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert gated_signals == []
+    diagnostics = strategy.last_diagnostics
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy:effective_edge_below_cross_market_min") == 1
 
 
 def test_s9_can_opt_out_same_condition_guard() -> None:
@@ -457,6 +566,7 @@ def test_s9_can_opt_out_same_condition_guard() -> None:
             "require_same_condition": False,
             "require_same_event": True,
             "require_same_market": False,
+            "cross_market_require_same_source": False,
             "min_effective_edge_bps": 5.0,
             "fee_bps": 0.0,
             "slippage_bps": 0.0,
