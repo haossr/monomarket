@@ -23,6 +23,7 @@ from monomarket.signals.strategies import (
     S4LowProbYesBasket,
     S8NoCarryTailHedge,
     S9YesNoParityArb,
+    S10NegRiskConversionArb,
 )
 
 
@@ -473,6 +474,7 @@ def _strategy_registry() -> dict[str, Any]:
         "s4": S4LowProbYesBasket(),
         "s8": S8NoCarryTailHedge(),
         "s9": S9YesNoParityArb(),
+        "s10": S10NegRiskConversionArb(),
     }
 
 

@@ -306,6 +306,7 @@ from monomarket.signals.strategies.s2_negrisk_rebalance import S2NegRiskRebalanc
 from monomarket.signals.strategies.s4_low_prob_yes import S4LowProbYesBasket
 from monomarket.signals.strategies.s8_no_carry_tailhedge import S8NoCarryTailHedge
 from monomarket.signals.strategies.s9_yes_no_parity import S9YesNoParityArb
+from monomarket.signals.strategies.s10_negrisk_conversion import S10NegRiskConversionArb
 
 config_path, from_ts, to_ts, strategies_csv, market_limit_raw, step_hours_raw = sys.argv[1:]
 settings = load_settings(config_path)
@@ -335,6 +336,7 @@ registry = {
     "s4": S4LowProbYesBasket(),
     "s8": S8NoCarryTailHedge(),
     "s9": S9YesNoParityArb(),
+    "s10": S10NegRiskConversionArb(),
 }
 
 from_dt = _parse_iso(from_ts)

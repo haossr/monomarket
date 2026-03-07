@@ -13,6 +13,7 @@ from monomarket.signals.strategies import (
     S4LowProbYesBasket,
     S8NoCarryTailHedge,
     S9YesNoParityArb,
+    S10NegRiskConversionArb,
     Strategy,
 )
 
@@ -42,6 +43,7 @@ class SignalEngine:
             "s4": S4LowProbYesBasket(),
             "s8": S8NoCarryTailHedge(),
             "s9": S9YesNoParityArb(),
+            "s10": S10NegRiskConversionArb(),
         }
         self.last_generation_stats: dict[str, object] = {}
 

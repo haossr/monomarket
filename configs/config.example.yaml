@@ -83,3 +83,20 @@ strategies:
     max_signals: 120
     quote_improve: 0.0
     allow_sell_parity: false
+  s10:
+    prob_sum_tolerance: 0.02
+    max_abs_deviation: 0.20
+    min_leg_liquidity: 80.0
+    max_order_notional: 10.0
+    min_effective_edge_bps: 30.0
+    fee_bps: 0.0
+    slippage_bps: 6.0
+    depth_reference_liquidity: 1000.0
+    depth_penalty_max_bps: 35.0
+    liquidity_fraction: 0.01
+    min_qty: 1.0
+    max_legs_per_event: 24
+    max_signals: 180
+    quote_improve: 0.0
+    allow_sell_conversion: false
+    exclude_event_ids: []
