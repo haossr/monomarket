@@ -15,6 +15,7 @@ from monomarket.backtest.reject_reason import format_reject_top, normalize_rejec
 
 ROLLING_REJECT_TOP_DELIMITER = ";"
 INTERPRETABLE_MIN_EXECUTED_SIGNALS = 10
+FOCUS_STRATEGIES = ("s9", "s10")
 
 
 def _f(raw: object) -> float:
@@ -158,11 +159,7 @@ def _rolling_negative_strategy_summary(
             "worst_avg_pnl": 0.0,
             "metric_key": metric_key,
             "active_only": active_only,
-            "text": (
-                f"{count_label}=0 "
-                f"{strategy_label}=n/a "
-                f"{pnl_label}=0.0000"
-            ),
+            "text": (f"{count_label}=0 " f"{strategy_label}=n/a " f"{pnl_label}=0.0000"),
         }
 
     worst_strategy, worst_avg_pnl = min(negatives, key=lambda x: x[1])
@@ -192,6 +189,80 @@ def _strategy_has_activity(row: dict[str, Any]) -> bool:
         "mtm_losses",
     )
     return any(int(_f(row.get(key))) > 0 for key in numeric_keys)
+
+
+def _strategy_focus_metrics(
+    payload: dict[str, Any], *, strategies: tuple[str, ...] = FOCUS_STRATEGIES
+) -> dict[str, dict[str, Any]]:
+    rows_obj = payload.get("results")
+    rows = rows_obj if isinstance(rows_obj, list) else []
+
+    by_strategy: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("strategy") or "").strip().lower()
+        if not key:
+            continue
+        by_strategy[key] = row
+
+    summary: dict[str, dict[str, Any]] = {}
+    for strategy in strategies:
+        row = by_strategy.get(strategy.lower())
+        if row is None:
+            summary[strategy] = {
+                "strategy": strategy,
+                "present": False,
+                "active": False,
+                "pnl": 0.0,
+                "trade_count": 0,
+                "closed_winrate": 0.0,
+                "closed_sample_count": 0,
+                "mtm_winrate": 0.0,
+                "mtm_sample_count": 0,
+                "text": (
+                    f"{strategy}_present=false "
+                    f"{strategy}_pnl=n/a "
+                    f"{strategy}_trades=0 "
+                    f"{strategy}_closed_winrate=n/a "
+                    f"{strategy}_closed_samples=0 "
+                    f"{strategy}_mtm_winrate=n/a "
+                    f"{strategy}_mtm_samples=0"
+                ),
+            }
+            continue
+
+        pnl = _f(row.get("pnl"))
+        trade_count = int(_f(row.get("trade_count", row.get("trades"))))
+        closed_sample_count = int(_f(row.get("closed_sample_count")))
+        mtm_sample_count = int(_f(row.get("mtm_sample_count")))
+        closed_winrate = _f(row.get("closed_winrate", row.get("winrate")))
+        mtm_winrate = _f(row.get("mtm_winrate", row.get("winrate")))
+        active = _strategy_has_activity(row)
+
+        summary[strategy] = {
+            "strategy": strategy,
+            "present": True,
+            "active": active,
+            "pnl": pnl,
+            "trade_count": trade_count,
+            "closed_winrate": closed_winrate,
+            "closed_sample_count": closed_sample_count,
+            "mtm_winrate": mtm_winrate,
+            "mtm_sample_count": mtm_sample_count,
+            "text": (
+                f"{strategy}_present=true "
+                f"{strategy}_active={str(active).lower()} "
+                f"{strategy}_pnl={pnl:.4f} "
+                f"{strategy}_trades={trade_count} "
+                f"{strategy}_closed_winrate={_format_winrate(closed_winrate, closed_sample_count)} "
+                f"{strategy}_closed_samples={closed_sample_count} "
+                f"{strategy}_mtm_winrate={_format_winrate(mtm_winrate, mtm_sample_count)} "
+                f"{strategy}_mtm_samples={mtm_sample_count}"
+            ),
+        }
+
+    return summary
 
 
 def _best_strategy(payload: dict[str, Any]) -> dict[str, Any]:
@@ -418,10 +489,10 @@ def _reject_by_strategy(payload: dict[str, Any], *, top_k: int = 3) -> dict[str,
         risk_allowed_raw = row.get("risk_allowed")
         risk_allowed = True if risk_allowed_raw is None else bool(risk_allowed_raw)
         risk_reason_raw = str(row.get("risk_reason") or "").strip()
-        rejected = (not risk_allowed) or (
+        is_rejected = (not risk_allowed) or (
             risk_reason_raw != "" and risk_reason_raw.lower() != "ok"
         )
-        if not rejected:
+        if not is_rejected:
             continue
 
         item["rejected"] = int(item["rejected"]) + 1
@@ -542,6 +613,15 @@ def build_summary_bundle(
     mtm_winrate = float(winrate_info.get("mtm_winrate", 0.0))
     mtm_sample_count = int(winrate_info.get("mtm_sample_count", 0))
 
+    strategy_focus_info = _strategy_focus_metrics(payload)
+    strategy_focus_s9 = strategy_focus_info.get("s9", {})
+    strategy_focus_s10 = strategy_focus_info.get("s10", {})
+    strategy_focus_s9_text = str(strategy_focus_s9.get("text") or "s9_present=false s9_pnl=n/a")
+    strategy_focus_s10_text = str(strategy_focus_s10.get("text") or "s10_present=false s10_pnl=n/a")
+    strategy_focus_pnl_diff_s9_minus_s10 = float(
+        _f(strategy_focus_s9.get("pnl")) - _f(strategy_focus_s10.get("pnl"))
+    )
+
     window_coverage = _compute_window_coverage(payload)
     window_coverage_ratio = float(window_coverage.get("coverage_ratio", 0.0))
     window_note = str(window_coverage.get("note", ""))
@@ -595,9 +675,7 @@ def build_summary_bundle(
             cycle_historical_replay_only = bool(
                 signal_generation.get("historical_replay_only", False)
             )
-            cycle_clear_signals_window = bool(
-                signal_generation.get("clear_signals_window", False)
-            )
+            cycle_clear_signals_window = bool(signal_generation.get("clear_signals_window", False))
             cycle_cleared_signals_in_window = int(
                 _f(signal_generation.get("cleared_signals_in_window"))
             )
@@ -605,9 +683,7 @@ def build_summary_bundle(
                 signal_generation.get("rebuild_signals_window", False)
             )
             cycle_rebuild_step_hours = float(_f(signal_generation.get("rebuild_step_hours")))
-            cycle_rebuild_sampled_steps = int(
-                _f(signal_generation.get("rebuild_sampled_steps"))
-            )
+            cycle_rebuild_sampled_steps = int(_f(signal_generation.get("rebuild_sampled_steps")))
             cycle_new_signals_first_ts = str(signal_generation.get("new_signals_first_ts") or "")
             cycle_new_signals_last_ts = str(signal_generation.get("new_signals_last_ts") or "")
             edge_gate = signal_generation.get("edge_gate")
@@ -640,7 +716,7 @@ def build_summary_bundle(
                     ]
                     edge_gate_by_strategy_top = (
                         ";".join(
-                            f"{r['strategy']}:{float(r['pass_rate']) * 100.0:.1f}%"
+                            f"{r['strategy']}:{_f(r.get('pass_rate')) * 100.0:.1f}%"
                             for r in edge_gate_by_strategy_rows[:4]
                         )
                         if edge_gate_by_strategy_rows
@@ -653,8 +729,7 @@ def build_summary_bundle(
     )
     generated_low_influence = cycle_fixed_window_mode and generated_share_of_total < 0.05
     generated_low_sample_count = (
-        cycle_fixed_window_mode
-        and executed_signals_total < INTERPRETABLE_MIN_EXECUTED_SIGNALS
+        cycle_fixed_window_mode and executed_signals_total < INTERPRETABLE_MIN_EXECUTED_SIGNALS
     )
 
     window_hours = float(_f(window_coverage.get("window_hours")))
@@ -838,6 +913,9 @@ def build_summary_bundle(
         f"edge_gate_fail={edge_gate_total_fail} "
         f"edge_gate_pass_rate={edge_gate_pass_rate:.2%} "
         f"edge_gate_top={edge_gate_by_strategy_top} "
+        f"| {strategy_focus_s9_text} "
+        f"| {strategy_focus_s10_text} "
+        f"s9_minus_s10_pnl={strategy_focus_pnl_diff_s9_minus_s10:.4f} "
         f"| {best_text} "
         f"best_strategy_basis={best_strategy_basis} "
         f"| {negative_text} "
@@ -883,7 +961,7 @@ def build_summary_bundle(
     sidecar = {
         "schema_version": "nightly-summary-sidecar-1.0",
         "schema_note_version": "1.0",
-        "schema_note": "best is structured object; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (share + temporal coverage + experiment_interpretable/reason) for machine parsing",
+        "schema_note": "best is structured object; strategy_focus surfaces S9/S10 snapshot metrics; prefer rolling.reject_top_pairs(_normalized), reject_by_strategy.rows, and cycle_meta.signal_generation (share + temporal coverage + experiment_interpretable/reason) for machine parsing",
         "best_version": "1.0",
         "nightly_date": nightly_date,
         "window": {
@@ -924,6 +1002,34 @@ def build_summary_bundle(
             "text": best_text,
         },
         "best_text": best_text,
+        "strategy_focus": {
+            "strategies": [str(s) for s in FOCUS_STRATEGIES],
+            "pnl_diff_s9_minus_s10": strategy_focus_pnl_diff_s9_minus_s10,
+            "s9": {
+                "strategy": str(strategy_focus_s9.get("strategy", "s9")),
+                "present": bool(strategy_focus_s9.get("present", False)),
+                "active": bool(strategy_focus_s9.get("active", False)),
+                "pnl": float(_f(strategy_focus_s9.get("pnl"))),
+                "trade_count": int(_f(strategy_focus_s9.get("trade_count"))),
+                "closed_winrate": float(_f(strategy_focus_s9.get("closed_winrate"))),
+                "closed_sample_count": int(_f(strategy_focus_s9.get("closed_sample_count"))),
+                "mtm_winrate": float(_f(strategy_focus_s9.get("mtm_winrate"))),
+                "mtm_sample_count": int(_f(strategy_focus_s9.get("mtm_sample_count"))),
+                "text": str(strategy_focus_s9.get("text") or ""),
+            },
+            "s10": {
+                "strategy": str(strategy_focus_s10.get("strategy", "s10")),
+                "present": bool(strategy_focus_s10.get("present", False)),
+                "active": bool(strategy_focus_s10.get("active", False)),
+                "pnl": float(_f(strategy_focus_s10.get("pnl"))),
+                "trade_count": int(_f(strategy_focus_s10.get("trade_count"))),
+                "closed_winrate": float(_f(strategy_focus_s10.get("closed_winrate"))),
+                "closed_sample_count": int(_f(strategy_focus_s10.get("closed_sample_count"))),
+                "mtm_winrate": float(_f(strategy_focus_s10.get("mtm_winrate"))),
+                "mtm_sample_count": int(_f(strategy_focus_s10.get("mtm_sample_count"))),
+                "text": str(strategy_focus_s10.get("text") or ""),
+            },
+        },
         "negative_strategies": {
             "count": int(_f(negative_info.get("count"))),
             "worst_strategy": str(negative_info.get("worst_strategy", "")),
@@ -986,18 +1092,10 @@ def build_summary_bundle(
             },
             "negative_strategies_active": {
                 "count": int(_f(rolling_negative_active_info.get("count"))),
-                "worst_strategy": str(
-                    rolling_negative_active_info.get("worst_strategy", "")
-                ),
-                "worst_avg_pnl": float(
-                    _f(rolling_negative_active_info.get("worst_avg_pnl"))
-                ),
-                "metric_key": str(
-                    rolling_negative_active_info.get("metric_key", "avg_pnl_active")
-                ),
-                "active_only": bool(
-                    rolling_negative_active_info.get("active_only", True)
-                ),
+                "worst_strategy": str(rolling_negative_active_info.get("worst_strategy", "")),
+                "worst_avg_pnl": float(_f(rolling_negative_active_info.get("worst_avg_pnl"))),
+                "metric_key": str(rolling_negative_active_info.get("metric_key", "avg_pnl_active")),
+                "active_only": bool(rolling_negative_active_info.get("active_only", True)),
                 "text": rolling_negative_active_text,
             },
         },

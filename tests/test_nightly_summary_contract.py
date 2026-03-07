@@ -60,6 +60,11 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "historical_replay_only=",
         "experiment_interpretable=",
         "experiment_reason=",
+        "s9_present=",
+        "s9_pnl=",
+        "s10_present=",
+        "s10_pnl=",
+        "s9_minus_s10_pnl=",
         "negative_strategies=",
         "worst_negative_strategy=",
         "worst_negative_pnl=",
@@ -356,6 +361,122 @@ def test_nightly_best_strategy_prefers_active_strategies(tmp_path: Path) -> None
     assert str(best_obj["selection_basis"]) == "active_first"
     assert int(best_obj["candidate_count"]) == 3
     assert int(best_obj["active_candidate_count"]) == 1
+
+
+def test_nightly_summary_surfaces_s9_s10_focus_metrics(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T04:00:00Z",
+        "total_signals": 6,
+        "executed_signals": 6,
+        "rejected_signals": 0,
+        "results": [
+            {
+                "strategy": "s9",
+                "pnl": 1.5,
+                "trade_count": 3,
+                "closed_winrate": 1.0,
+                "closed_sample_count": 2,
+                "mtm_winrate": 2 / 3,
+                "mtm_sample_count": 3,
+                "mtm_wins": 2,
+                "mtm_losses": 1,
+            },
+            {
+                "strategy": "s10",
+                "pnl": -0.25,
+                "trade_count": 2,
+                "closed_winrate": 0.5,
+                "closed_sample_count": 2,
+                "mtm_winrate": 0.5,
+                "mtm_sample_count": 2,
+                "mtm_wins": 1,
+                "mtm_losses": 1,
+            },
+        ],
+        "replay": [{"ts": "2026-02-24T00:00:00Z", "realized_change": 0.0}],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 1.0,
+            "positive_window_rate": 1.0,
+            "empty_window_count": 0,
+            "range_hours": 4,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "s9_present=true" in line
+    assert "s9_pnl=1.5000" in line
+    assert "s9_trades=3" in line
+    assert "s10_present=true" in line
+    assert "s10_pnl=-0.2500" in line
+    assert "s10_trades=2" in line
+    assert "s9_minus_s10_pnl=1.7500" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    assert verify_nightly_summary_sidecar_checksum(sidecar)
+
+    focus = sidecar["strategy_focus"]
+    assert isinstance(focus, dict)
+    assert focus["strategies"] == ["s9", "s10"]
+    assert abs(float(focus["pnl_diff_s9_minus_s10"]) - 1.75) < 1e-9
+
+    s9 = focus["s9"]
+    assert bool(s9["present"]) is True
+    assert bool(s9["active"]) is True
+    assert abs(float(s9["pnl"]) - 1.5) < 1e-9
+    assert int(s9["trade_count"]) == 3
+    assert int(s9["closed_sample_count"]) == 2
+    assert int(s9["mtm_sample_count"]) == 3
+
+    s10 = focus["s10"]
+    assert bool(s10["present"]) is True
+    assert bool(s10["active"]) is True
+    assert abs(float(s10["pnl"]) - (-0.25)) < 1e-9
+    assert int(s10["trade_count"]) == 2
+    assert int(s10["closed_sample_count"]) == 2
+    assert int(s10["mtm_sample_count"]) == 2
 
 
 def test_nightly_summary_reports_negative_strategy_metadata(tmp_path: Path) -> None:
