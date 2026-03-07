@@ -186,10 +186,60 @@ def test_fetch_gamma_includes_closed_and_archived_filters(monkeypatch) -> None:
     assert captured["path"] == "markets"
     assert captured["params"] == {
         "limit": 321,
+        "offset": 0,
         "active": "true",
         "closed": "false",
         "archived": "false",
     }
+
+
+def test_fetch_gamma_paginates_when_limit_exceeds_single_page(monkeypatch) -> None:
+    clients = MarketDataClients(DataSettings())
+    call_offsets: list[int] = []
+
+    def _mk_market(i: int) -> dict[str, object]:
+        return {
+            "id": f"m-{i}",
+            "question": f"Q-{i}",
+            "active": True,
+            "closed": False,
+            "liquidity": 100 + i,
+            "outcomePrices": ["0.4", "0.6"],
+            "outcomes": ["Yes", "No"],
+            "eventId": f"e-{i}",
+            "updatedAt": "2026-03-07T00:00:00Z",
+        }
+
+    def _fake_get_json(
+        _self: SourceClient,
+        path: str,
+        params: dict[str, object] | None = None,
+    ) -> tuple[object, RequestStats, str]:
+        assert path == "markets"
+        p = dict(params or {})
+        offset = int(p.get("offset", 0))
+        limit = int(p.get("limit", 0))
+        call_offsets.append(offset)
+
+        if offset == 0:
+            payload = [_mk_market(i) for i in range(0, limit)]
+        elif offset == 500:
+            payload = [_mk_market(i) for i in range(500, 500 + limit)]
+        elif offset == 1000:
+            payload = [_mk_market(i) for i in range(1000, 1000 + limit)]
+        else:
+            payload = []
+
+        return payload, RequestStats(requests=1), ""
+
+    monkeypatch.setattr(SourceClient, "get_json", _fake_get_json)
+
+    batch = clients.fetch_gamma(limit=1150, incremental=False)
+
+    assert batch.error == ""
+    assert len(batch.rows) == 1150
+    assert batch.stats.requests == 3
+    assert call_offsets == [0, 500, 1000]
 
 
 def test_fetch_data_skips_404_market_endpoints(monkeypatch) -> None:

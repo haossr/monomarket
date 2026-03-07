@@ -25,6 +25,9 @@ data:
   breaker_failure_threshold: 3
   breaker_cooldown_sec: 90
 
+universe:
+  liquidity_top_fraction: 0.30
+
 edge_gate:
   enabled: true
   min_edge_bps: 0.0

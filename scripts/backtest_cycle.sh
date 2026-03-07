@@ -6,7 +6,9 @@ cd "$ROOT"
 
 LOOKBACK_HOURS="24"
 MARKET_LIMIT="2000"
-INGEST_LIMIT="300"
+INGEST_LIMIT="5000"
+INGEST_MODE="full"
+LIQUIDITY_TOP_FRACTION="0.30"
 CONFIG_PATH="configs/config.yaml"
 OUTPUT_DIR=""
 STRATEGIES="s1,s2,s4,s8,s9,s10"
@@ -21,14 +23,17 @@ usage() {
 Usage: bash scripts/backtest_cycle.sh [options]
 
 Run one reusable backtest cycle:
-  init-db -> ingest(gamma, incremental) -> generate-signals(S1,S2,S4,S8,S9,S10) -> backtest
+  init-db -> ingest(gamma, full by default) -> generate-signals(S1,S2,S4,S8,S9,S10) -> backtest
 
 Options:
   --lookback-hours <float>   Lookback window in hours (default: 24)
   --from-ts <ISO8601>        Optional fixed backtest window start (requires --to-ts)
   --to-ts <ISO8601>          Optional fixed backtest window end (requires --from-ts)
   --market-limit <int>       Market limit for generate-signals (default: 2000)
-  --ingest-limit <int>       Ingest limit for gamma source (default: 300)
+  --liquidity-top-fraction <0..1>
+                             Liquidity top-fraction universe before strategy generation (default: 0.30)
+  --ingest-limit <int>       Ingest limit for gamma source (default: 5000)
+  --ingest-mode <mode>       gamma ingest mode: full|incremental (default: full)
   --config <path>            Config path (default: configs/config.yaml)
   --output-dir <path>        Output run directory (default: artifacts/backtest/runs/<timestamp>)
   --clear-signals-window     Delete existing signals in [from_ts,to_ts] before generate-signals
@@ -58,8 +63,16 @@ while [[ $# -gt 0 ]]; do
       MARKET_LIMIT="$2"
       shift 2
       ;;
+    --liquidity-top-fraction)
+      LIQUIDITY_TOP_FRACTION="$2"
+      shift 2
+      ;;
     --ingest-limit)
       INGEST_LIMIT="$2"
+      shift 2
+      ;;
+    --ingest-mode)
+      INGEST_MODE="$2"
       shift 2
       ;;
     --config)
@@ -115,6 +128,11 @@ fi
 
 if [[ "$REBUILD_SIGNALS_WINDOW" == "1" && "$CLEAR_SIGNALS_WINDOW" != "1" ]]; then
   echo "[backtest-cycle] --rebuild-signals-window requires --clear-signals-window" >&2
+  exit 1
+fi
+
+if [[ "$INGEST_MODE" != "full" && "$INGEST_MODE" != "incremental" ]]; then
+  echo "[backtest-cycle] --ingest-mode must be full|incremental" >&2
   exit 1
 fi
 
@@ -291,7 +309,7 @@ PY
 }
 
 _rebuild_signals_from_snapshots() {
-  "$PYTHON_BIN" - "$CONFIG_PATH" "$1" "$2" "$3" "$4" "$5" <<'PY'
+  "$PYTHON_BIN" - "$CONFIG_PATH" "$1" "$2" "$3" "$4" "$5" "$6" <<'PY'
 from __future__ import annotations
 
 import json
@@ -306,14 +324,24 @@ from monomarket.signals.strategies.s2_negrisk_rebalance import S2NegRiskRebalanc
 from monomarket.signals.strategies.s4_low_prob_yes import S4LowProbYesBasket
 from monomarket.signals.strategies.s8_no_carry_tailhedge import S8NoCarryTailHedge
 from monomarket.signals.strategies.s9_yes_no_parity import S9YesNoParityArb
+from monomarket.signals.engine import SignalEngine
 from monomarket.signals.strategies.s10_negrisk_conversion import S10NegRiskConversionArb
 
-config_path, from_ts, to_ts, strategies_csv, market_limit_raw, step_hours_raw = sys.argv[1:]
+(
+    config_path,
+    from_ts,
+    to_ts,
+    strategies_csv,
+    market_limit_raw,
+    step_hours_raw,
+    liquidity_top_fraction_raw,
+) = sys.argv[1:]
 settings = load_settings(config_path)
 storage = Storage(settings.app.db_path)
 strategies = [s.strip().lower() for s in strategies_csv.split(",") if s.strip()]
 market_limit = max(1, int(float(market_limit_raw)))
 step_hours = max(0.25, float(step_hours_raw))
+liquidity_top_fraction = min(1.0, max(0.0, float(liquidity_top_fraction_raw)))
 
 
 def _parse_iso(ts: str) -> datetime:
@@ -433,6 +461,8 @@ for ts in sampled:
             )
         )
 
+    views, _ = SignalEngine._apply_liquidity_universe(views, liquidity_top_fraction)
+
     generated: list[Signal] = []
     for strategy_name in strategies:
         impl = registry.get(strategy_name)
@@ -519,8 +549,12 @@ echo "[backtest-cycle] run_dir=$RUN_DIR"
 echo "[backtest-cycle] init-db"
 monomarket init-db --config "$CONFIG_PATH"
 
-echo "[backtest-cycle] ingest gamma incremental"
-monomarket ingest --source gamma --limit "$INGEST_LIMIT" --incremental --config "$CONFIG_PATH"
+echo "[backtest-cycle] ingest gamma ${INGEST_MODE}"
+if [[ "$INGEST_MODE" == "incremental" ]]; then
+  monomarket ingest --source gamma --limit "$INGEST_LIMIT" --incremental --config "$CONFIG_PATH"
+else
+  monomarket ingest --source gamma --limit "$INGEST_LIMIT" --full --config "$CONFIG_PATH"
+fi
 
 CLEARED_SIGNALS_IN_WINDOW="0"
 if [[ "$CLEAR_SIGNALS_WINDOW" == "1" ]]; then
@@ -552,7 +586,7 @@ EDGE_GATE_RUN_JSON="{}"
 
 if [[ "$REBUILD_SIGNALS_WINDOW" == "1" ]]; then
   echo "[backtest-cycle] rebuild signals from snapshots: $STRATEGIES (step_h=${REBUILD_STEP_HOURS})"
-  REBUILD_STATS="$(_rebuild_signals_from_snapshots "$FROM_TS" "$TO_TS" "$STRATEGIES" "$MARKET_LIMIT" "$REBUILD_STEP_HOURS")"
+  REBUILD_STATS="$(_rebuild_signals_from_snapshots "$FROM_TS" "$TO_TS" "$STRATEGIES" "$MARKET_LIMIT" "$REBUILD_STEP_HOURS" "$LIQUIDITY_TOP_FRACTION")"
   REBUILD_GENERATED_TOTAL="$(echo "$REBUILD_STATS" | sed -n '1p')"
   REBUILD_INSERTED_TOTAL="$(echo "$REBUILD_STATS" | sed -n '2p')"
   NEW_SIGNALS_FIRST_TS="$(echo "$REBUILD_STATS" | sed -n '3p')"
@@ -567,6 +601,7 @@ else
   monomarket generate-signals \
     --strategies "$STRATEGIES" \
     --market-limit "$MARKET_LIMIT" \
+    --liquidity-top-fraction "$LIQUIDITY_TOP_FRACTION" \
     --config "$CONFIG_PATH"
 
   OVERLAP_STATS="$(_signal_generation_overlap_stats "$RUN_START_TS" "$FROM_TS" "$TO_TS")"
@@ -583,15 +618,28 @@ if [[ "$EDGE_GATE_RUN_JSON" != "{}" ]]; then
 from __future__ import annotations
 import json, sys
 obj = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
-diag = obj.get("diagnostics", {}).get("edge_gate", {}) if isinstance(obj, dict) else {}
-if isinstance(diag, dict):
-    print(
-        "[backtest-cycle] edge_gate "
-        f"raw={int(float(diag.get('total_raw', 0)))} "
-        f"pass={int(float(diag.get('total_pass', 0)))} "
-        f"fail={int(float(diag.get('total_fail', 0)))} "
-        f"pass_rate={float(diag.get('pass_rate', 0.0) or 0.0):.2%}"
-    )
+diagnostics = obj.get("diagnostics", {}) if isinstance(obj, dict) else {}
+if isinstance(diagnostics, dict):
+    diag = diagnostics.get("edge_gate", {})
+    if isinstance(diag, dict):
+        print(
+            "[backtest-cycle] edge_gate "
+            f"raw={int(float(diag.get('total_raw', 0)))} "
+            f"pass={int(float(diag.get('total_pass', 0)))} "
+            f"fail={int(float(diag.get('total_fail', 0)))} "
+            f"pass_rate={float(diag.get('pass_rate', 0.0) or 0.0):.2%}"
+        )
+
+    universe = diagnostics.get("universe", {})
+    if isinstance(universe, dict):
+        print(
+            "[backtest-cycle] universe "
+            f"selected={int(float(universe.get('selected_markets', 0)))}"
+            f"/{int(float(universe.get('total_markets', 0)))} "
+            f"share={float(universe.get('selected_market_share', 0.0) or 0.0):.2%} "
+            f"top_fraction={float(universe.get('liquidity_top_fraction', 0.0) or 0.0):.2f} "
+            f"liquidity_cutoff={float(universe.get('liquidity_cutoff', 0.0) or 0.0):.2f}"
+        )
 PY
 )"
   echo "$EDGE_GATE_LINE"
@@ -706,11 +754,15 @@ except json.JSONDecodeError:
     edge_gate_run = {}
 
 edge_gate_diag = {}
+universe_diag = {}
 raw_diag = edge_gate_run.get("diagnostics") if isinstance(edge_gate_run, dict) else None
 if isinstance(raw_diag, dict):
     eg = raw_diag.get("edge_gate")
     if isinstance(eg, dict):
         edge_gate_diag = eg
+    uv = raw_diag.get("universe")
+    if isinstance(uv, dict):
+        universe_diag = uv
 
 pointer = {
     "updated_at": datetime.now(UTC).isoformat(),
@@ -739,6 +791,7 @@ cycle_meta = {
         "rebuild_signals_window": rebuild_signals_window,
         "rebuild_step_hours": rebuild_step_hours,
         "rebuild_sampled_steps": rebuild_sampled_steps,
+        "universe": universe_diag,
         "edge_gate": edge_gate_diag,
     },
 }

@@ -211,9 +211,13 @@ KILL_SWITCH 生效后所有新单拒绝。
 bash scripts/backtest_cycle.sh \
   --lookback-hours 24 \
   --market-limit 2000 \
-  --ingest-limit 300 \
+  --liquidity-top-fraction 0.30 \
+  --ingest-limit 5000 \
+  --ingest-mode full \
   --config configs/soak.paper.yaml
 ```
+
+默认口径：`gamma full ingest(limit=5000)` + `liquidity top 30% universe`（可通过 `--ingest-mode/--ingest-limit/--liquidity-top-fraction` 覆盖）。
 
 产物目录：`artifacts/backtest/runs/<timestamp>/`
 - `latest.json`
@@ -246,7 +250,9 @@ uv run --with reportlab python scripts/backtest_pdf_report.py \
 bash scripts/backtest_nightly_report.sh \
   --lookback-hours 4380 \
   --market-limit 2000 \
-  --ingest-limit 300 \
+  --liquidity-top-fraction 0.30 \
+  --ingest-limit 5000 \
+  --ingest-mode full \
   --rolling-window-hours 24 \
   --rolling-step-hours 12 \
   --rolling-reject-top-k 2 \
