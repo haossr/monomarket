@@ -19,6 +19,7 @@ class BacktestExecutionConfig:
     slippage_bps: float = 5.0
     fee_bps: float = 0.0
     enable_partial_fill: bool = False
+    settle_window_end_positions: bool = False
     liquidity_full_fill: float = 1000.0
     min_fill_ratio: float = 0.1
     enable_fill_probability: bool = False
@@ -873,6 +874,137 @@ class BacktestEngine:
 
             return True, None
 
+        def _settle_open_positions_at_window_end() -> None:
+            nonlocal total_realized
+
+            settle_ts = to_iso
+            open_keys = sorted(
+                [key for key, pos in positions.items() if abs(float(pos.net_qty)) > 1e-9],
+                key=lambda x: (x[0], x[1], x[2]),
+            )
+
+            for strategy, market_id, token_id in open_keys:
+                pos = positions.get((strategy, market_id, token_id))
+                if pos is None or abs(float(pos.net_qty)) <= 1e-9:
+                    continue
+
+                event_id = strategy_market_event.get((strategy, market_id), "unknown")
+                event_key = (strategy, event_id)
+
+                strategy_equity_before = realized_by_strategy[strategy] + self._strategy_unrealized(
+                    positions,
+                    strategy,
+                    settle_ts,
+                )
+                event_equity_before = realized_by_event[event_key] + self._event_unrealized(
+                    positions,
+                    strategy,
+                    event_id,
+                    settle_ts,
+                    strategy_market_event,
+                )
+                strategy_notional_before = self._strategy_notional(positions, strategy, settle_ts)
+                event_notional_before = self._event_notional(
+                    positions,
+                    strategy,
+                    event_id,
+                    strategy_market_event,
+                    settle_ts,
+                )
+                realized_before = realized_by_strategy[strategy]
+
+                mark = self.storage.get_snapshot_price_at(market_id, token_id, settle_ts)
+                mark_price = float(mark) if mark is not None else float(pos.avg_price)
+
+                net_qty_before = float(pos.net_qty)
+                close_qty = abs(net_qty_before)
+                direction = 1.0 if net_qty_before > 0 else -1.0
+                realized_change = close_qty * (mark_price - float(pos.avg_price)) * direction
+
+                pos.net_qty = 0.0
+                pos.avg_price = 0.0
+
+                realized_by_strategy[strategy] += realized_change
+                total_realized += realized_change
+                realized_by_event[event_key] += realized_change
+
+                trade_notional = abs(mark_price * close_qty)
+                trade_return = (
+                    (realized_change / trade_notional) if trade_notional > _METRIC_EPS else 0.0
+                )
+                closed_trade_returns[strategy].append(trade_return)
+                closed_trade_realized[strategy].append(realized_change)
+                event_closed_trade_returns[event_key].append(trade_return)
+                event_closed_trade_realized[event_key].append(realized_change)
+
+                if realized_change > 0:
+                    wins[strategy] += 1
+                    event_wins[event_key] += 1
+                elif realized_change < 0:
+                    losses[strategy] += 1
+                    event_losses[event_key] += 1
+
+                strategy_equity = realized_by_strategy[strategy] + self._strategy_unrealized(
+                    positions,
+                    strategy,
+                    settle_ts,
+                )
+                event_equity = realized_by_event[event_key] + self._event_unrealized(
+                    positions,
+                    strategy,
+                    event_id,
+                    settle_ts,
+                    strategy_market_event,
+                )
+
+                mtm_delta = strategy_equity - strategy_equity_before
+                if mtm_delta > 1e-12:
+                    mtm_wins[strategy] += 1
+                elif mtm_delta < -1e-12:
+                    mtm_losses[strategy] += 1
+
+                event_mtm_delta = event_equity - event_equity_before
+                if event_mtm_delta > 1e-12:
+                    event_mtm_wins[event_key] += 1
+                elif event_mtm_delta < -1e-12:
+                    event_mtm_losses[event_key] += 1
+
+                equity_curve[strategy].append(strategy_equity)
+                event_equity_curve[event_key].append(event_equity)
+
+                settlement_side = "sell" if net_qty_before > 0 else "buy"
+                replay.append(
+                    BacktestReplayRow(
+                        ts=settle_ts,
+                        strategy=strategy,
+                        event_id=event_id,
+                        market_id=market_id,
+                        token_id=token_id,
+                        side=settlement_side,
+                        qty=close_qty,
+                        executed_qty=close_qty,
+                        fill_ratio=1.0,
+                        fill_probability=1.0,
+                        slippage_bps_applied=0.0,
+                        target_price=mark_price,
+                        fill_price=mark_price,
+                        realized_change=realized_change,
+                        strategy_equity=strategy_equity,
+                        event_equity=event_equity,
+                        risk_allowed=True,
+                        risk_reason="window_end_settlement",
+                        risk_notional=trade_notional,
+                        risk_realized_pnl_before=realized_before,
+                        risk_strategy_notional_before=strategy_notional_before,
+                        risk_event_notional_before=event_notional_before,
+                        risk_rejections_before=int(rejection_streak_by_strategy[strategy]),
+                        risk_max_daily_loss=self.risk.max_daily_loss,
+                        risk_max_strategy_notional=self.risk.max_strategy_notional,
+                        risk_max_event_notional=self.risk.max_event_notional,
+                        risk_circuit_breaker_rejections=self.risk.circuit_breaker_rejections,
+                    )
+                )
+
         for batch in execution_batches:
             if len(batch) == 1:
                 row = batch[0]
@@ -1080,6 +1212,9 @@ class BacktestEngine:
                     _append_rejection(prep, "no executable liquidity", count_for_breaker=False)
                 else:
                     _execute_prepared(prep)
+
+        if self.execution.settle_window_end_positions:
+            _settle_open_positions_at_window_end()
 
         # Guarantee selected strategies appear in report, even if no signal in the window.
         strategies_for_report = sorted(

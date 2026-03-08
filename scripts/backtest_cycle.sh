@@ -18,6 +18,7 @@ CLEAR_SIGNALS_WINDOW="0"
 REBUILD_SIGNALS_WINDOW="0"
 REBUILD_STEP_HOURS="12"
 SKIP_INGEST="0"
+SETTLE_WINDOW_END="1"
 
 usage() {
   cat <<'USAGE'
@@ -37,6 +38,7 @@ Options:
   --ingest-limit <int>       Ingest limit for gamma source (default: 5000)
   --ingest-mode <mode>       gamma ingest mode: full|incremental (default: full)
   --skip-ingest              Skip ingest step (use existing DB snapshot as-is)
+  --no-settle-window-end     Disable synthetic settlement at window end (default: enabled)
   --config <path>            Config path (default: configs/config.yaml)
   --output-dir <path>        Output run directory (default: artifacts/backtest/runs/<timestamp>)
   --clear-signals-window     Delete existing signals in [from_ts,to_ts] before generate-signals
@@ -84,6 +86,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-ingest)
       SKIP_INGEST="1"
+      shift 1
+      ;;
+    --no-settle-window-end)
+      SETTLE_WINDOW_END="0"
       shift 1
       ;;
     --config)
@@ -669,10 +675,16 @@ if [[ "$NEW_SIGNALS_TOTAL" -gt 0 && "$NEW_SIGNALS_IN_WINDOW" -eq 0 ]]; then
 fi
 
 echo "[backtest-cycle] backtest"
+BACKTEST_SETTLE_FLAG="--settle-window-end"
+if [[ "$SETTLE_WINDOW_END" != "1" ]]; then
+  BACKTEST_SETTLE_FLAG="--no-settle-window-end"
+fi
+
 monomarket backtest \
   --strategies "$STRATEGIES" \
   --from "$FROM_TS" \
   --to "$TO_TS" \
+  "$BACKTEST_SETTLE_FLAG" \
   --replay-limit 0 \
   --out-json "$RUN_DIR/latest.json" \
   --out-replay-csv "$RUN_DIR/replay.csv" \

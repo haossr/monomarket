@@ -272,6 +272,60 @@ def test_backtest_engine_attribution(tmp_path: Path) -> None:
     assert all(abs(x.fill_probability - 1.0) < 1e-9 for x in report.replay)
 
 
+def test_backtest_window_end_settlement_realizes_open_positions(tmp_path: Path) -> None:
+    db = tmp_path / "mono.db"
+    storage = Storage(str(db))
+    storage.init_db()
+    _seed_market_snapshots(storage)
+
+    storage.insert_signals(
+        [
+            Signal(
+                strategy="s1",
+                market_id="m1",
+                event_id="e1",
+                side="buy",
+                score=1.0,
+                confidence=0.8,
+                target_price=0.40,
+                size_hint=10.0,
+                rationale="open-only-window-end-settlement",
+            )
+        ],
+        created_at="2026-02-20T00:10:00+00:00",
+    )
+
+    report = BacktestEngine(
+        storage,
+        execution=BacktestExecutionConfig(
+            slippage_bps=0.0,
+            fee_bps=0.0,
+            settle_window_end_positions=True,
+        ),
+    ).run(["s1"], from_ts="2026-02-20T00:00:00Z", to_ts="2026-02-20T02:00:00Z")
+
+    assert report.total_signals == 1
+    assert report.executed_signals == 1
+    assert report.rejected_signals == 0
+    assert len(report.replay) == 2
+
+    first, second = report.replay
+    assert first.risk_reason == "ok"
+    assert abs(first.realized_change) < 1e-9
+
+    assert second.risk_reason == "window_end_settlement"
+    assert second.ts == "2026-02-20T02:00:00+00:00"
+    assert abs(second.realized_change - 2.0) < 1e-9
+
+    r = report.results[0]
+    assert r.strategy == "s1"
+    assert abs(r.pnl - 2.0) < 1e-9
+    assert r.trade_count == 1
+    assert r.closed_sample_count == 1
+    assert r.wins == 1
+    assert abs(r.closed_winrate - 1.0) < 1e-9
+
+
 def test_backtest_metrics_no_trades_are_zero(tmp_path: Path) -> None:
     db = tmp_path / "mono.db"
     storage = Storage(str(db))

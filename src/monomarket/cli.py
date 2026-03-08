@@ -996,6 +996,11 @@ def backtest(
         "--dynamic-slippage/--no-dynamic-slippage",
         help="Enable spread/liquidity layered slippage",
     ),
+    settle_window_end: bool = typer.Option(
+        False,
+        "--settle-window-end/--no-settle-window-end",
+        help="At --to timestamp, realize remaining open positions using snapshot marks",
+    ),
     spread_slippage_weight_bps: float = typer.Option(
         50.0,
         min=0.0,
@@ -1049,6 +1054,7 @@ def backtest(
             enable_fill_probability=fill_probability,
             min_fill_probability=min_fill_probability,
             enable_dynamic_slippage=dynamic_slippage,
+            settle_window_end_positions=settle_window_end,
             spread_slippage_weight_bps=spread_slippage_weight_bps,
             liquidity_slippage_weight_bps=liquidity_slippage_weight_bps,
             liquidity_reference=slippage_liquidity_reference,
@@ -1205,6 +1211,11 @@ def backtest_rolling(
     step_hours: float = typer.Option(12.0, min=0.1, help="Step size in hours"),
     slippage_bps: float = typer.Option(5.0, min=0.0),
     fee_bps: float = typer.Option(0.0, min=0.0),
+    settle_window_end: bool = typer.Option(
+        False,
+        "--settle-window-end/--no-settle-window-end",
+        help="At each window end, realize remaining open positions using snapshot marks",
+    ),
     out_json: str | None = typer.Option(None, help="Write rolling summary as JSON"),
     config: str | None = typer.Option(None),
 ) -> None:
@@ -1234,6 +1245,7 @@ def backtest_rolling(
     execution_cfg = BacktestExecutionConfig(
         slippage_bps=slippage_bps,
         fee_bps=fee_bps,
+        settle_window_end_positions=settle_window_end,
     )
     risk_cfg = BacktestRiskConfig(
         max_daily_loss=settings.risk.max_daily_loss,

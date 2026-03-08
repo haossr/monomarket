@@ -683,9 +683,7 @@ def _render_html(
     )
 
     realized_pnl = (
-        float(replay_timeline[-1].get("cumulative_realized_pnl", 0.0))
-        if replay_timeline
-        else 0.0
+        float(replay_timeline[-1].get("cumulative_realized_pnl", 0.0)) if replay_timeline else 0.0
     )
 
     summary_items = [

@@ -23,6 +23,7 @@ CLEAR_SIGNALS_WINDOW="0"
 REBUILD_SIGNALS_WINDOW="0"
 REBUILD_STEP_HOURS="12"
 REQUIRE_INTERPRETABLE="0"
+SETTLE_WINDOW_END="1"
 
 usage() {
   cat <<'USAGE'
@@ -49,6 +50,7 @@ Options:
   --rebuild-signals-window        Rebuild signals across window from market_snapshots
                                   (requires --clear-signals-window)
   --rebuild-step-hours <f>        Step hours for rebuild-signals-window (default: 12)
+  --no-settle-window-end          Disable synthetic settlement at window end (default: enabled)
   --require-interpretable         Fail if summary marks experiment_interpretable=false
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
@@ -124,6 +126,10 @@ while [[ $# -gt 0 ]]; do
     --rebuild-step-hours)
       REBUILD_STEP_HOURS="$2"
       shift 2
+      ;;
+    --no-settle-window-end)
+      SETTLE_WINDOW_END="0"
+      shift 1
       ;;
     --require-interpretable)
       REQUIRE_INTERPRETABLE="1"
@@ -218,6 +224,11 @@ if [[ "$REBUILD_SIGNALS_WINDOW" == "1" ]]; then
   CYCLE_REBUILD_ARGS=(--rebuild-signals-window --rebuild-step-hours "$REBUILD_STEP_HOURS")
 fi
 
+CYCLE_SETTLE_ARGS=()
+if [[ "$SETTLE_WINDOW_END" != "1" ]]; then
+  CYCLE_SETTLE_ARGS=(--no-settle-window-end)
+fi
+
 echo "[nightly] running cycle"
 bash scripts/backtest_cycle.sh \
   --lookback-hours "$LOOKBACK_HOURS" \
@@ -230,7 +241,8 @@ bash scripts/backtest_cycle.sh \
   --output-dir "$RUN_DIR" \
   ${CYCLE_WINDOW_ARGS[@]-} \
   ${CYCLE_CLEAR_ARGS[@]-} \
-  ${CYCLE_REBUILD_ARGS[@]-}
+  ${CYCLE_REBUILD_ARGS[@]-} \
+  ${CYCLE_SETTLE_ARGS[@]-}
 
 echo "[nightly] generate topic analysis charts"
 mkdir -p "$ANALYSIS_DIR"
@@ -271,10 +283,16 @@ if [[ -z "$ROLLING_FROM_TS" || -z "$ROLLING_TO_TS" ]]; then
 fi
 
 echo "[nightly] rolling backtest window=${ROLLING_FROM_TS} -> ${ROLLING_TO_TS}"
+ROLLING_SETTLE_FLAG="--settle-window-end"
+if [[ "$SETTLE_WINDOW_END" != "1" ]]; then
+  ROLLING_SETTLE_FLAG="--no-settle-window-end"
+fi
+
 monomarket backtest-rolling \
   --strategies "$STRATEGIES" \
   --from "$ROLLING_FROM_TS" \
   --to "$ROLLING_TO_TS" \
+  "$ROLLING_SETTLE_FLAG" \
   --window-hours "$ROLLING_WINDOW_HOURS" \
   --step-hours "$ROLLING_STEP_HOURS" \
   --out-json "$ROLLING_JSON" \
