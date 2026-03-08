@@ -93,6 +93,31 @@ def test_build_backtest_cycle_cmd_includes_rebuild_flags(tmp_path: Path) -> None
     assert "--skip-ingest" in cmd
 
 
+def test_extract_settle_window_end_prefers_cycle_meta_then_execution_config() -> None:
+    module = _load_module()
+
+    settle_from_cycle_meta = module._extract_settle_window_end(
+        {"execution_config": {"settle_window_end_positions": False}},
+        cycle_meta={"signal_generation": {"settle_window_end": True}},
+    )
+    assert settle_from_cycle_meta == (
+        True,
+        "cycle_meta.signal_generation.settle_window_end",
+    )
+
+    settle_from_execution_config = module._extract_settle_window_end(
+        {"execution_config": {"settle_window_end_positions": True}},
+        cycle_meta=None,
+    )
+    assert settle_from_execution_config == (
+        True,
+        "report.execution_config.settle_window_end_positions",
+    )
+
+    settle_default = module._extract_settle_window_end({}, cycle_meta=None)
+    assert settle_default == (False, "default(false)")
+
+
 def test_summarize_strategy_normalizes_reject_reason_prefix() -> None:
     module = _load_module()
 
@@ -262,8 +287,16 @@ def test_summary_delta_and_markdown_render() -> None:
                 {
                     "label": "recent24h",
                     "hours": 24,
-                    "baseline": {"by_strategy": baseline},
-                    "candidate": {"by_strategy": candidate},
+                    "baseline": {
+                        "settle_window_end": True,
+                        "settle_window_end_source": "cycle_meta.signal_generation.settle_window_end",
+                        "by_strategy": baseline,
+                    },
+                    "candidate": {
+                        "settle_window_end": False,
+                        "settle_window_end_source": "report.execution_config.settle_window_end_positions",
+                        "by_strategy": candidate,
+                    },
                     "delta": delta,
                 }
             ],
@@ -271,6 +304,10 @@ def test_summary_delta_and_markdown_render() -> None:
     )
     assert "# Sx12 Dual-Slice Compare" in rendered
     assert "## recent24h (24h)" in rendered
+    assert (
+        "- settle_window_end: base=true (cycle_meta.signal_generation.settle_window_end), "
+        "cand=false (report.execution_config.settle_window_end_positions)"
+    ) in rendered
     assert "| s9 | -0.5000 | 0.1000 | +0.6000 |" in rendered
     assert "| 1 | 4 | +3 | 5 | 2 | -3 |" in rendered
     assert (
