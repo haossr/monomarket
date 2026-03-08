@@ -26,6 +26,10 @@ class _ConversionCandidate:
     max_leg_weight: float
     raw_leg_count: int
     selection_mode: str
+    source_scope: str
+    source_anchor: str
+    source_unique_canonicals: int
+    source_total_rows: int
 
 
 @dataclass(slots=True)
@@ -206,6 +210,7 @@ class S10NegRiskConversionArb(Strategy):
             max(0.0, float(cfg.get("max_floor_adjusted_leg_share", 1.0))),
         )
         allow_sell_conversion = _as_bool(cfg.get("allow_sell_conversion"), False)
+        require_same_source = _as_bool(cfg.get("require_same_source"), False)
         diagnostics_event_top_k = max(0, int(float(cfg.get("diagnostics_event_top_k", 20))))
 
         exclude_event_ids_raw = cfg.get("exclude_event_ids", [])
@@ -220,6 +225,7 @@ class S10NegRiskConversionArb(Strategy):
                 "events_total": 0,
                 "events_with_candidates": 0,
                 "signals_emitted": 0,
+                "require_same_source": require_same_source,
                 "direction_attempts": {"buy_conversion": 0, "sell_conversion": 0},
                 "direction_pass": {"buy_conversion": 0, "sell_conversion": 0},
                 "candidate_reject_reasons": {"strategy_disabled": 1},
@@ -293,19 +299,34 @@ class S10NegRiskConversionArb(Strategy):
                     reason="event_excluded",
                 )
                 continue
-            if len(event_rows) < min_unique_canonicals:
+            (
+                scoped_event_rows,
+                source_scope,
+                source_anchor,
+                source_unique_canonicals,
+            ) = self._scope_event_rows_by_source(
+                event_rows,
+                require_same_source=require_same_source,
+            )
+
+            if source_unique_canonicals < min_unique_canonicals:
+                reject_reason = (
+                    "event_under_min_unique_same_source"
+                    if require_same_source
+                    else "event_under_min_unique"
+                )
                 _record_reject_reason(
                     reject_reasons=reject_reasons,
                     reject_reasons_by_event=reject_reasons_by_event,
                     event_id=event_id,
-                    reason="event_under_min_unique",
+                    reason=reject_reason,
                 )
                 continue
 
             candidates: list[list[Signal]] = []
 
             buy_rows = self._select_rows_for_direction(
-                event_rows,
+                scoped_event_rows,
                 buy_mode=True,
                 max_legs_per_event=max_legs_per_event,
             )
@@ -319,6 +340,10 @@ class S10NegRiskConversionArb(Strategy):
                 min_unique_canonicals=min_unique_canonicals,
                 raw_leg_count=len(event_rows),
                 convert_value=convert_value,
+                source_scope=source_scope,
+                source_anchor=source_anchor,
+                source_unique_canonicals=source_unique_canonicals,
+                source_total_rows=len(scoped_event_rows),
             )
             if buy_candidate is not None:
                 (
@@ -402,7 +427,7 @@ class S10NegRiskConversionArb(Strategy):
 
             if allow_sell_conversion:
                 sell_rows = self._select_rows_for_direction(
-                    event_rows,
+                    scoped_event_rows,
                     buy_mode=False,
                     max_legs_per_event=max_legs_per_event,
                 )
@@ -416,6 +441,10 @@ class S10NegRiskConversionArb(Strategy):
                     min_unique_canonicals=min_unique_canonicals,
                     raw_leg_count=len(event_rows),
                     convert_value=convert_value,
+                    source_scope=source_scope,
+                    source_anchor=source_anchor,
+                    source_unique_canonicals=source_unique_canonicals,
+                    source_total_rows=len(scoped_event_rows),
                 )
                 if sell_candidate is not None:
                     (
@@ -522,6 +551,7 @@ class S10NegRiskConversionArb(Strategy):
             "events_total": len(by_event),
             "events_with_candidates": events_with_candidates,
             "signals_emitted": len(selected_signals),
+            "require_same_source": require_same_source,
             "direction_attempts": direction_attempts,
             "direction_pass": direction_pass,
             "candidate_reject_reasons": {
@@ -591,6 +621,36 @@ class S10NegRiskConversionArb(Strategy):
         return selected_signals
 
     @staticmethod
+    def _scope_event_rows_by_source(
+        rows: list[MarketView],
+        *,
+        require_same_source: bool,
+    ) -> tuple[list[MarketView], str, str, int]:
+        if not rows:
+            return [], "none", "", 0
+
+        if not require_same_source:
+            unique_canonicals = len({str(row.canonical_id) for row in rows})
+            return rows, "multi_source_allowed", "mixed", unique_canonicals
+
+        by_source: dict[str, list[MarketView]] = defaultdict(list)
+        for row in rows:
+            source_key = str(row.source or "").strip() or "unknown"
+            by_source[source_key].append(row)
+
+        ranked_sources = sorted(
+            by_source.items(),
+            key=lambda item: (
+                -len({str(r.canonical_id) for r in item[1]}),
+                -sum(float(r.liquidity) for r in item[1]),
+                item[0],
+            ),
+        )
+        source_anchor, scoped_rows = ranked_sources[0]
+        unique_canonicals = len({str(row.canonical_id) for row in scoped_rows})
+        return scoped_rows, "single_source_required", source_anchor, unique_canonicals
+
+    @staticmethod
     def _select_rows_for_direction(
         rows: list[MarketView],
         *,
@@ -657,6 +717,10 @@ class S10NegRiskConversionArb(Strategy):
         min_unique_canonicals: int,
         raw_leg_count: int,
         convert_value: float,
+        source_scope: str,
+        source_anchor: str,
+        source_unique_canonicals: int,
+        source_total_rows: int,
     ) -> tuple[_ConversionCandidate | None, str | None]:
         if len(rows) < min_unique_canonicals:
             return None, "under_min_unique_canonicals"
@@ -697,6 +761,10 @@ class S10NegRiskConversionArb(Strategy):
                 max_leg_weight=max_leg_weight_ratio,
                 raw_leg_count=raw_leg_count,
                 selection_mode=selection_mode,
+                source_scope=source_scope,
+                source_anchor=source_anchor,
+                source_unique_canonicals=source_unique_canonicals,
+                source_total_rows=source_total_rows,
             ),
             None,
         )
@@ -920,6 +988,7 @@ class S10NegRiskConversionArb(Strategy):
             {
                 "market_id": r.market_id,
                 "canonical_id": r.canonical_id,
+                "source": str(r.source),
                 "yes_price": float(r.yes_price or 0.0),
                 "target_price": target_prices.get(r.market_id, 0.0),
                 "estimated_fill_price": estimated_fill_prices.get(r.market_id, 0.0),
@@ -944,6 +1013,10 @@ class S10NegRiskConversionArb(Strategy):
                 "basket_expected_legs": total_legs,
                 "direction": candidate.direction,
                 "selection_mode": candidate.selection_mode,
+                "source_scope": candidate.source_scope,
+                "source_anchor": candidate.source_anchor,
+                "source_unique_canonicals": candidate.source_unique_canonicals,
+                "source_total_rows": candidate.source_total_rows,
                 "sum_yes": post_quote_sum_yes,
                 "deviation": candidate.deviation,
                 "convert_value": convert_value,

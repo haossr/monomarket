@@ -171,6 +171,98 @@ def test_s10_dedupes_per_canonical_using_min_yes_for_buy() -> None:
     assert selected_ids == {"m1", "m3", "m4"}
 
 
+def test_s10_require_same_source_can_select_single_source_subset() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(1, event_id="e-source-scope", canonical_id="c1", yes=0.28, liq=900),
+        _market(2, event_id="e-source-scope", canonical_id="c1", yes=0.26, liq=900),
+        _market(3, event_id="e-source-scope", canonical_id="c2", yes=0.31, liq=850),
+        _market(4, event_id="e-source-scope", canonical_id="c2", yes=0.29, liq=850),
+        _market(5, event_id="e-source-scope", canonical_id="c3", yes=0.34, liq=870),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "require_same_source": True,
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 10.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_order_notional": 8.0,
+            "min_unique_canonicals": 3,
+        },
+    )
+
+    assert len(signals) == 3
+    payload = signals[0].payload
+    assert str(payload.get("source_scope", "")) == "single_source_required"
+    assert str(payload.get("source_anchor", "")) == "gamma"
+    assert int(payload.get("source_unique_canonicals", 0)) == 3
+    assert int(payload.get("source_total_rows", 0)) == 3
+
+    basket_sources = {
+        str(row.get("source", ""))
+        for row in payload.get("basket_markets", [])
+        if isinstance(row, dict)
+    }
+    assert basket_sources == {"gamma"}
+
+
+def test_s10_require_same_source_rejects_when_no_source_meets_min_unique() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(1, event_id="e-source-guard", canonical_id="c1", yes=0.28, liq=900),
+        _market(2, event_id="e-source-guard", canonical_id="c2", yes=0.31, liq=850),
+        _market(3, event_id="e-source-guard", canonical_id="c3", yes=0.34, liq=870),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "require_same_source": True,
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 10.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "min_unique_canonicals": 3,
+        },
+    )
+
+    assert signals == []
+    diagnostics = strategy.last_diagnostics
+    assert bool(diagnostics.get("require_same_source", False))
+    reject_reasons = diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("event_under_min_unique_same_source") == 1
+
+
+def test_s10_can_opt_out_same_source_guard() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(1, event_id="e-source-optout", canonical_id="c1", yes=0.28, liq=900),
+        _market(2, event_id="e-source-optout", canonical_id="c2", yes=0.31, liq=850),
+        _market(3, event_id="e-source-optout", canonical_id="c3", yes=0.34, liq=870),
+    ]
+
+    signals = strategy.generate(
+        markets,
+        {
+            "require_same_source": False,
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 10.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "min_unique_canonicals": 3,
+        },
+    )
+
+    assert len(signals) == 3
+    assert all(str(s.payload.get("source_scope", "")) == "multi_source_allowed" for s in signals)
+
+
 def test_s10_filters_by_unique_canonicals_and_leg_weight() -> None:
     strategy = S10NegRiskConversionArb()
 
