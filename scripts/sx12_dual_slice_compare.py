@@ -599,6 +599,24 @@ def _render_strategy_config_diff(base: dict[str, Any], cand: dict[str, Any]) -> 
     return ", ".join(changed) if changed else "none"
 
 
+def _filter_strategy_config_diff_only(
+    base: dict[str, Any],
+    cand: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    changed_keys = [
+        key
+        for key in sorted(set(base.keys()) | set(cand.keys()))
+        if base.get(key) != cand.get(key)
+    ]
+    if not changed_keys:
+        return {}, {}, False
+    return (
+        {key: base[key] for key in changed_keys if key in base},
+        {key: cand[key] for key in changed_keys if key in cand},
+        True,
+    )
+
+
 def render_markdown(result: dict[str, Any]) -> str:
     lines: list[str] = [
         "# Sx12 Dual-Slice Compare",
@@ -615,6 +633,7 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- skip_ingest_rebuild: {bool(result.get('skip_ingest_rebuild', False))}",
         f"- baseline_settle_window_end: {bool(result.get('baseline_settle_window_end', True))}",
         f"- candidate_settle_window_end: {bool(result.get('candidate_settle_window_end', True))}",
+        f"- strategy_config_diff_only: {bool(result.get('strategy_config_diff_only', False))}",
         "",
     ]
 
@@ -626,8 +645,10 @@ def render_markdown(result: dict[str, Any]) -> str:
     candidate_strategy_config: dict[str, Any] = (
         raw_candidate_strategy_config if isinstance(raw_candidate_strategy_config, dict) else {}
     )
+    strategy_config_diff_only = bool(result.get("strategy_config_diff_only", False))
     if baseline_strategy_config or candidate_strategy_config:
         lines.append("## Strategy config context")
+        rendered_strategy_rows = 0
         for strategy_raw in result.get("strategies", []):
             strategy = str(strategy_raw).strip().lower()
             base_payload = baseline_strategy_config.get(strategy)
@@ -636,9 +657,19 @@ def render_markdown(result: dict[str, Any]) -> str:
             cand = cand_payload if isinstance(cand_payload, dict) else {}
             if not base and not cand:
                 continue
+
+            if strategy_config_diff_only:
+                base, cand, has_diff = _filter_strategy_config_diff_only(base, cand)
+                if not has_diff:
+                    continue
+
             lines.append(f"- {strategy} baseline: {_render_strategy_config_values(base)}")
             lines.append(f"- {strategy} candidate: {_render_strategy_config_values(cand)}")
             lines.append(f"- {strategy} diff: {_render_strategy_config_diff(base, cand)}")
+            rendered_strategy_rows += 1
+
+        if rendered_strategy_rows == 0 and strategy_config_diff_only:
+            lines.append("- no strategy config diffs")
         lines.append("")
 
     for item in result.get("slices", []):
@@ -790,6 +821,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "Run candidate slices with --no-settle-window-end (default candidate settle is on)."
         ),
     )
+    parser.add_argument(
+        "--strategy-config-diff-only",
+        action="store_true",
+        help=(
+            "Render strategy config context with only changed keys and omit strategies "
+            "without config diffs."
+        ),
+    )
     return parser
 
 
@@ -845,6 +884,7 @@ def main() -> int:
         "skip_ingest_rebuild": bool(args.skip_ingest_rebuild),
         "baseline_settle_window_end": not bool(args.baseline_no_settle_window_end),
         "candidate_settle_window_end": not bool(args.candidate_no_settle_window_end),
+        "strategy_config_diff_only": bool(args.strategy_config_diff_only),
         "slices": [],
     }
 

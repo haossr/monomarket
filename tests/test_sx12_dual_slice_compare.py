@@ -41,6 +41,7 @@ def test_slice_default_includes_recent14d() -> None:
     assert bool(args.skip_ingest_rebuild) is False
     assert bool(args.baseline_no_settle_window_end) is False
     assert bool(args.candidate_no_settle_window_end) is False
+    assert bool(args.strategy_config_diff_only) is False
 
 
 def test_slice_parser_accepts_settle_override_flags() -> None:
@@ -60,6 +61,23 @@ def test_slice_parser_accepts_settle_override_flags() -> None:
 
     assert bool(args.baseline_no_settle_window_end) is True
     assert bool(args.candidate_no_settle_window_end) is True
+
+
+def test_slice_parser_accepts_strategy_config_diff_only_flag() -> None:
+    module = _load_module()
+
+    parser = module._build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--baseline-config",
+            "base.yaml",
+            "--candidate-config",
+            "cand.yaml",
+            "--strategy-config-diff-only",
+        ]
+    )
+
+    assert bool(args.strategy_config_diff_only) is True
 
 
 def test_prepare_isolated_config_copies_db_and_rewrites_config(tmp_path: Path) -> None:
@@ -391,3 +409,48 @@ def test_summary_delta_and_markdown_render() -> None:
         "| none | none | effective edge below min:4 | none | evt-old:4 | evt-new:2 | -2 | +1 |"
         in rendered
     )
+
+
+def test_render_markdown_strategy_config_diff_only_filters_unchanged_keys() -> None:
+    module = _load_module()
+
+    rendered = module.render_markdown(
+        {
+            "generated_at": "2026-03-08T07:00:00Z",
+            "anchor_ts": "2026-03-08T06:59:59Z",
+            "baseline_config": "/tmp/base.yaml",
+            "candidate_config": "/tmp/candidate.yaml",
+            "strategies": ["s9", "s10"],
+            "strategy_config_diff_only": True,
+            "baseline_strategy_config": {
+                "s9": {
+                    "min_effective_edge_bps": 20.0,
+                    "require_same_market": True,
+                },
+                "s10": {
+                    "convert_value": 1.0,
+                    "conversion_fee_bps": 0.0,
+                },
+            },
+            "candidate_strategy_config": {
+                "s9": {
+                    "min_effective_edge_bps": 35.0,
+                    "require_same_market": True,
+                },
+                "s10": {
+                    "convert_value": 1.0,
+                    "conversion_fee_bps": 0.0,
+                },
+            },
+            "slices": [],
+        }
+    )
+
+    assert "- strategy_config_diff_only: True" in rendered
+    assert "## Strategy config context" in rendered
+    assert "- s9 baseline: min_effective_edge_bps=20" in rendered
+    assert "- s9 candidate: min_effective_edge_bps=35" in rendered
+    assert "- s9 diff: min_effective_edge_bps:20->35" in rendered
+    assert "require_same_market" not in rendered
+    assert "- s10 baseline:" not in rendered
+    assert "- no strategy config diffs" not in rendered
