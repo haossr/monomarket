@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -97,6 +99,23 @@ def test_slice_parser_accepts_config_context_strategies() -> None:
     )
 
     assert str(args.config_context_strategies) == "s10"
+
+
+def test_slice_parser_accepts_guard_snapshot_only_flag() -> None:
+    module = _load_module()
+
+    parser = module._build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--baseline-config",
+            "base.yaml",
+            "--candidate-config",
+            "cand.yaml",
+            "--guard-snapshot-only",
+        ]
+    )
+
+    assert bool(args.guard_snapshot_only) is True
 
 
 def test_prepare_isolated_config_copies_db_and_rewrites_config(tmp_path: Path) -> None:
@@ -554,3 +573,104 @@ def test_render_markdown_strategy_config_context_can_focus_subset() -> None:
     assert "- s10 baseline: convert_value=1" in rendered
     assert "- s10 candidate: convert_value=1.01" in rendered
     assert "- s9 baseline:" not in rendered
+
+
+def test_render_markdown_guard_snapshot_only_note() -> None:
+    module = _load_module()
+
+    rendered = module.render_markdown(
+        {
+            "generated_at": "2026-03-08T08:00:00Z",
+            "anchor_ts": "2026-03-08T08:00:00Z",
+            "baseline_config": "/tmp/base.yaml",
+            "candidate_config": "/tmp/cand.yaml",
+            "strategies": ["s9", "s10"],
+            "guard_snapshot_only": True,
+            "guard_snapshot": {
+                "s9_cross_market_require_same_source": {
+                    "baseline": True,
+                    "candidate": False,
+                },
+                "s10_require_same_source": {
+                    "baseline": False,
+                    "candidate": False,
+                },
+            },
+            "slices": [],
+        }
+    )
+
+    assert "- guard_snapshot_only: True" in rendered
+    assert "- note: backtests skipped (--guard-snapshot-only)" in rendered
+    assert "## Guard snapshot" in rendered
+    assert "## recent24h" not in rendered
+
+
+def test_guard_snapshot_only_runtime_skips_slice_backtests(tmp_path: Path) -> None:
+    baseline_config = tmp_path / "baseline.yaml"
+    candidate_config = tmp_path / "candidate.yaml"
+    out_dir = tmp_path / "out"
+
+    baseline_config.write_text(
+        """
+app:
+  db_path: data/mono.db
+strategies:
+  s9:
+    cross_market_require_same_source: true
+  s10:
+    require_same_source: false
+""".strip()
+        + "\n"
+    )
+    candidate_config.write_text(
+        """
+app:
+  db_path: data/mono.db
+strategies:
+  s9:
+    cross_market_require_same_source: false
+  s10:
+    require_same_source: true
+""".strip()
+        + "\n"
+    )
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--baseline-config",
+            str(baseline_config),
+            "--candidate-config",
+            str(candidate_config),
+            "--guard-snapshot-only",
+            "--out-dir",
+            str(out_dir),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    compare_json = out_dir / "compare.json"
+    compare_md = out_dir / "compare.md"
+    assert compare_json.exists()
+    assert compare_md.exists()
+
+    payload = json.loads(compare_json.read_text())
+    assert bool(payload["guard_snapshot_only"]) is True
+    assert payload["slices"] == []
+    assert payload["guard_snapshot"] == {
+        "s9_cross_market_require_same_source": {
+            "baseline": True,
+            "candidate": False,
+        },
+        "s10_require_same_source": {
+            "baseline": False,
+            "candidate": True,
+        },
+    }
+    assert "mode: guard_snapshot_only=true (no backtests)" in proc.stdout
+    assert not (out_dir / "baseline").exists()
+    assert not (out_dir / "candidate").exists()

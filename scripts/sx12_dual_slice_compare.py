@@ -701,6 +701,7 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- baseline_settle_window_end: {bool(result.get('baseline_settle_window_end', True))}",
         f"- candidate_settle_window_end: {bool(result.get('candidate_settle_window_end', True))}",
         f"- strategy_config_diff_only: {bool(result.get('strategy_config_diff_only', False))}",
+        f"- guard_snapshot_only: {bool(result.get('guard_snapshot_only', False))}",
         "",
     ]
 
@@ -758,6 +759,10 @@ def render_markdown(result: dict[str, Any]) -> str:
                 f"- {guard_key}: baseline={_format_bool_flag(baseline_value)} "
                 f"candidate={_format_bool_flag(candidate_value)} diff={diff_flag}"
             )
+        lines.append("")
+
+    if bool(result.get("guard_snapshot_only", False)):
+        lines.append("- note: backtests skipped (--guard-snapshot-only)")
         lines.append("")
 
     for item in result.get("slices", []):
@@ -921,6 +926,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "without config diffs."
         ),
     )
+    parser.add_argument(
+        "--guard-snapshot-only",
+        action="store_true",
+        help=(
+            "Only emit strategy config context + guard snapshot (skip all slice backtests)."
+        ),
+    )
     return parser
 
 
@@ -953,7 +965,9 @@ def main() -> int:
             "unsupported config_context_strategies: " + ",".join(unknown_context_strategies)
         )
 
-    specs = parse_slice_specs(str(args.slices))
+    specs: list[SliceSpec] = []
+    if not bool(args.guard_snapshot_only):
+        specs = parse_slice_specs(str(args.slices))
     anchor = _parse_iso_utc(args.anchor_ts) if args.anchor_ts else datetime.now(UTC)
 
     if args.out_dir:
@@ -1000,126 +1014,134 @@ def main() -> int:
         "baseline_settle_window_end": not bool(args.baseline_no_settle_window_end),
         "candidate_settle_window_end": not bool(args.candidate_no_settle_window_end),
         "strategy_config_diff_only": bool(args.strategy_config_diff_only),
+        "guard_snapshot_only": bool(args.guard_snapshot_only),
         "slices": [],
     }
 
-    for spec in specs:
-        to_dt = anchor
-        from_dt = anchor - timedelta(hours=spec.hours)
-        from_ts = _iso_z(from_dt)
-        to_ts = _iso_z(to_dt)
+    if not bool(args.guard_snapshot_only):
+        for spec in specs:
+            to_dt = anchor
+            from_dt = anchor - timedelta(hours=spec.hours)
+            from_ts = _iso_z(from_dt)
+            to_ts = _iso_z(to_dt)
 
-        baseline_out = out_dir / "baseline" / f"{spec.label}.json"
-        candidate_out = out_dir / "candidate" / f"{spec.label}.json"
-        baseline_out.parent.mkdir(parents=True, exist_ok=True)
-        candidate_out.parent.mkdir(parents=True, exist_ok=True)
+            baseline_out = out_dir / "baseline" / f"{spec.label}.json"
+            candidate_out = out_dir / "candidate" / f"{spec.label}.json"
+            baseline_out.parent.mkdir(parents=True, exist_ok=True)
+            candidate_out.parent.mkdir(parents=True, exist_ok=True)
 
-        baseline_isolated_dir = (
-            out_dir / "isolated" / spec.label / "baseline" if args.rebuild_signals_window else None
-        )
-        candidate_isolated_dir = (
-            out_dir / "isolated" / spec.label / "candidate" if args.rebuild_signals_window else None
-        )
-
-        baseline_report = _run_backtest(
-            config_path=baseline_config,
-            strategies_csv=strategies_csv,
-            from_ts=from_ts,
-            to_ts=to_ts,
-            out_json=baseline_out,
-            rebuild_signals_window=bool(args.rebuild_signals_window),
-            rebuild_step_hours=float(args.rebuild_step_hours),
-            rebuild_market_limit=int(args.rebuild_market_limit),
-            rebuild_ingest_limit=int(args.rebuild_ingest_limit),
-            skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
-            isolated_run_dir=baseline_isolated_dir,
-            settle_window_end=not bool(args.baseline_no_settle_window_end),
-        )
-        candidate_report = _run_backtest(
-            config_path=candidate_config,
-            strategies_csv=strategies_csv,
-            from_ts=from_ts,
-            to_ts=to_ts,
-            out_json=candidate_out,
-            rebuild_signals_window=bool(args.rebuild_signals_window),
-            rebuild_step_hours=float(args.rebuild_step_hours),
-            rebuild_market_limit=int(args.rebuild_market_limit),
-            rebuild_ingest_limit=int(args.rebuild_ingest_limit),
-            skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
-            isolated_run_dir=candidate_isolated_dir,
-            settle_window_end=not bool(args.candidate_no_settle_window_end),
-        )
-
-        baseline_cycle_meta = baseline_report.get("_cycle_meta")
-        baseline_cycle_meta_payload = (
-            baseline_cycle_meta if isinstance(baseline_cycle_meta, dict) else None
-        )
-        candidate_cycle_meta = candidate_report.get("_cycle_meta")
-        candidate_cycle_meta_payload = (
-            candidate_cycle_meta if isinstance(candidate_cycle_meta, dict) else None
-        )
-
-        baseline_settle_window_end, baseline_settle_window_end_source = _extract_settle_window_end(
-            baseline_report,
-            cycle_meta=baseline_cycle_meta_payload,
-        )
-        candidate_settle_window_end, candidate_settle_window_end_source = (
-            _extract_settle_window_end(
-                candidate_report,
-                cycle_meta=candidate_cycle_meta_payload,
+            baseline_isolated_dir = (
+                out_dir / "isolated" / spec.label / "baseline"
+                if args.rebuild_signals_window
+                else None
             )
-        )
-
-        baseline_by_strategy = {
-            strategy: summarize_strategy(
-                baseline_report,
-                strategy=strategy,
-                normalize_reject_reasons=normalize_reject_reasons,
-                cycle_meta=baseline_cycle_meta_payload,
+            candidate_isolated_dir = (
+                out_dir / "isolated" / spec.label / "candidate"
+                if args.rebuild_signals_window
+                else None
             )
-            for strategy in strategies
-        }
-        candidate_by_strategy = {
-            strategy: summarize_strategy(
-                candidate_report,
-                strategy=strategy,
-                normalize_reject_reasons=normalize_reject_reasons,
-                cycle_meta=candidate_cycle_meta_payload,
-            )
-            for strategy in strategies
-        }
 
-        result["slices"].append(
-            {
-                "label": spec.label,
-                "hours": spec.hours,
-                "from_ts": from_ts,
-                "to_ts": to_ts,
-                "baseline": {
-                    "report_path": str(baseline_out),
-                    "total_signals": _safe_int(baseline_report.get("total_signals")),
-                    "executed_signals": _safe_int(baseline_report.get("executed_signals")),
-                    "rejected_signals": _safe_int(baseline_report.get("rejected_signals")),
-                    "settle_window_end": baseline_settle_window_end,
-                    "settle_window_end_source": baseline_settle_window_end_source,
-                    "by_strategy": baseline_by_strategy,
-                },
-                "candidate": {
-                    "report_path": str(candidate_out),
-                    "total_signals": _safe_int(candidate_report.get("total_signals")),
-                    "executed_signals": _safe_int(candidate_report.get("executed_signals")),
-                    "rejected_signals": _safe_int(candidate_report.get("rejected_signals")),
-                    "settle_window_end": candidate_settle_window_end,
-                    "settle_window_end_source": candidate_settle_window_end_source,
-                    "by_strategy": candidate_by_strategy,
-                },
-                "delta": _summary_delta(
-                    baseline_by_strategy,
-                    candidate_by_strategy,
-                    strategies=strategies,
-                ),
+            baseline_report = _run_backtest(
+                config_path=baseline_config,
+                strategies_csv=strategies_csv,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                out_json=baseline_out,
+                rebuild_signals_window=bool(args.rebuild_signals_window),
+                rebuild_step_hours=float(args.rebuild_step_hours),
+                rebuild_market_limit=int(args.rebuild_market_limit),
+                rebuild_ingest_limit=int(args.rebuild_ingest_limit),
+                skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
+                isolated_run_dir=baseline_isolated_dir,
+                settle_window_end=not bool(args.baseline_no_settle_window_end),
+            )
+            candidate_report = _run_backtest(
+                config_path=candidate_config,
+                strategies_csv=strategies_csv,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                out_json=candidate_out,
+                rebuild_signals_window=bool(args.rebuild_signals_window),
+                rebuild_step_hours=float(args.rebuild_step_hours),
+                rebuild_market_limit=int(args.rebuild_market_limit),
+                rebuild_ingest_limit=int(args.rebuild_ingest_limit),
+                skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
+                isolated_run_dir=candidate_isolated_dir,
+                settle_window_end=not bool(args.candidate_no_settle_window_end),
+            )
+
+            baseline_cycle_meta = baseline_report.get("_cycle_meta")
+            baseline_cycle_meta_payload = (
+                baseline_cycle_meta if isinstance(baseline_cycle_meta, dict) else None
+            )
+            candidate_cycle_meta = candidate_report.get("_cycle_meta")
+            candidate_cycle_meta_payload = (
+                candidate_cycle_meta if isinstance(candidate_cycle_meta, dict) else None
+            )
+
+            baseline_settle_window_end, baseline_settle_window_end_source = (
+                _extract_settle_window_end(
+                    baseline_report,
+                    cycle_meta=baseline_cycle_meta_payload,
+                )
+            )
+            candidate_settle_window_end, candidate_settle_window_end_source = (
+                _extract_settle_window_end(
+                    candidate_report,
+                    cycle_meta=candidate_cycle_meta_payload,
+                )
+            )
+
+            baseline_by_strategy = {
+                strategy: summarize_strategy(
+                    baseline_report,
+                    strategy=strategy,
+                    normalize_reject_reasons=normalize_reject_reasons,
+                    cycle_meta=baseline_cycle_meta_payload,
+                )
+                for strategy in strategies
             }
-        )
+            candidate_by_strategy = {
+                strategy: summarize_strategy(
+                    candidate_report,
+                    strategy=strategy,
+                    normalize_reject_reasons=normalize_reject_reasons,
+                    cycle_meta=candidate_cycle_meta_payload,
+                )
+                for strategy in strategies
+            }
+
+            result["slices"].append(
+                {
+                    "label": spec.label,
+                    "hours": spec.hours,
+                    "from_ts": from_ts,
+                    "to_ts": to_ts,
+                    "baseline": {
+                        "report_path": str(baseline_out),
+                        "total_signals": _safe_int(baseline_report.get("total_signals")),
+                        "executed_signals": _safe_int(baseline_report.get("executed_signals")),
+                        "rejected_signals": _safe_int(baseline_report.get("rejected_signals")),
+                        "settle_window_end": baseline_settle_window_end,
+                        "settle_window_end_source": baseline_settle_window_end_source,
+                        "by_strategy": baseline_by_strategy,
+                    },
+                    "candidate": {
+                        "report_path": str(candidate_out),
+                        "total_signals": _safe_int(candidate_report.get("total_signals")),
+                        "executed_signals": _safe_int(candidate_report.get("executed_signals")),
+                        "rejected_signals": _safe_int(candidate_report.get("rejected_signals")),
+                        "settle_window_end": candidate_settle_window_end,
+                        "settle_window_end_source": candidate_settle_window_end_source,
+                        "by_strategy": candidate_by_strategy,
+                    },
+                    "delta": _summary_delta(
+                        baseline_by_strategy,
+                        candidate_by_strategy,
+                        strategies=strategies,
+                    ),
+                }
+            )
 
     compare_json = out_dir / "compare.json"
     compare_md = out_dir / "compare.md"
@@ -1129,6 +1151,18 @@ def main() -> int:
     print(f"sx12 dual-slice compare completed: {out_dir}")
     print(f"  json: {compare_json}")
     print(f"  markdown: {compare_md}")
+    if bool(args.guard_snapshot_only):
+        guard_snapshot = result.get("guard_snapshot")
+        guard_rows = guard_snapshot if isinstance(guard_snapshot, dict) else {}
+        print("  mode: guard_snapshot_only=true (no backtests)")
+        for guard_key in ("s9_cross_market_require_same_source", "s10_require_same_source"):
+            row_payload = guard_rows.get(guard_key)
+            row = row_payload if isinstance(row_payload, dict) else {}
+            print(
+                f"  [guard] {guard_key} "
+                f"baseline={_format_bool_flag(_parse_bool_flag(row.get('baseline')))} "
+                f"candidate={_format_bool_flag(_parse_bool_flag(row.get('candidate')))}"
+            )
     for item in result.get("slices", []):
         if not isinstance(item, dict):
             continue
