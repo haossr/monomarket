@@ -817,6 +817,7 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
             "s10": {
                 "convert_value": 1.0,
                 "conversion_fee_bps": 0.0,
+                "require_same_source": False,
             },
         },
         "candidate_strategy_config": {
@@ -828,6 +829,7 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
                 "convert_value": 1.02,
                 "conversion_fee_bps": 12.0,
                 "allow_sell_conversion": True,
+                "require_same_source": True,
             },
         },
         "strategy_config_diff_only": True,
@@ -863,7 +865,10 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
 
     line = summary_txt.read_text().strip()
     assert "s9_cfg_diff_keys=min_effective_edge_bps,require_same_market" in line
-    assert "s10_cfg_diff_keys=allow_sell_conversion,conversion_fee_bps,convert_value" in line
+    assert (
+        "s10_cfg_diff_keys=allow_sell_conversion,conversion_fee_bps,convert_value,require_same_source"
+        in line
+    )
     assert "sx12_cfg_diff_only=true" in line
 
     sidecar = json.loads(summary_json.read_text())
@@ -884,6 +889,7 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
         "s10": {
             "convert_value": 1.0,
             "conversion_fee_bps": 0.0,
+            "require_same_source": False,
         },
     }
     assert config_context["candidate_strategy_config"] == {
@@ -895,11 +901,17 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
             "convert_value": 1.02,
             "conversion_fee_bps": 12.0,
             "allow_sell_conversion": True,
+            "require_same_source": True,
         },
     }
     assert config_context["strategy_diff_keys"] == {
         "s9": ["min_effective_edge_bps", "require_same_market"],
-        "s10": ["allow_sell_conversion", "conversion_fee_bps", "convert_value"],
+        "s10": [
+            "allow_sell_conversion",
+            "conversion_fee_bps",
+            "convert_value",
+            "require_same_source",
+        ],
     }
 
     s9_config_context = focus["s9"]["config_context"]
@@ -917,16 +929,19 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
     assert s10_config_context["baseline"] == {
         "convert_value": 1.0,
         "conversion_fee_bps": 0.0,
+        "require_same_source": False,
     }
     assert s10_config_context["candidate"] == {
         "convert_value": 1.02,
         "conversion_fee_bps": 12.0,
         "allow_sell_conversion": True,
+        "require_same_source": True,
     }
     assert s10_config_context["diff_keys"] == [
         "allow_sell_conversion",
         "conversion_fee_bps",
         "convert_value",
+        "require_same_source",
     ]
 
 

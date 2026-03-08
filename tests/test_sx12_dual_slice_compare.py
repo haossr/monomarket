@@ -304,6 +304,7 @@ def test_extract_strategy_config_context_only_keeps_focus_keys() -> None:
                     "convert_value": 1.02,
                     "conversion_fee_bps": 12.0,
                     "max_weighted_total_cost_bps": 120.0,
+                    "require_same_source": True,
                     "list_value": [1, 2, 3],
                 },
                 "s1": {
@@ -323,6 +324,7 @@ def test_extract_strategy_config_context_only_keeps_focus_keys() -> None:
             "convert_value": 1.02,
             "conversion_fee_bps": 12.0,
             "max_weighted_total_cost_bps": 120.0,
+            "require_same_source": True,
         },
     }
 

@@ -48,6 +48,7 @@ STRATEGY_CONFIG_KEYS: dict[str, tuple[str, ...]] = {
         "max_tiny_price_leg_share",
         "max_floor_adjusted_leg_share",
         "allow_sell_conversion",
+        "require_same_source",
     ),
 }
 
