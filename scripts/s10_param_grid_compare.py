@@ -116,6 +116,8 @@ def summarize_compare_payload(
     total_delta_rej = 0
     total_delta_mtm_wr = 0.0
     total_delta_max_drawdown = 0.0
+    total_delta_generation_pass = 0
+    total_delta_generation_rejected_candidates = 0
 
     by_slice: list[dict[str, Any]] = []
     slices_raw = payload.get("slices", [])
@@ -134,12 +136,18 @@ def summarize_compare_payload(
         rej_rows = _safe_int(strategy_delta.get("rejected_rows"))
         mtm_wr = _safe_float(strategy_delta.get("mtm_winrate"))
         max_drawdown = _safe_float(strategy_delta.get("max_drawdown"))
+        generation_pass = _safe_int(strategy_delta.get("generation_pass"))
+        generation_rejected_candidates = _safe_int(
+            strategy_delta.get("generation_rejected_candidates")
+        )
 
         total_delta_pnl += pnl
         total_delta_exec += exec_rows
         total_delta_rej += rej_rows
         total_delta_mtm_wr += mtm_wr
         total_delta_max_drawdown += max_drawdown
+        total_delta_generation_pass += generation_pass
+        total_delta_generation_rejected_candidates += generation_rejected_candidates
 
         by_slice.append(
             {
@@ -150,6 +158,8 @@ def summarize_compare_payload(
                 "delta_rej": rej_rows,
                 "delta_mtm_winrate": mtm_wr,
                 "delta_max_drawdown": max_drawdown,
+                "delta_generation_pass": generation_pass,
+                "delta_generation_rejected_candidates": generation_rejected_candidates,
             }
         )
 
@@ -168,6 +178,8 @@ def summarize_compare_payload(
         "total_delta_rej": total_delta_rej,
         "total_delta_mtm_winrate": total_delta_mtm_wr,
         "total_delta_max_drawdown": total_delta_max_drawdown,
+        "total_delta_generation_pass": total_delta_generation_pass,
+        "total_delta_generation_rejected_candidates": total_delta_generation_rejected_candidates,
         "min_slice_delta_pnl": min_slice_delta_pnl,
         "max_slice_delta_max_drawdown": max_slice_delta_max_drawdown,
         "non_negative_slice_count": non_negative_slice_count,
@@ -207,8 +219,8 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- total_candidates: {result.get('total_candidates')}",
         "",
         "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | "
-        "min(Δpnl) | max(ΔmaxDD) | ΣΔpnl | ΣΔexec | ΣΔrej | ΣΔmaxDD | ΣΔmtm_wr | pass? |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "min(Δpnl) | max(ΔmaxDD) | ΣΔpnl | ΣΔexec | ΣΔrej | ΣΔgen_pass | ΣΔgen_reject | ΣΔmaxDD | ΣΔmtm_wr | pass? |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
 
     for item in result.get("candidates", []):
@@ -229,6 +241,8 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{_safe_float(item.get('total_delta_pnl')):+.4f} | "
             f"{_safe_int(item.get('total_delta_exec')):+d} | "
             f"{_safe_int(item.get('total_delta_rej')):+d} | "
+            f"{_safe_int(item.get('total_delta_generation_pass')):+d} | "
+            f"{_safe_int(item.get('total_delta_generation_rejected_candidates')):+d} | "
             f"{_safe_float(item.get('total_delta_max_drawdown')):+.4f} | "
             f"{_safe_float(item.get('total_delta_mtm_winrate')):+.4f} | "
             f"{'yes' if bool(item.get('passes_constraints')) else 'no'} |"
@@ -580,6 +594,8 @@ def main() -> int:
             f" ΣΔpnl={_safe_float(entry.get('total_delta_pnl')):+.4f}"
             f" ΣΔexec={_safe_int(entry.get('total_delta_exec')):+d}"
             f" ΣΔrej={_safe_int(entry.get('total_delta_rej')):+d}"
+            f" ΣΔgen_pass={_safe_int(entry.get('total_delta_generation_pass')):+d}"
+            f" ΣΔgen_reject={_safe_int(entry.get('total_delta_generation_rejected_candidates')):+d}"
             f" ΣΔmaxDD={_safe_float(entry.get('total_delta_max_drawdown')):+.4f}"
             f" pass={bool(entry.get('passes_constraints'))}"
             f" overrides={overrides}"
@@ -626,6 +642,8 @@ def main() -> int:
             f"ΣΔpnl={_safe_float(top.get('total_delta_pnl')):+.4f} "
             f"ΣΔexec={_safe_int(top.get('total_delta_exec')):+d} "
             f"ΣΔrej={_safe_int(top.get('total_delta_rej')):+d} "
+            f"ΣΔgen_pass={_safe_int(top.get('total_delta_generation_pass')):+d} "
+            f"ΣΔgen_reject={_safe_int(top.get('total_delta_generation_rejected_candidates')):+d} "
             f"ΣΔmaxDD={_safe_float(top.get('total_delta_max_drawdown')):+.4f} "
             f"pass={bool(top.get('passes_constraints'))}"
         )

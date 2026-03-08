@@ -141,6 +141,47 @@ def test_summarize_strategy_normalizes_reject_reason_prefix() -> None:
     assert summary["executed_rows"] == 1
     assert abs(float(summary["reject_share"]) - (2.0 / 3.0)) < 1e-12
     assert summary["top_reject_reason"] == "strategy notional limit exceeded:2"
+    assert int(summary["generation_raw"]) == 0
+    assert int(summary["generation_pass"]) == 0
+    assert int(summary["generation_fail"]) == 0
+    assert int(summary["generation_rejected_candidates"]) == 0
+    assert str(summary["generation_top_reject_reason"]) == "none"
+
+
+def test_summarize_strategy_extracts_generation_from_cycle_meta() -> None:
+    module = _load_module()
+
+    summary = module.summarize_strategy(
+        {"results": [], "replay": []},
+        strategy="s10",
+        cycle_meta={
+            "signal_generation": {
+                "edge_gate": {
+                    "by_strategy": {
+                        "s10": {
+                            "raw": 7,
+                            "pass": 3,
+                            "fail": 4,
+                            "pass_rate": 3.0 / 7.0,
+                            "strategy_diagnostics": {
+                                "candidate_reject_reasons": {
+                                    "buy_conversion:effective_edge_below_min": 5,
+                                    "event_no_actionable_candidate": 2,
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    assert int(summary["generation_raw"]) == 7
+    assert int(summary["generation_pass"]) == 3
+    assert int(summary["generation_fail"]) == 4
+    assert abs(float(summary["generation_pass_rate"]) - (3.0 / 7.0)) < 1e-12
+    assert int(summary["generation_rejected_candidates"]) == 7
+    assert str(summary["generation_top_reject_reason"]) == "buy_conversion:effective_edge_below_min:5"
 
 
 def test_summary_delta_and_markdown_render() -> None:
@@ -156,6 +197,9 @@ def test_summary_delta_and_markdown_render() -> None:
             "mtm_winrate": 0.2,
             "closed_winrate": 0.0,
             "top_reject_reason": "none",
+            "generation_pass": 1,
+            "generation_rejected_candidates": 5,
+            "generation_top_reject_reason": "effective edge below min:4",
         }
     }
     candidate = {
@@ -168,6 +212,9 @@ def test_summary_delta_and_markdown_render() -> None:
             "mtm_winrate": 0.4,
             "closed_winrate": 0.5,
             "top_reject_reason": "none",
+            "generation_pass": 4,
+            "generation_rejected_candidates": 2,
+            "generation_top_reject_reason": "none",
         }
     }
     delta = module._summary_delta(baseline, candidate, strategies=["s9"])
@@ -175,6 +222,8 @@ def test_summary_delta_and_markdown_render() -> None:
     assert abs(float(delta["s9"]["max_drawdown"]) + 0.3) < 1e-12
     assert int(delta["s9"]["executed_rows"]) == 2
     assert int(delta["s9"]["rejected_rows"]) == -1
+    assert int(delta["s9"]["generation_pass"]) == 3
+    assert int(delta["s9"]["generation_rejected_candidates"]) == -3
 
     rendered = module.render_markdown(
         {
@@ -197,3 +246,5 @@ def test_summary_delta_and_markdown_render() -> None:
     assert "# Sx12 Dual-Slice Compare" in rendered
     assert "## recent24h (24h)" in rendered
     assert "| s9 | -0.5000 | 0.1000 | +0.6000 |" in rendered
+    assert "| 1 | 4 | +3 | 5 | 2 | -3 |" in rendered
+    assert "| none | none | effective edge below min:4 | none |" in rendered
