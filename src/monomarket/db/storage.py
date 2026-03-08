@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS markets (
     mid_price REAL,
     liquidity REAL NOT NULL DEFAULT 0,
     volume REAL NOT NULL DEFAULT 0,
+    end_date TEXT,
     updated_at TEXT NOT NULL,
     UNIQUE(source, market_id)
 );
@@ -103,6 +104,7 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
     mid_price REAL,
     liquidity REAL NOT NULL DEFAULT 0,
     volume REAL NOT NULL DEFAULT 0,
+    end_date TEXT,
     captured_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_market_snapshots_market_time
@@ -221,6 +223,7 @@ class Storage:
             conn.executescript(SCHEMA_SQL)
             self._ensure_ingestion_runs_columns(conn)
             self._ensure_fills_columns(conn)
+            self._ensure_market_columns(conn)
 
     @staticmethod
     def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -258,6 +261,15 @@ class Storage:
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_fills_external_fill_id ON fills(external_fill_id)"
         )
+
+    def _ensure_market_columns(self, conn: sqlite3.Connection) -> None:
+        market_cols = self._table_columns(conn, "markets")
+        if "end_date" not in market_cols:
+            conn.execute("ALTER TABLE markets ADD COLUMN end_date TEXT")
+
+        snapshot_cols = self._table_columns(conn, "market_snapshots")
+        if "end_date" not in snapshot_cols:
+            conn.execute("ALTER TABLE market_snapshots ADD COLUMN end_date TEXT")
 
     @staticmethod
     def _now() -> str:
@@ -798,9 +810,9 @@ class Storage:
                     """
                     INSERT INTO markets(
                         source, market_id, canonical_id, event_id, question, status, neg_risk,
-                        yes_price, no_price, best_bid, best_ask, mid_price, liquidity, volume, updated_at
+                        yes_price, no_price, best_bid, best_ask, mid_price, liquidity, volume, end_date, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(source, market_id) DO UPDATE SET
                         canonical_id=excluded.canonical_id,
                         event_id=excluded.event_id,
@@ -814,6 +826,7 @@ class Storage:
                         mid_price=excluded.mid_price,
                         liquidity=excluded.liquidity,
                         volume=excluded.volume,
+                        end_date=excluded.end_date,
                         updated_at=excluded.updated_at
                     """,
                     (
@@ -831,15 +844,16 @@ class Storage:
                         m.mid_price,
                         m.liquidity,
                         m.volume,
+                        m.end_date,
                         now,
                     ),
                 )
                 conn.execute(
                     """
                     INSERT INTO market_snapshots(
-                        source, market_id, event_id, yes_price, no_price, mid_price, liquidity, volume, captured_at
+                        source, market_id, event_id, yes_price, no_price, mid_price, liquidity, volume, end_date, captured_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         m.source,
@@ -850,6 +864,7 @@ class Storage:
                         m.mid_price,
                         m.liquidity,
                         m.volume,
+                        m.end_date,
                         captured_at,
                     ),
                 )
@@ -861,7 +876,7 @@ class Storage:
                 rows = conn.execute(
                     """
                     SELECT source, market_id, canonical_id, event_id, question, status, neg_risk,
-                           liquidity, volume, yes_price, no_price, best_bid, best_ask, mid_price
+                           liquidity, volume, yes_price, no_price, best_bid, best_ask, mid_price, end_date
                     FROM markets
                     WHERE status = ?
                     ORDER BY updated_at DESC
@@ -873,7 +888,7 @@ class Storage:
                 rows = conn.execute(
                     """
                     SELECT source, market_id, canonical_id, event_id, question, status, neg_risk,
-                           liquidity, volume, yes_price, no_price, best_bid, best_ask, mid_price
+                           liquidity, volume, yes_price, no_price, best_bid, best_ask, mid_price, end_date
                     FROM markets
                     ORDER BY updated_at DESC
                     LIMIT ?
@@ -897,6 +912,7 @@ class Storage:
                 best_bid=row["best_bid"],
                 best_ask=row["best_ask"],
                 mid_price=row["mid_price"],
+                end_date=row["end_date"],
             )
             for row in rows
         ]
@@ -1198,6 +1214,36 @@ class Storage:
         if row is None:
             return None
         return float(row["px"])
+
+    def get_market_end_date_at(self, market_id: str, ts: str) -> str | None:
+        with self.conn() as conn:
+            row = conn.execute(
+                """
+                SELECT end_date AS v
+                FROM market_snapshots
+                WHERE market_id = ? AND captured_at <= ?
+                  AND end_date IS NOT NULL AND TRIM(end_date) <> ''
+                ORDER BY captured_at DESC
+                LIMIT 1
+                """,
+                (market_id, ts),
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    """
+                    SELECT end_date AS v
+                    FROM markets
+                    WHERE market_id = ?
+                      AND end_date IS NOT NULL AND TRIM(end_date) <> ''
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (market_id,),
+                ).fetchone()
+
+        if row is None:
+            return None
+        return str(row["v"])
 
     def get_snapshot_liquidity_at(self, market_id: str, ts: str) -> float | None:
         with self.conn() as conn:

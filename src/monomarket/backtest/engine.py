@@ -877,17 +877,43 @@ class BacktestEngine:
         def _settle_open_positions_at_window_end() -> None:
             nonlocal total_realized
 
-            settle_ts = to_iso
-            open_keys = sorted(
-                [key for key, pos in positions.items() if abs(float(pos.net_qty)) > 1e-9],
-                key=lambda x: (x[0], x[1], x[2]),
-            )
+            window_end_dt = _parse_ts(to_iso)
 
-            for strategy, market_id, token_id in open_keys:
+            open_keys = [key for key, pos in positions.items() if abs(float(pos.net_qty)) > 1e-9]
+            if not open_keys:
+                return
+
+            expiry_cache: dict[str, datetime | None] = {}
+            expiring_keys: list[tuple[datetime, tuple[str, str, str]]] = []
+
+            for key in open_keys:
+                strategy, market_id, token_id = key
+                _ = token_id
+
+                if market_id not in expiry_cache:
+                    raw_end_date = self.storage.get_market_end_date_at(market_id, to_iso)
+                    if raw_end_date:
+                        try:
+                            expiry_cache[market_id] = _parse_ts(raw_end_date)
+                        except ValueError:
+                            expiry_cache[market_id] = None
+                    else:
+                        expiry_cache[market_id] = None
+
+                expiry_dt = expiry_cache[market_id]
+                if expiry_dt is None or expiry_dt > window_end_dt:
+                    continue
+
+                expiring_keys.append((expiry_dt, (strategy, market_id, token_id)))
+
+            expiring_keys.sort(key=lambda x: (x[0], x[1][0], x[1][1], x[1][2]))
+
+            for expiry_dt, (strategy, market_id, token_id) in expiring_keys:
                 pos = positions.get((strategy, market_id, token_id))
                 if pos is None or abs(float(pos.net_qty)) <= 1e-9:
                     continue
 
+                settle_ts = expiry_dt.isoformat()
                 event_id = strategy_market_event.get((strategy, market_id), "unknown")
                 event_key = (strategy, event_id)
 
@@ -992,7 +1018,7 @@ class BacktestEngine:
                         strategy_equity=strategy_equity,
                         event_equity=event_equity,
                         risk_allowed=True,
-                        risk_reason="window_end_settlement",
+                        risk_reason="event_expiry_settlement",
                         risk_notional=trade_notional,
                         risk_realized_pnl_before=realized_before,
                         risk_strategy_notional_before=strategy_notional_before,

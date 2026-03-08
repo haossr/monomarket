@@ -21,6 +21,7 @@ class MarketView:
     best_bid: float | None = None
     best_ask: float | None = None
     mid_price: float | None = None
+    end_date: str | None = None
 
 
 @dataclass(slots=True)

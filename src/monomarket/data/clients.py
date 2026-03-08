@@ -315,6 +315,31 @@ def _extract_event_id(item: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _extract_end_date(item: dict[str, Any]) -> str | None:
+    for key in ("endDate", "end_date", "closeTime", "close_time"):
+        ts = _parse_timestamp(item.get(key))
+        if ts is not None:
+            return ts.isoformat()
+
+    event = item.get("event")
+    if isinstance(event, dict):
+        for key in ("endDate", "end_date", "closeTime", "close_time"):
+            ts = _parse_timestamp(event.get(key))
+            if ts is not None:
+                return ts.isoformat()
+
+    events = _to_list(item.get("events"))
+    if events:
+        first = events[0]
+        if isinstance(first, dict):
+            for key in ("endDate", "end_date", "closeTime", "close_time"):
+                ts = _parse_timestamp(first.get(key))
+                if ts is not None:
+                    return ts.isoformat()
+
+    return None
+
+
 def normalize_market(item: dict[str, Any], source: str) -> MarketView | None:
     market_id = str(
         item.get("market_id")
@@ -366,6 +391,7 @@ def normalize_market(item: dict[str, Any], source: str) -> MarketView | None:
         best_bid=best_bid_f,
         best_ask=best_ask_f,
         mid_price=mid,
+        end_date=_extract_end_date(item),
     )
 
 
