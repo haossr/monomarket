@@ -50,7 +50,7 @@ Options:
   --rebuild-signals-window        Rebuild signals across window from market_snapshots
                                   (requires --clear-signals-window)
   --rebuild-step-hours <f>        Step hours for rebuild-signals-window (default: 12)
-  --no-settle-window-end          Disable synthetic settlement at window end (default: enabled)
+  --no-settle-window-end          Disable expired-event settlement at window end (default: enabled)
   --require-interpretable         Fail if summary marks experiment_interpretable=false
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help

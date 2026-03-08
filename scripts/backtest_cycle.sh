@@ -38,7 +38,7 @@ Options:
   --ingest-limit <int>       Ingest limit for gamma source (default: 5000)
   --ingest-mode <mode>       gamma ingest mode: full|incremental (default: full)
   --skip-ingest              Skip ingest step (use existing DB snapshot as-is)
-  --no-settle-window-end     Disable synthetic settlement at window end (default: enabled)
+  --no-settle-window-end     Disable expired-event settlement at window end (default: enabled)
   --config <path>            Config path (default: configs/config.yaml)
   --output-dir <path>        Output run directory (default: artifacts/backtest/runs/<timestamp>)
   --clear-signals-window     Delete existing signals in [from_ts,to_ts] before generate-signals

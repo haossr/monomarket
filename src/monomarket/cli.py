@@ -999,7 +999,7 @@ def backtest(
     settle_window_end: bool = typer.Option(
         False,
         "--settle-window-end/--no-settle-window-end",
-        help="At --to timestamp, realize remaining open positions using snapshot marks",
+        help="At --to timestamp, realize remaining open positions only for events expired by --to",
     ),
     spread_slippage_weight_bps: float = typer.Option(
         50.0,
@@ -1214,7 +1214,7 @@ def backtest_rolling(
     settle_window_end: bool = typer.Option(
         False,
         "--settle-window-end/--no-settle-window-end",
-        help="At each window end, realize remaining open positions using snapshot marks",
+        help="At each window end, realize remaining open positions only for events expired by that window",
     ),
     out_json: str | None = typer.Option(None, help="Write rolling summary as JSON"),
     config: str | None = typer.Option(None),
