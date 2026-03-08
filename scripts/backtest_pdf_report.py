@@ -63,7 +63,7 @@ def _nice_step(span: float, target_ticks: int = 5) -> float:
         nice = 5.0
     else:
         nice = 10.0
-    return nice * magnitude
+    return float(nice * magnitude)
 
 
 def _truncate_label(text: str, max_len: int = 16) -> str:
@@ -73,7 +73,71 @@ def _truncate_label(text: str, max_len: int = 16) -> str:
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
+    loaded = json.loads(path.read_text())
+    if not isinstance(loaded, dict):
+        return {}
+    return loaded
+
+
+def _coerce_bool(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _format_guard_bool(value: bool | None) -> str:
+    if value is None:
+        return "n/a"
+    return "true" if value else "false"
+
+
+def _extract_sx12_guard_snapshot(sx12_compare_payload: dict[str, Any] | None) -> dict[str, Any]:
+    default = {
+        "available": False,
+        "source": "",
+        "s9_cross_market_require_same_source": {
+            "baseline": None,
+            "candidate": None,
+        },
+        "s10_require_same_source": {
+            "baseline": None,
+            "candidate": None,
+        },
+    }
+    if not isinstance(sx12_compare_payload, dict):
+        return default
+
+    baseline_cfg = sx12_compare_payload.get("baseline_strategy_config")
+    if not isinstance(baseline_cfg, dict):
+        baseline_cfg = {}
+    candidate_cfg = sx12_compare_payload.get("candidate_strategy_config")
+    if not isinstance(candidate_cfg, dict):
+        candidate_cfg = {}
+
+    baseline_s9 = baseline_cfg.get("s9")
+    if not isinstance(baseline_s9, dict):
+        baseline_s9 = {}
+    candidate_s9 = candidate_cfg.get("s9")
+    if not isinstance(candidate_s9, dict):
+        candidate_s9 = {}
+
+    baseline_s10 = baseline_cfg.get("s10")
+    if not isinstance(baseline_s10, dict):
+        baseline_s10 = {}
+    candidate_s10 = candidate_cfg.get("s10")
+    if not isinstance(candidate_s10, dict):
+        candidate_s10 = {}
+
+    return {
+        "available": True,
+        "source": str(sx12_compare_payload.get("_source", "")),
+        "s9_cross_market_require_same_source": {
+            "baseline": _coerce_bool(baseline_s9.get("cross_market_require_same_source")),
+            "candidate": _coerce_bool(candidate_s9.get("cross_market_require_same_source")),
+        },
+        "s10_require_same_source": {
+            "baseline": _coerce_bool(baseline_s10.get("require_same_source")),
+            "candidate": _coerce_bool(candidate_s10.get("require_same_source")),
+        },
+    }
 
 
 def _load_strategy_rows(payload: dict[str, Any], strategy_csv: Path | None) -> list[dict[str, Any]]:
@@ -249,7 +313,7 @@ def _format_rolling_reject_top(
     top_text, _ = format_reject_top(raw, top_k=top_k, delimiter=";", normalize=True)
     if top_text == "disabled":
         return "none"
-    return top_text
+    return str(top_text)
 
 
 def _aggregate_winrate_from_rows(strategy_rows: list[dict[str, Any]]) -> dict[str, float | int]:
@@ -562,6 +626,7 @@ def render_pdf(
     rolling_payload: dict[str, Any] | None,
     cycle_meta_payload: dict[str, Any] | None,
     analysis_payload: dict[str, Any] | None,
+    sx12_compare_payload: dict[str, Any] | None,
     output_path: Path,
     title: str,
 ) -> None:
@@ -891,6 +956,21 @@ def render_pdf(
     s9_pnl = _safe_float(strategy_focus.get("s9", {}).get("pnl"))
     s10_pnl = _safe_float(strategy_focus.get("s10", {}).get("pnl"))
     write_line(f"S9-S10 pnl diff:         {s9_pnl - s10_pnl:.4f}")
+
+    guard_snapshot = _extract_sx12_guard_snapshot(sx12_compare_payload)
+    guard_source = str(guard_snapshot.get("source", ""))
+    if guard_source:
+        write_wrapped(f"Guard snapshot source:   {guard_source}")
+    write_wrapped(
+        "s9_cross_market_require_same_source: "
+        f"baseline={_format_guard_bool(guard_snapshot['s9_cross_market_require_same_source']['baseline'])} "
+        f"candidate={_format_guard_bool(guard_snapshot['s9_cross_market_require_same_source']['candidate'])}"
+    )
+    write_wrapped(
+        "s10_require_same_source: "
+        f"baseline={_format_guard_bool(guard_snapshot['s10_require_same_source']['baseline'])} "
+        f"candidate={_format_guard_bool(guard_snapshot['s10_require_same_source']['candidate'])}"
+    )
     write_line("")
 
     rolling_summary = _extract_rolling_summary(rolling_payload)
@@ -1121,6 +1201,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rolling-json", help="Optional rolling summary JSON")
     parser.add_argument("--cycle-meta-json", help="Optional cycle-meta JSON")
     parser.add_argument("--analysis-json", help="Optional topic/performance analysis JSON")
+    parser.add_argument(
+        "--sx12-compare-json",
+        help="Optional sx12 dual-slice compare.json for guard snapshot",
+    )
     parser.add_argument("--output", required=True, help="Output PDF path")
     parser.add_argument("--title", default="Monomarket Backtest Report", help="PDF title")
     return parser.parse_args()
@@ -1134,6 +1218,7 @@ def main() -> None:
     rolling_json = Path(args.rolling_json) if args.rolling_json else None
     cycle_meta_json = Path(args.cycle_meta_json) if args.cycle_meta_json else None
     analysis_json = Path(args.analysis_json) if args.analysis_json else None
+    sx12_compare_json = Path(args.sx12_compare_json) if args.sx12_compare_json else None
     output = Path(args.output)
 
     payload = _load_payload(backtest_json)
@@ -1151,6 +1236,13 @@ def main() -> None:
     if analysis_json and analysis_json.exists():
         analysis_payload = _load_payload(analysis_json)
 
+    sx12_compare_payload: dict[str, Any] | None = None
+    if sx12_compare_json and sx12_compare_json.exists():
+        loaded_sx12_compare = _load_payload(sx12_compare_json)
+        if isinstance(loaded_sx12_compare, dict):
+            loaded_sx12_compare["_source"] = str(sx12_compare_json.resolve())
+            sx12_compare_payload = loaded_sx12_compare
+
     render_pdf(
         payload=payload,
         strategy_rows=strategy_rows,
@@ -1158,6 +1250,7 @@ def main() -> None:
         rolling_payload=rolling_payload,
         cycle_meta_payload=cycle_meta_payload,
         analysis_payload=analysis_payload,
+        sx12_compare_payload=sx12_compare_payload,
         output_path=output,
         title=args.title,
     )

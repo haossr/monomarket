@@ -134,6 +134,9 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Main history limited",
         "Main window note",
         "Sx12 Strategy Focus / S9-S10",
+        "Guard snapshot source",
+        "s9_cross_market_require_same_source:",
+        "s10_require_same_source:",
         "top_reject_reason_source=",
         "generation_rejected_candidates=",
         "generation_top_reject_reason=",
@@ -151,6 +154,9 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "PDF_ROLLING_REJECT_TOP_K = 2",
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
+        "def _extract_sx12_guard_snapshot",
+        "def _format_guard_bool",
+        "--sx12-compare-json",
         "def _build_strategy_focus_metrics",
         "def _build_strategy_focus_activity_hints",
         "def _extract_rolling_summary",
@@ -205,6 +211,47 @@ def test_pdf_format_rolling_reject_top_tie_is_stable() -> None:
         }
     )
     assert actual == "a-reason:5;z-reason:5"
+
+
+def test_pdf_extract_sx12_guard_snapshot() -> None:
+    module = _load_pdf_report_module()
+
+    default_snapshot = module._extract_sx12_guard_snapshot(None)
+    assert bool(default_snapshot["available"]) is False
+    assert default_snapshot["source"] == ""
+    assert default_snapshot["s9_cross_market_require_same_source"] == {
+        "baseline": None,
+        "candidate": None,
+    }
+    assert default_snapshot["s10_require_same_source"] == {
+        "baseline": None,
+        "candidate": None,
+    }
+
+    snapshot = module._extract_sx12_guard_snapshot(
+        {
+            "_source": "/tmp/compare.json",
+            "baseline_strategy_config": {
+                "s9": {"cross_market_require_same_source": True},
+                "s10": {"require_same_source": False},
+            },
+            "candidate_strategy_config": {
+                "s9": {"cross_market_require_same_source": False},
+                "s10": {"require_same_source": True},
+            },
+        }
+    )
+
+    assert bool(snapshot["available"]) is True
+    assert snapshot["source"] == "/tmp/compare.json"
+    assert snapshot["s9_cross_market_require_same_source"] == {
+        "baseline": True,
+        "candidate": False,
+    }
+    assert snapshot["s10_require_same_source"] == {
+        "baseline": False,
+        "candidate": True,
+    }
 
 
 def test_pdf_strategy_focus_activity_hints_from_payload() -> None:

@@ -323,6 +323,16 @@ monomarket backtest-rolling \
   --out-json "$ROLLING_JSON" \
   --config "$CONFIG_PATH"
 
+if [[ -n "$SX12_COMPARE_JSON" && ! -f "$SX12_COMPARE_JSON" ]]; then
+  echo "[nightly] --sx12-compare-json not found: $SX12_COMPARE_JSON" >&2
+  exit 1
+fi
+
+PDF_SX12_COMPARE_ARGS=()
+if [[ -n "$SX12_COMPARE_JSON" ]]; then
+  PDF_SX12_COMPARE_ARGS=(--sx12-compare-json "$SX12_COMPARE_JSON")
+fi
+
 if command -v uv >/dev/null 2>&1; then
   echo "[nightly] render PDF via uv + reportlab"
   uv run --with reportlab "$PYTHON_BIN" scripts/backtest_pdf_report.py \
@@ -332,6 +342,7 @@ if command -v uv >/dev/null 2>&1; then
     --rolling-json "$ROLLING_JSON" \
     --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
     --analysis-json "$ANALYSIS_JSON" \
+    ${PDF_SX12_COMPARE_ARGS[@]+"${PDF_SX12_COMPARE_ARGS[@]}"} \
     --output "$PDF_PATH" \
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 else
@@ -343,6 +354,7 @@ else
     --rolling-json "$ROLLING_JSON" \
     --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
     --analysis-json "$ANALYSIS_JSON" \
+    ${PDF_SX12_COMPARE_ARGS[@]+"${PDF_SX12_COMPARE_ARGS[@]}"} \
     --output "$PDF_PATH" \
     --title "Monomarket Nightly Backtest Report (${NIGHTLY_DATE})"
 fi
