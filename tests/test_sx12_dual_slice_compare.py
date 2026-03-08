@@ -329,6 +329,32 @@ def test_extract_strategy_config_context_only_keeps_focus_keys() -> None:
     }
 
 
+def test_extract_guard_snapshot() -> None:
+    module = _load_module()
+
+    guard_snapshot = module._extract_guard_snapshot(
+        baseline_strategy_config={
+            "s9": {"cross_market_require_same_source": True},
+            "s10": {"require_same_source": False},
+        },
+        candidate_strategy_config={
+            "s9": {"cross_market_require_same_source": False},
+            "s10": {"require_same_source": False},
+        },
+    )
+
+    assert guard_snapshot == {
+        "s9_cross_market_require_same_source": {
+            "baseline": True,
+            "candidate": False,
+        },
+        "s10_require_same_source": {
+            "baseline": False,
+            "candidate": False,
+        },
+    }
+
+
 def test_summary_delta_and_markdown_render() -> None:
     module = _load_module()
 
@@ -395,6 +421,16 @@ def test_summary_delta_and_markdown_render() -> None:
                 }
             },
             "strategies": ["s9"],
+            "guard_snapshot": {
+                "s9_cross_market_require_same_source": {
+                    "baseline": True,
+                    "candidate": False,
+                },
+                "s10_require_same_source": {
+                    "baseline": None,
+                    "candidate": None,
+                },
+            },
             "slices": [
                 {
                     "label": "recent24h",
@@ -424,6 +460,11 @@ def test_summary_delta_and_markdown_render() -> None:
     assert "- s9 baseline: min_effective_edge_bps=20, require_same_market=true" in rendered
     assert "- s9 candidate: min_effective_edge_bps=35, require_same_market=false" in rendered
     assert "- s9 diff: min_effective_edge_bps:20->35, require_same_market:true->false" in rendered
+    assert "## Guard snapshot" in rendered
+    assert (
+        "- s9_cross_market_require_same_source: baseline=true candidate=false diff=true" in rendered
+    )
+    assert "- s10_require_same_source: baseline=n/a candidate=n/a diff=n/a" in rendered
     assert "| s9 | -0.5000 | 0.1000 | +0.6000 |" in rendered
     assert "| 1 | 4 | +3 | 5 | 2 | -3 |" in rendered
     assert (
