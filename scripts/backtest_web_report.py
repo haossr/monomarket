@@ -385,46 +385,110 @@ def _collect_assumptions(
         f"{_fmt_opt(_get_nested(cycle_meta, 'signal_generation.rebuild_step_hours'))}"
     )
 
+    universe = _get_nested(cycle_meta, "signal_generation.universe")
+    if isinstance(universe, dict):
+        universe_desc = (
+            f"top_fraction={_fmt_opt(universe.get('liquidity_top_fraction'))}, "
+            f"selected={_fmt_opt(universe.get('selected_markets'))}/"
+            f"{_fmt_opt(universe.get('total_markets'))}, "
+            f"share={_fmt_pct(float(universe.get('selected_market_share', 0.0) or 0.0))}, "
+            f"liquidity_cutoff={_fmt_opt(universe.get('liquidity_cutoff'))}"
+        )
+    else:
+        universe_desc = "n/a"
+
+    settle_window_end = _as_bool_or_none(
+        _get_nested(cycle_meta, "signal_generation.settle_window_end")
+    )
+    if settle_window_end is None:
+        settle_desc = "n/a"
+    elif settle_window_end:
+        settle_desc = "开启：仅对窗口结束前已到期事件做结算（event_expiry_settlement）"
+    else:
+        settle_desc = "关闭：窗口结束时不做事件到期结算，仓位仅按 MTM 估值"
+
+    replay_rows = payload.get("replay", [])
+    if not isinstance(replay_rows, list):
+        replay_rows = []
+    realized_pnl = sum(float((row or {}).get("realized_change", 0.0) or 0.0) for row in replay_rows)
+    mtm_total_pnl = sum(float(row.pnl) for row in strategy_rows)
+    settlement_rows = sum(
+        1
+        for row in replay_rows
+        if str((row or {}).get("risk_reason", "")) == "event_expiry_settlement"
+    )
+
+    signal_generation_stats = (
+        f"new_total={_fmt_opt(_get_nested(cycle_meta, 'signal_generation.new_signals_total'))}, "
+        f"new_in_window={_fmt_opt(_get_nested(cycle_meta, 'signal_generation.new_signals_in_window'))}, "
+        "historical_replay_only="
+        f"{_fmt_opt(_get_nested(cycle_meta, 'signal_generation.historical_replay_only'))}"
+    )
+
     assumptions = [
         AssumptionRow(
-            item="Window (from -> to)",
+            item="回测窗口（UTC）",
             value=f"{_fmt_opt(payload.get('from_ts'))} -> {_fmt_opt(payload.get('to_ts'))}",
             source="latest.json.from_ts/to_ts",
         ),
         AssumptionRow(
-            item="Strategies",
+            item="策略集合（本次参与）",
             value=", ".join(sorted(strategy_set)) if strategy_set else "n/a",
             source="latest.json.results/replay + cycle-meta.json.signal_generation.edge_gate.by_strategy",
         ),
         AssumptionRow(
-            item="Live trading",
-            value=live_status,
-            source=live_source,
+            item="流动性 Universe（筛选口径）",
+            value=universe_desc,
+            source="cycle-meta.json.signal_generation.universe",
         ),
         AssumptionRow(
-            item="Fill model",
-            value=fill_mode,
-            source="latest.json.execution_config.*",
+            item="结算口径（Realized 形成方式）",
+            value=settle_desc,
+            source="cycle-meta.json.signal_generation.settle_window_end",
         ),
         AssumptionRow(
-            item="Slippage / Fee",
-            value=slippage_fee,
-            source="latest.json.execution_config.slippage_bps/fee_bps",
-        ),
-        AssumptionRow(
-            item="Risk limits",
-            value=risk_limits,
-            source="latest.json.risk_config.*",
-        ),
-        AssumptionRow(
-            item="Signal generation mode",
+            item="信号生成模式",
             value=signal_mode,
             source="cycle-meta.json.fixed_window_mode + signal_generation.historical_replay_only",
         ),
         AssumptionRow(
-            item="Signal window controls",
+            item="信号窗口控制参数",
             value=signal_window_controls,
             source="cycle-meta.json.signal_generation.*",
+        ),
+        AssumptionRow(
+            item="信号样本统计（本轮）",
+            value=signal_generation_stats,
+            source="cycle-meta.json.signal_generation.new_signals_*",
+        ),
+        AssumptionRow(
+            item="成交填充模型",
+            value=fill_mode,
+            source="latest.json.execution_config.*",
+        ),
+        AssumptionRow(
+            item="交易成本（滑点/手续费）",
+            value=slippage_fee,
+            source="latest.json.execution_config.slippage_bps/fee_bps",
+        ),
+        AssumptionRow(
+            item="风控上限（统一）",
+            value=risk_limits,
+            source="latest.json.risk_config.*",
+        ),
+        AssumptionRow(
+            item="PnL 口径快照（本轮）",
+            value=(
+                f"total_pnl_mtm={_fmt_num(mtm_total_pnl)}, "
+                f"realized_pnl={_fmt_num(realized_pnl)}, "
+                f"event_expiry_settlement_rows={settlement_rows}"
+            ),
+            source="latest.json.results + latest.json.replay[*].realized_change/risk_reason",
+        ),
+        AssumptionRow(
+            item="实盘开关",
+            value=live_status,
+            source=live_source,
         ),
     ]
     return assumptions
@@ -446,11 +510,41 @@ def _cycle_reject_reasons(cycle_meta: dict[str, Any], strategy: str, top_k: int 
     return out
 
 
+def _strategy_cycle_funnel(cycle_meta: dict[str, Any], strategy: str) -> str:
+    row = _get_nested(cycle_meta, f"signal_generation.edge_gate.by_strategy.{strategy}")
+    if not isinstance(row, dict):
+        return "n/a"
+
+    raw = int(float(row.get("raw", 0) or 0))
+    passed = int(float(row.get("pass", 0) or 0))
+    failed = int(float(row.get("fail", 0) or 0))
+    pass_rate = float(row.get("pass_rate", 0.0) or 0.0)
+
+    reject_reasons = _get_nested(
+        cycle_meta,
+        f"signal_generation.edge_gate.by_strategy.{strategy}.strategy_diagnostics.candidate_reject_reasons",
+    )
+    top_reject = "n/a"
+    if isinstance(reject_reasons, dict) and reject_reasons:
+        ranked = sorted(
+            ((str(reason), int(count)) for reason, count in reject_reasons.items()),
+            key=lambda item: (-item[1], item[0]),
+        )
+        reason, count = ranked[0]
+        top_reject = f"{reason}: {count}"
+
+    return (
+        f"raw={raw}, pass={passed}, fail={failed}, pass_rate={_fmt_pct(pass_rate)}, "
+        f"top_reject={top_reject}"
+    )
+
+
 def _strategy_catalog(cycle_meta: dict[str, Any]) -> list[dict[str, Any]]:
     catalog: list[dict[str, Any]] = [
         {
             "strategy": "s1",
             "name": "Cross Venue Scanner",
+            "use_case": "适合做跨市场/同事件价差扫描，偏机会发现型策略。",
             "core_logic": "同 canonical 或同 event 下，寻找 YES 价格低腿与高腿的价差并打分。",
             "signal_trigger": "当 spread >= min_spread（或 min_event_spread）且满足流动性门槛时，生成 buy 信号。",
             "constraints": [
@@ -475,6 +569,7 @@ def _strategy_catalog(cycle_meta: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "strategy": "s2",
             "name": "NegRisk Rebalance",
+            "use_case": "适合在负风险事件中做概率和偏离修复，偏再平衡型策略。",
             "core_logic": "对 neg_risk=true 的同事件市场，计算 sum(yes) 偏离 1 的程度，做篮子再平衡。",
             "signal_trigger": "|sum_yes - 1| >= prob_sum_tolerance 时触发，偏离<0 买入，偏离>0 卖出。",
             "constraints": [
@@ -497,6 +592,7 @@ def _strategy_catalog(cycle_meta: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "strategy": "s4",
             "name": "Low Prob YES Basket",
+            "use_case": "适合低概率 YES 的分层篮子布局，偏结构化持仓型策略。",
             "core_logic": "在低 yes 价格区间内构建篮子，按 A/B/C 分层与阶梯报价下单。",
             "signal_trigger": "yes 价格、no 价格、edge buffer、流动性等条件同时满足时触发 buy。",
             "constraints": [
@@ -524,6 +620,7 @@ def _strategy_catalog(cycle_meta: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "strategy": "s8",
             "name": "NO Carry + Tail Hedge",
+            "use_case": "适合主仓 NO carry + 尾部对冲，偏收益/回撤平衡型策略。",
             "core_logic": "主仓做高胜率 NO carry，尾部用超低 yes 市场做 hedge。",
             "signal_trigger": "yes<=yes_price_max_for_no 且流动性达标时触发，按 hedge_budget_ratio 生成对冲建议。",
             "constraints": [
@@ -549,6 +646,7 @@ def _strategy_catalog(cycle_meta: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "strategy": "s9",
             "name": "YES/NO Parity Arb",
+            "use_case": "适合同市场同条件的双腿平价套利，偏中高频配对型策略。",
             "core_logic": "同条件 YES+NO 平价套利：sum<1 做 buy carry，sum>1（可选）做 sell overround。",
             "signal_trigger": "满足同市场/同事件/同条件配对门槛后，effective edge 超过阈值才发双腿信号。",
             "constraints": [
@@ -576,6 +674,7 @@ def _strategy_catalog(cycle_meta: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "strategy": "s10",
             "name": "NegRisk Conversion Arb",
+            "use_case": "适合负风险事件多腿转换套利，偏原子篮子执行型策略。",
             "core_logic": "在 negRisk 事件上做转换套利：sum(yes)<1-tol 买入篮子，sum(yes)>1+tol（可选）卖出。",
             "signal_trigger": "事件满足 unique canonical、deviation 与成本/edge 门槛后，发 basket 原子多腿信号。",
             "constraints": [
@@ -604,6 +703,7 @@ def _strategy_catalog(cycle_meta: dict[str, Any]) -> list[dict[str, Any]]:
     for row in catalog:
         cycle_rejects = _cycle_reject_reasons(cycle_meta, row["strategy"])
         row["cycle_rejects"] = cycle_rejects
+        row["cycle_funnel"] = _strategy_cycle_funnel(cycle_meta, row["strategy"])
 
     return catalog
 
@@ -687,12 +787,12 @@ def _render_html(
     )
 
     summary_items = [
-        ("Total PnL (MTM)", _fmt_num(total_pnl)),
-        ("Realized PnL", _fmt_num(realized_pnl)),
-        ("Max Drawdown", _fmt_num(max_dd)),
-        ("Executed Signals", str(int(payload.get("executed_signals", 0) or 0))),
-        ("Rejected Signals", str(int(payload.get("rejected_signals", 0) or 0))),
-        ("History points", str(len(run_history))),
+        ("总收益（MTM）", _fmt_num(total_pnl)),
+        ("已实现收益（Realized）", _fmt_num(realized_pnl)),
+        ("最大回撤", _fmt_num(max_dd)),
+        ("执行信号数", str(int(payload.get("executed_signals", 0) or 0))),
+        ("拒绝信号数", str(int(payload.get("rejected_signals", 0) or 0))),
+        ("历史样本点", str(len(run_history))),
     ]
     cards = "\n".join(
         f"<div class='card'><div class='label'>{html.escape(k)}</div>"
@@ -736,12 +836,14 @@ def _render_html(
                     "<tr>",
                     f"<td><strong>{html.escape(row['strategy'])}</strong><br/>"
                     f"<span class='muted'>{html.escape(row['name'])}</span></td>",
+                    f"<td>{html.escape(str(row.get('use_case', 'n/a')))}</td>",
                     f"<td>{html.escape(row['core_logic'])}</td>",
                     f"<td>{html.escape(row['signal_trigger'])}</td>",
                     f"<td><ul>{constraints}</ul></td>",
                     f"<td><ul>{known_rejects}</ul><div class='muted'>"
                     "本次 cycle 常见拒因</div><ul>"
                     f"{cycle_rejects_html}</ul></td>",
+                    f"<td>{html.escape(str(row.get('cycle_funnel', 'n/a')))}</td>",
                     f"<td><ul>{refs}</ul></td>",
                     "</tr>",
                 ]
@@ -756,11 +858,11 @@ def _render_html(
     chart_data_json = json.dumps(chart_data, ensure_ascii=False)
 
     return f"""<!doctype html>
-<html lang='en'>
+<html lang='zh-CN'>
 <head>
   <meta charset='utf-8' />
   <meta name='viewport' content='width=device-width, initial-scale=1' />
-  <title>Monomarket Backtest Report</title>
+  <title>Monomarket 回测看板</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; margin: 16px; color: #111; }}
     h1, h2 {{ margin: 0 0 12px; }}
@@ -806,28 +908,29 @@ def _render_html(
   </style>
 </head>
 <body>
-  <h1>Monomarket Backtest Report</h1>
+  <h1>Monomarket 回测看板</h1>
   <div class='meta'>
-    <div><strong>Generated:</strong> {html.escape(datetime.now(UTC).isoformat())}</div>
-    <div><strong>Window:</strong> {html.escape(str(payload.get('from_ts', 'n/a')))} → {html.escape(str(payload.get('to_ts', 'n/a')))}</div>
-    <div><strong>Run dir:</strong> <code>{html.escape(str(run_dir))}</code></div>
-    <div><strong>Report dir:</strong> <code>{html.escape(str(output_dir))}</code></div>
-    <div><strong>Schema:</strong> {html.escape(str(payload.get('schema_version', 'n/a')))}</div>
+    <div><strong>生成时间:</strong> {html.escape(datetime.now(UTC).isoformat())}</div>
+    <div><strong>回测窗口:</strong> {html.escape(str(payload.get('from_ts', 'n/a')))} → {html.escape(str(payload.get('to_ts', 'n/a')))}</div>
+    <div><strong>运行目录:</strong> <code>{html.escape(str(run_dir))}</code></div>
+    <div><strong>报告目录:</strong> <code>{html.escape(str(output_dir))}</code></div>
+    <div><strong>Schema 版本:</strong> {html.escape(str(payload.get('schema_version', 'n/a')))}</div>
   </div>
 
-  <h2>Summary</h2>
+  <h2>回测总览</h2>
   <div class='cards'>
     {cards}
   </div>
 
-  <h2>Backtest Assumptions</h2>
+  <h2>回测假设与参数口径（Backtest Assumptions）</h2>
+  <div class='muted'>以下口径会直接影响回测解释：窗口、样本筛选、结算规则、风控阈值、执行模型等。</div>
   <div class='table-wrap'>
     <table>
       <thead>
         <tr>
-          <th>Item</th>
-          <th>Value</th>
-          <th>Source</th>
+          <th>假设项</th>
+          <th>本次取值（中文解释）</th>
+          <th>数据来源</th>
         </tr>
       </thead>
       <tbody>
@@ -861,16 +964,16 @@ def _render_html(
     </div>
   </div>
 
-  <h2>Per-strategy</h2>
+  <h2>分策略结果</h2>
   <div class='table-wrap'>
     <table>
       <thead>
         <tr>
-          <th>strategy</th>
-          <th>pnl</th>
-          <th>trade_count</th>
-          <th>winrate</th>
-          <th>winrate_source</th>
+          <th>策略</th>
+          <th>PnL</th>
+          <th>成交数</th>
+          <th>胜率</th>
+          <th>胜率口径</th>
         </tr>
       </thead>
       <tbody>
@@ -879,16 +982,19 @@ def _render_html(
     </table>
   </div>
 
-  <h2>Strategy Catalog</h2>
+  <h2>策略目录（Strategy Catalog）</h2>
+  <div class='muted'>尽量用中文写清楚每个策略“做什么、什么时候触发、被哪些阈值约束、这次为什么被拒/通过”。</div>
   <div class='table-wrap'>
     <table>
       <thead>
         <tr>
-          <th>Strategy</th>
+          <th>策略</th>
+          <th>适用场景</th>
           <th>策略核心逻辑</th>
           <th>信号方向/触发条件</th>
           <th>主要约束（关键阈值配置项名）</th>
           <th>已知风险或常见拒因</th>
+          <th>本次生成漏斗（raw/pass/fail + top_reject）</th>
           <th>来源</th>
         </tr>
       </thead>
@@ -898,7 +1004,7 @@ def _render_html(
     </table>
   </div>
 
-  <h2>Raw Artifacts</h2>
+  <h2>原始工件（Raw Artifacts）</h2>
   <ul>
     {link_items}
   </ul>
