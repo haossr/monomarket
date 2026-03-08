@@ -77,6 +77,7 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "s10_generation_floor_adjusted_leg_rejected=",
         "s10_generation_floor_adjusted_leg_reject_share=",
         "s9_minus_s10_pnl=",
+        "sx12_cfg_diff_only=",
         "s10_grid_available=",
         "s10_grid_candidates=",
         "s10_grid_settle_mismatch_rate=",
@@ -829,6 +830,7 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
                 "allow_sell_conversion": True,
             },
         },
+        "strategy_config_diff_only": True,
     }
     sx12_compare_json.write_text(json.dumps(sx12_compare_payload))
 
@@ -862,6 +864,7 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
     line = summary_txt.read_text().strip()
     assert "s9_cfg_diff_keys=min_effective_edge_bps,require_same_market" in line
     assert "s10_cfg_diff_keys=allow_sell_conversion,conversion_fee_bps,convert_value" in line
+    assert "sx12_cfg_diff_only=true" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -871,6 +874,7 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
     config_context = focus["config_context"]
     assert bool(config_context["available"]) is True
     assert str(config_context["source"]).endswith("compare.json")
+    assert bool(config_context["strategy_config_diff_only"]) is True
 
     assert config_context["baseline_strategy_config"] == {
         "s9": {
