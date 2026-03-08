@@ -49,6 +49,22 @@ def _source_profile(values: list[str]) -> str:
     return "mixed"
 
 
+def _normalize_slice_labels(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    labels: list[str] = []
+    for item in raw:
+        label = str(item).strip()
+        if label:
+            labels.append(label)
+    return labels
+
+
+def _format_slice_labels(raw: object) -> str:
+    labels = _normalize_slice_labels(raw)
+    return ",".join(labels) if labels else "none"
+
+
 def _iso_z(dt: datetime) -> str:
     return dt.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -146,6 +162,7 @@ def summarize_compare_payload(
     baseline_settle_sources: list[str] = []
     candidate_settle_sources: list[str] = []
     settle_mismatch_slice_count = 0
+    settle_mismatch_slice_labels: list[str] = []
 
     by_slice: list[dict[str, Any]] = []
     slices_raw = payload.get("slices", [])
@@ -191,8 +208,10 @@ def summarize_compare_payload(
         candidate_settle_values.append(candidate_settle_window_end)
         baseline_settle_sources.append(baseline_settle_window_end_source)
         candidate_settle_sources.append(candidate_settle_window_end_source)
-        if baseline_settle_window_end != candidate_settle_window_end:
+        settle_mismatch = baseline_settle_window_end != candidate_settle_window_end
+        if settle_mismatch:
             settle_mismatch_slice_count += 1
+            settle_mismatch_slice_labels.append(str(item.get("label", "slice")))
         baseline_by_strategy = (
             baseline.get("by_strategy", {}) if isinstance(baseline.get("by_strategy"), dict) else {}
         )
@@ -247,6 +266,7 @@ def summarize_compare_payload(
                 "candidate_settle_window_end": candidate_settle_window_end,
                 "baseline_settle_window_end_source": baseline_settle_window_end_source,
                 "candidate_settle_window_end_source": candidate_settle_window_end_source,
+                "settle_mismatch": settle_mismatch,
             }
         )
 
@@ -260,6 +280,9 @@ def summarize_compare_payload(
     candidate_settle_window_end_profile = _settle_profile(candidate_settle_values)
     baseline_settle_window_end_source_profile = _source_profile(baseline_settle_sources)
     candidate_settle_window_end_source_profile = _source_profile(candidate_settle_sources)
+    settle_mismatch_slice_rate = (
+        float(settle_mismatch_slice_count) / float(len(by_slice)) if by_slice else 0.0
+    )
 
     return {
         "objective_strategy": objective,
@@ -278,6 +301,8 @@ def summarize_compare_payload(
         "baseline_settle_window_end_source_profile": baseline_settle_window_end_source_profile,
         "candidate_settle_window_end_source_profile": candidate_settle_window_end_source_profile,
         "settle_mismatch_slice_count": settle_mismatch_slice_count,
+        "settle_mismatch_slice_rate": settle_mismatch_slice_rate,
+        "settle_mismatch_slice_labels": settle_mismatch_slice_labels,
         "min_slice_delta_pnl": min_slice_delta_pnl,
         "max_slice_delta_max_drawdown": max_slice_delta_max_drawdown,
         "non_negative_slice_count": non_negative_slice_count,
@@ -341,10 +366,10 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- total_candidates: {result.get('total_candidates')}",
         "",
         "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | "
-        "base_settle | cand_settle | settle_mismatch | pass_settle? | "
+        "base_settle | cand_settle | settle_mismatch | mismatch_rate | mismatch_slices | pass_settle? | "
         "min(Δpnl) | max(ΔmaxDD) | ΣΔpnl | ΣΔexec | ΣΔrej | ΣΔgen_pass | ΣΔgen_reject | "
         "ΣΔgen_top_event_count | event_shift_slices | ΣΔmaxDD | ΣΔmtm_wr | pass? |",
-        "|---:|---|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "|---:|---|---:|---:|---:|---:|---|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
 
     for item in result.get("candidates", []):
@@ -363,6 +388,8 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{str(item.get('baseline_settle_window_end_profile', 'unknown'))} | "
             f"{str(item.get('candidate_settle_window_end_profile', 'unknown'))} | "
             f"{_safe_int(item.get('settle_mismatch_slice_count')):+d} | "
+            f"{_safe_float(item.get('settle_mismatch_slice_rate')):.2%} | "
+            f"{_format_slice_labels(item.get('settle_mismatch_slice_labels'))} | "
             f"{'yes' if bool(item.get('passes_settle_profile_match', True)) else 'no'} | "
             f"{_safe_float(item.get('min_slice_delta_pnl')):+.4f} | "
             f"{_safe_float(item.get('max_slice_delta_max_drawdown')):+.4f} | "
@@ -768,6 +795,8 @@ def main() -> int:
             f" event_shift_slices={_safe_int(entry.get('generation_top_reject_event_shift_slices')):+d}"
             f" settle(base/cand)={entry.get('baseline_settle_window_end_profile')}/{entry.get('candidate_settle_window_end_profile')}"
             f" settle_mismatch={_safe_int(entry.get('settle_mismatch_slice_count')):+d}"
+            f" settle_mismatch_rate={_safe_float(entry.get('settle_mismatch_slice_rate')):.2%}"
+            f" settle_mismatch_labels={_format_slice_labels(entry.get('settle_mismatch_slice_labels'))}"
             f" pass_settle={bool(entry.get('passes_settle_profile_match'))}"
             f" ΣΔmaxDD={_safe_float(entry.get('total_delta_max_drawdown')):+.4f}"
             f" pass={bool(entry.get('passes_constraints'))}"
@@ -821,6 +850,8 @@ def main() -> int:
             f"ΣΔgen_reject={_safe_int(top.get('total_delta_generation_rejected_candidates')):+d} "
             f"ΣΔgen_top_event_count={_safe_int(top.get('total_delta_generation_top_reject_event_count')):+d} "
             f"event_shift_slices={_safe_int(top.get('generation_top_reject_event_shift_slices')):+d} "
+            f"settle_mismatch_rate={_safe_float(top.get('settle_mismatch_slice_rate')):.2%} "
+            f"settle_mismatch_labels={_format_slice_labels(top.get('settle_mismatch_slice_labels'))} "
             f"pass_settle={bool(top.get('passes_settle_profile_match'))} "
             f"ΣΔmaxDD={_safe_float(top.get('total_delta_max_drawdown')):+.4f} "
             f"pass={bool(top.get('passes_constraints'))}"

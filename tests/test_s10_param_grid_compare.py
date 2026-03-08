@@ -286,6 +286,48 @@ def test_candidate_sort_key_downgrades_settle_mismatch_candidate() -> None:
     assert [row["candidate_id"] for row in ranked] == ["cand-match", "cand-mismatch"]
 
 
+def test_summarize_compare_payload_tracks_settle_mismatch_rate_and_labels() -> None:
+    module = _load_module()
+
+    payload = {
+        "slices": [
+            {
+                "label": "recent24h",
+                "baseline": {"settle_window_end": True, "settle_window_end_source": "cycle_meta"},
+                "candidate": {
+                    "settle_window_end": True,
+                    "settle_window_end_source": "cycle_meta",
+                },
+                "delta": {"s10": {"pnl": 0.1}},
+            },
+            {
+                "label": "recent7d",
+                "baseline": {"settle_window_end": True, "settle_window_end_source": "cycle_meta"},
+                "candidate": {
+                    "settle_window_end": False,
+                    "settle_window_end_source": "execution_config",
+                },
+                "delta": {"s10": {"pnl": 0.0}},
+            },
+            {
+                "label": "recent14d",
+                "baseline": {"settle_window_end": True, "settle_window_end_source": "cycle_meta"},
+                "candidate": {
+                    "settle_window_end": False,
+                    "settle_window_end_source": "execution_config",
+                },
+                "delta": {"s10": {"pnl": -0.1}},
+            },
+        ]
+    }
+
+    summary = module.summarize_compare_payload(payload, objective_strategy="s10")
+    assert int(summary["slice_count"]) == 3
+    assert int(summary["settle_mismatch_slice_count"]) == 2
+    assert abs(float(summary["settle_mismatch_slice_rate"]) - (2.0 / 3.0)) < 1e-12
+    assert summary["settle_mismatch_slice_labels"] == ["recent7d", "recent14d"]
+
+
 def test_summarize_compare_payload_and_markdown() -> None:
     module = _load_module()
 
@@ -358,6 +400,8 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert str(summary["baseline_settle_window_end_source_profile"]) == "unknown"
     assert str(summary["candidate_settle_window_end_source_profile"]) == "unknown"
     assert int(summary["settle_mismatch_slice_count"]) == 0
+    assert abs(float(summary["settle_mismatch_slice_rate"]) - 0.0) < 1e-12
+    assert summary["settle_mismatch_slice_labels"] == []
 
     markdown = module.render_markdown(
         {
@@ -399,10 +443,10 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert "# S10 Parameter Grid Compare" in markdown
     assert "| rank | candidate | prob_tol |" in markdown
     assert (
-        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | base_settle | cand_settle | settle_mismatch | pass_settle? | min(Δpnl) | max(ΔmaxDD) |"
+        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | base_settle | cand_settle | settle_mismatch | mismatch_rate | mismatch_slices | pass_settle? | min(Δpnl) | max(ΔmaxDD) |"
         in markdown
     )
     assert (
-        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | unknown | unknown | +0 | yes | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
+        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | unknown | unknown | +0 | 0.00% | none | yes | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
         in markdown
     )
