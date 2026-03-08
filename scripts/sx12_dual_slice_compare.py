@@ -202,7 +202,9 @@ def summarize_strategy(
                 by_strategy = edge_gate.get("by_strategy")
                 if isinstance(by_strategy, dict):
                     generation_by_strategy = {
-                        str(k).strip().lower(): v for k, v in by_strategy.items() if isinstance(v, dict)
+                        str(k).strip().lower(): v
+                        for k, v in by_strategy.items()
+                        if isinstance(v, dict)
                     }
 
     generation_row = generation_by_strategy.get(target, {})
@@ -212,15 +214,15 @@ def summarize_strategy(
     generation_pass_rate = _safe_float(generation_row.get("pass_rate"))
 
     generation_reason_counts: Counter[str] = Counter()
-    strategy_diag = generation_row.get("strategy_diagnostics")
-    if isinstance(strategy_diag, dict):
-        candidate_reject_reasons = strategy_diag.get("candidate_reject_reasons")
-        if isinstance(candidate_reject_reasons, dict):
-            for reason, raw_count in candidate_reject_reasons.items():
-                count = _safe_int(raw_count)
-                if count <= 0:
-                    continue
-                generation_reason_counts[str(reason)] += count
+    raw_strategy_diag = generation_row.get("strategy_diagnostics")
+    strategy_diag = raw_strategy_diag if isinstance(raw_strategy_diag, dict) else {}
+    candidate_reject_reasons = strategy_diag.get("candidate_reject_reasons")
+    if isinstance(candidate_reject_reasons, dict):
+        for reason, raw_count in candidate_reject_reasons.items():
+            count = _safe_int(raw_count)
+            if count <= 0:
+                continue
+            generation_reason_counts[str(reason)] += count
 
     generation_reject_top_pairs = aggregate_reject_reasons(
         generation_reason_counts,
@@ -232,6 +234,53 @@ def summarize_strategy(
         else f"{generation_reject_top_pairs[0][0]}:{generation_reject_top_pairs[0][1]}"
     )
     generation_rejected_candidates = sum(generation_reason_counts.values())
+
+    generation_reject_by_event_raw = strategy_diag.get("candidate_reject_reasons_by_event_top")
+    if not isinstance(generation_reject_by_event_raw, dict):
+        generation_reject_by_event_raw = strategy_diag.get("candidate_reject_reasons_by_event")
+
+    generation_reject_by_event: dict[str, dict[str, int]] = {}
+    if isinstance(generation_reject_by_event_raw, dict):
+        for raw_event_id, raw_reasons in generation_reject_by_event_raw.items():
+            event_id = str(raw_event_id or "").strip()
+            if not event_id or not isinstance(raw_reasons, dict):
+                continue
+            normalized_reasons: dict[str, int] = {}
+            for raw_reason, raw_count in raw_reasons.items():
+                reason = str(raw_reason or "unknown").strip() or "unknown"
+                count = _safe_int(raw_count)
+                if count <= 0:
+                    continue
+                normalized_reasons[reason] = count
+            if normalized_reasons:
+                generation_reject_by_event[event_id] = normalized_reasons
+
+    generation_reject_event_totals = sorted(
+        (
+            (event_id, sum(int(v) for v in event_reason_counts.values()))
+            for event_id, event_reason_counts in generation_reject_by_event.items()
+        ),
+        key=lambda item: (-item[1], item[0]),
+    )
+    generation_top_reject_event = (
+        "none"
+        if not generation_reject_event_totals
+        else f"{generation_reject_event_totals[0][0]}:{generation_reject_event_totals[0][1]}"
+    )
+    generation_top_reject_event_count = (
+        0 if not generation_reject_event_totals else int(generation_reject_event_totals[0][1])
+    )
+    generation_top_reject_event_reason = "none"
+    if generation_reject_event_totals:
+        top_event_id = generation_reject_event_totals[0][0]
+        top_event_reason_pairs = aggregate_reject_reasons(
+            Counter(generation_reject_by_event.get(top_event_id, {})),
+            normalize=normalize_reject_reasons,
+        )
+        if top_event_reason_pairs:
+            generation_top_reject_event_reason = (
+                f"{top_event_id}|{top_event_reason_pairs[0][0]}:{top_event_reason_pairs[0][1]}"
+            )
 
     return {
         "strategy": target,
@@ -259,6 +308,12 @@ def summarize_strategy(
         "generation_reject_reasons": [
             [reason, count] for reason, count in generation_reject_top_pairs
         ],
+        "generation_top_reject_event": generation_top_reject_event,
+        "generation_top_reject_event_count": generation_top_reject_event_count,
+        "generation_top_reject_event_reason": generation_top_reject_event_reason,
+        "generation_reject_events": [
+            [event_id, total] for event_id, total in generation_reject_event_totals
+        ],
     }
 
 
@@ -272,6 +327,12 @@ def _summary_delta(
     for strategy in strategies:
         b = baseline.get(strategy, {})
         c = candidate.get(strategy, {})
+        base_top_event = str(b.get("generation_top_reject_event") or "none")
+        cand_top_event = str(c.get("generation_top_reject_event") or "none")
+        top_event_shift = int(
+            (base_top_event != cand_top_event)
+            and not (base_top_event == "none" and cand_top_event == "none")
+        )
         delta[strategy] = {
             "pnl": _safe_float(c.get("pnl")) - _safe_float(b.get("pnl")),
             "max_drawdown": _safe_float(c.get("max_drawdown")) - _safe_float(b.get("max_drawdown")),
@@ -298,6 +359,11 @@ def _summary_delta(
                 _safe_int(c.get("generation_rejected_candidates"))
                 - _safe_int(b.get("generation_rejected_candidates"))
             ),
+            "generation_top_reject_event_count": float(
+                _safe_int(c.get("generation_top_reject_event_count"))
+                - _safe_int(b.get("generation_top_reject_event_count"))
+            ),
+            "generation_top_reject_event_shift": float(top_event_shift),
         }
     return delta
 
@@ -443,10 +509,11 @@ def render_markdown(result: dict[str, Any]) -> str:
             "base_rej | cand_rej | Δrej | base_gen_pass | cand_gen_pass | Δgen_pass | "
             "base_gen_reject | cand_gen_reject | Δgen_reject | base_maxdd | cand_maxdd | Δmaxdd | "
             "base_mtm_wr | cand_mtm_wr | Δmtm_wr | base_top_reject | cand_top_reject | "
-            "base_gen_top_reject | cand_gen_top_reject |"
+            "base_gen_top_reject | cand_gen_top_reject | base_gen_top_event | cand_gen_top_event | "
+            "Δgen_top_event_count | event_shift |"
         )
         lines.append(
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|"
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|---:|---:|"
         )
 
         baseline = item.get("baseline", {}) if isinstance(item.get("baseline"), dict) else {}
@@ -477,7 +544,10 @@ def render_markdown(result: dict[str, Any]) -> str:
                 f"{_safe_float(b.get('max_drawdown')):.4f} | {_safe_float(c.get('max_drawdown')):.4f} | {(_safe_float(d.get('max_drawdown'))):+.4f} | "
                 f"{_safe_float(b.get('mtm_winrate')):.4f} | {_safe_float(c.get('mtm_winrate')):.4f} | {(_safe_float(d.get('mtm_winrate'))):+.4f} | "
                 f"{str(b.get('top_reject_reason', 'none'))} | {str(c.get('top_reject_reason', 'none'))} | "
-                f"{str(b.get('generation_top_reject_reason', 'none'))} | {str(c.get('generation_top_reject_reason', 'none'))} |"
+                f"{str(b.get('generation_top_reject_reason', 'none'))} | {str(c.get('generation_top_reject_reason', 'none'))} | "
+                f"{str(b.get('generation_top_reject_event', 'none'))} | {str(c.get('generation_top_reject_event', 'none'))} | "
+                f"{(_safe_int(c.get('generation_top_reject_event_count')) - _safe_int(b.get('generation_top_reject_event_count'))):+d} | "
+                f"{_safe_int(d.get('generation_top_reject_event_shift')):+d} |"
             )
         lines.append("")
 
@@ -644,7 +714,9 @@ def main() -> int:
         )
 
         baseline_cycle_meta = baseline_report.get("_cycle_meta")
-        baseline_cycle_meta_payload = baseline_cycle_meta if isinstance(baseline_cycle_meta, dict) else None
+        baseline_cycle_meta_payload = (
+            baseline_cycle_meta if isinstance(baseline_cycle_meta, dict) else None
+        )
         candidate_cycle_meta = candidate_report.get("_cycle_meta")
         candidate_cycle_meta_payload = (
             candidate_cycle_meta if isinstance(candidate_cycle_meta, dict) else None
@@ -717,7 +789,9 @@ def main() -> int:
                 f"Δexec={_safe_int(sd.get('executed_rows')):+d} "
                 f"Δrej={_safe_int(sd.get('rejected_rows')):+d} "
                 f"Δgen_pass={_safe_int(sd.get('generation_pass')):+d} "
-                f"Δgen_reject={_safe_int(sd.get('generation_rejected_candidates')):+d}"
+                f"Δgen_reject={_safe_int(sd.get('generation_rejected_candidates')):+d} "
+                f"Δgen_top_event_count={_safe_int(sd.get('generation_top_reject_event_count')):+d} "
+                f"event_shift={_safe_int(sd.get('generation_top_reject_event_shift')):+d}"
             )
 
     return 0

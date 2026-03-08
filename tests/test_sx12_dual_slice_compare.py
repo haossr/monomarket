@@ -146,6 +146,9 @@ def test_summarize_strategy_normalizes_reject_reason_prefix() -> None:
     assert int(summary["generation_fail"]) == 0
     assert int(summary["generation_rejected_candidates"]) == 0
     assert str(summary["generation_top_reject_reason"]) == "none"
+    assert str(summary["generation_top_reject_event"]) == "none"
+    assert int(summary["generation_top_reject_event_count"]) == 0
+    assert str(summary["generation_top_reject_event_reason"]) == "none"
 
 
 def test_summarize_strategy_extracts_generation_from_cycle_meta() -> None:
@@ -167,7 +170,16 @@ def test_summarize_strategy_extracts_generation_from_cycle_meta() -> None:
                                 "candidate_reject_reasons": {
                                     "buy_conversion:effective_edge_below_min": 5,
                                     "event_no_actionable_candidate": 2,
-                                }
+                                },
+                                "candidate_reject_reasons_by_event_top": {
+                                    "evt-alpha": {
+                                        "buy_conversion:effective_edge_below_min": 4,
+                                        "event_no_actionable_candidate": 1,
+                                    },
+                                    "evt-beta": {
+                                        "event_no_actionable_candidate": 2,
+                                    },
+                                },
                             },
                         }
                     }
@@ -181,7 +193,15 @@ def test_summarize_strategy_extracts_generation_from_cycle_meta() -> None:
     assert int(summary["generation_fail"]) == 4
     assert abs(float(summary["generation_pass_rate"]) - (3.0 / 7.0)) < 1e-12
     assert int(summary["generation_rejected_candidates"]) == 7
-    assert str(summary["generation_top_reject_reason"]) == "buy_conversion:effective_edge_below_min:5"
+    assert (
+        str(summary["generation_top_reject_reason"]) == "buy_conversion:effective_edge_below_min:5"
+    )
+    assert str(summary["generation_top_reject_event"]) == "evt-alpha:5"
+    assert int(summary["generation_top_reject_event_count"]) == 5
+    assert (
+        str(summary["generation_top_reject_event_reason"])
+        == "evt-alpha|buy_conversion:effective_edge_below_min:4"
+    )
 
 
 def test_summary_delta_and_markdown_render() -> None:
@@ -200,6 +220,8 @@ def test_summary_delta_and_markdown_render() -> None:
             "generation_pass": 1,
             "generation_rejected_candidates": 5,
             "generation_top_reject_reason": "effective edge below min:4",
+            "generation_top_reject_event": "evt-old:4",
+            "generation_top_reject_event_count": 4,
         }
     }
     candidate = {
@@ -215,6 +237,8 @@ def test_summary_delta_and_markdown_render() -> None:
             "generation_pass": 4,
             "generation_rejected_candidates": 2,
             "generation_top_reject_reason": "none",
+            "generation_top_reject_event": "evt-new:2",
+            "generation_top_reject_event_count": 2,
         }
     }
     delta = module._summary_delta(baseline, candidate, strategies=["s9"])
@@ -224,6 +248,8 @@ def test_summary_delta_and_markdown_render() -> None:
     assert int(delta["s9"]["rejected_rows"]) == -1
     assert int(delta["s9"]["generation_pass"]) == 3
     assert int(delta["s9"]["generation_rejected_candidates"]) == -3
+    assert int(delta["s9"]["generation_top_reject_event_count"]) == -2
+    assert int(delta["s9"]["generation_top_reject_event_shift"]) == 1
 
     rendered = module.render_markdown(
         {
@@ -247,4 +273,7 @@ def test_summary_delta_and_markdown_render() -> None:
     assert "## recent24h (24h)" in rendered
     assert "| s9 | -0.5000 | 0.1000 | +0.6000 |" in rendered
     assert "| 1 | 4 | +3 | 5 | 2 | -3 |" in rendered
-    assert "| none | none | effective edge below min:4 | none |" in rendered
+    assert (
+        "| none | none | effective edge below min:4 | none | evt-old:4 | evt-new:2 | -2 | +1 |"
+        in rendered
+    )
