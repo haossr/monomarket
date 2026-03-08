@@ -490,3 +490,84 @@ def test_s10_rejects_when_tiny_price_leg_share_exceeds_cap() -> None:
 
     pricing_diag = strategy.last_diagnostics.get("pricing_consistency", {})
     assert int(float(pricing_diag.get("filtered_tiny_price_leg_share_exceeded", 0.0))) == 1
+
+
+def test_s10_convert_value_can_shift_conversion_anchor() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(131, event_id="e-convert-value", canonical_id="c1", yes=0.33, liq=1000),
+        _market(132, event_id="e-convert-value", canonical_id="c2", yes=0.33, liq=1000),
+        _market(133, event_id="e-convert-value", canonical_id="c3", yes=0.325, liq=1000),
+    ]
+
+    default_signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.02,
+            "min_effective_edge_bps": 1.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+    assert default_signals == []
+
+    shifted_anchor_signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.02,
+            "convert_value": 1.02,
+            "max_abs_deviation": 0.20,
+            "min_effective_edge_bps": 1.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+        },
+    )
+
+    assert len(shifted_anchor_signals) == 3
+    assert all(str(s.payload.get("direction")) == "buy_conversion" for s in shifted_anchor_signals)
+    assert all(abs(float(s.payload.get("convert_value", 0.0)) - 1.02) < 1e-12 for s in shifted_anchor_signals)
+    assert all(abs(float(s.payload.get("deviation", 0.0)) + 0.035) < 1e-9 for s in shifted_anchor_signals)
+
+
+def test_s10_conversion_fee_bps_can_gate_weak_edge() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(141, event_id="e-conversion-fee", canonical_id="c1", yes=0.33, liq=1000),
+        _market(142, event_id="e-conversion-fee", canonical_id="c2", yes=0.33, liq=1000),
+        _market(143, event_id="e-conversion-fee", canonical_id="c3", yes=0.33, liq=1000),
+    ]
+
+    no_fee_signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.005,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "max_weighted_total_cost_bps": 200.0,
+        },
+    )
+    assert len(no_fee_signals) == 3
+
+    high_conversion_fee_signals = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.005,
+            "min_effective_edge_bps": 5.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "conversion_fee_bps": 120.0,
+            "max_weighted_total_cost_bps": 200.0,
+        },
+    )
+
+    assert high_conversion_fee_signals == []
+    reject_reasons = strategy.last_diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy_conversion:effective_edge_below_min") == 1
+
+    pricing_diag = strategy.last_diagnostics.get("pricing_consistency", {})
+    assert abs(float(pricing_diag.get("conversion_fee_bps", 0.0)) - 120.0) < 1e-12
