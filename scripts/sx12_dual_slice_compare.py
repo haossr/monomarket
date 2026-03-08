@@ -158,6 +158,29 @@ def _build_backtest_cycle_cmd(
     return cmd
 
 
+def _extract_settle_window_end(
+    report: dict[str, Any],
+    *,
+    cycle_meta: dict[str, Any] | None,
+) -> tuple[bool, str]:
+    if isinstance(cycle_meta, dict):
+        signal_generation = cycle_meta.get("signal_generation")
+        if isinstance(signal_generation, dict) and "settle_window_end" in signal_generation:
+            return (
+                bool(signal_generation.get("settle_window_end")),
+                "cycle_meta.signal_generation.settle_window_end",
+            )
+
+    execution_config = report.get("execution_config")
+    if isinstance(execution_config, dict) and "settle_window_end_positions" in execution_config:
+        return (
+            bool(execution_config.get("settle_window_end_positions")),
+            "report.execution_config.settle_window_end_positions",
+        )
+
+    return (False, "default(false)")
+
+
 def summarize_strategy(
     report: dict[str, Any],
     *,
@@ -503,6 +526,18 @@ def render_markdown(result: dict[str, Any]) -> str:
         label = str(item.get("label", "slice"))
         hours = _safe_float(item.get("hours"))
         lines.append(f"## {label} ({hours:g}h)")
+
+        baseline = item.get("baseline", {}) if isinstance(item.get("baseline"), dict) else {}
+        candidate = item.get("candidate", {}) if isinstance(item.get("candidate"), dict) else {}
+        base_settle = bool(baseline.get("settle_window_end", False))
+        cand_settle = bool(candidate.get("settle_window_end", False))
+        base_settle_source = str(baseline.get("settle_window_end_source") or "unknown")
+        cand_settle_source = str(candidate.get("settle_window_end_source") or "unknown")
+        lines.append(
+            "- settle_window_end: "
+            f"base={str(base_settle).lower()} ({base_settle_source}), "
+            f"cand={str(cand_settle).lower()} ({cand_settle_source})"
+        )
         lines.append("")
         lines.append(
             "| strategy | base_pnl | cand_pnl | Δpnl | base_exec | cand_exec | Δexec | "
@@ -516,8 +551,6 @@ def render_markdown(result: dict[str, Any]) -> str:
             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|---:|---:|"
         )
 
-        baseline = item.get("baseline", {}) if isinstance(item.get("baseline"), dict) else {}
-        candidate = item.get("candidate", {}) if isinstance(item.get("candidate"), dict) else {}
         delta = item.get("delta", {}) if isinstance(item.get("delta"), dict) else {}
         baseline_by_strategy = (
             baseline.get("by_strategy", {}) if isinstance(baseline.get("by_strategy"), dict) else {}
@@ -722,6 +755,15 @@ def main() -> int:
             candidate_cycle_meta if isinstance(candidate_cycle_meta, dict) else None
         )
 
+        baseline_settle_window_end, baseline_settle_window_end_source = _extract_settle_window_end(
+            baseline_report,
+            cycle_meta=baseline_cycle_meta_payload,
+        )
+        candidate_settle_window_end, candidate_settle_window_end_source = _extract_settle_window_end(
+            candidate_report,
+            cycle_meta=candidate_cycle_meta_payload,
+        )
+
         baseline_by_strategy = {
             strategy: summarize_strategy(
                 baseline_report,
@@ -752,6 +794,8 @@ def main() -> int:
                     "total_signals": _safe_int(baseline_report.get("total_signals")),
                     "executed_signals": _safe_int(baseline_report.get("executed_signals")),
                     "rejected_signals": _safe_int(baseline_report.get("rejected_signals")),
+                    "settle_window_end": baseline_settle_window_end,
+                    "settle_window_end_source": baseline_settle_window_end_source,
                     "by_strategy": baseline_by_strategy,
                 },
                 "candidate": {
@@ -759,6 +803,8 @@ def main() -> int:
                     "total_signals": _safe_int(candidate_report.get("total_signals")),
                     "executed_signals": _safe_int(candidate_report.get("executed_signals")),
                     "rejected_signals": _safe_int(candidate_report.get("rejected_signals")),
+                    "settle_window_end": candidate_settle_window_end,
+                    "settle_window_end_source": candidate_settle_window_end_source,
                     "by_strategy": candidate_by_strategy,
                 },
                 "delta": _summary_delta(
@@ -781,6 +827,13 @@ def main() -> int:
         if not isinstance(item, dict):
             continue
         label = str(item.get("label", "slice"))
+        baseline = item.get("baseline", {}) if isinstance(item.get("baseline"), dict) else {}
+        candidate = item.get("candidate", {}) if isinstance(item.get("candidate"), dict) else {}
+        print(
+            f"  [{label}] settle_window_end "
+            f"base={str(bool(baseline.get('settle_window_end', False))).lower()} "
+            f"cand={str(bool(candidate.get('settle_window_end', False))).lower()}"
+        )
         delta = item.get("delta", {}) if isinstance(item.get("delta"), dict) else {}
         for strategy in strategies:
             sd = delta.get(strategy, {}) if isinstance(delta.get(strategy), dict) else {}

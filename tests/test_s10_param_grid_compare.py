@@ -235,6 +235,11 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert int(summary["total_delta_generation_rejected_candidates"]) == -7
     assert int(summary["total_delta_generation_top_reject_event_count"]) == -3
     assert int(summary["generation_top_reject_event_shift_slices"]) == 1
+    assert str(summary["baseline_settle_window_end_profile"]) == "all_off"
+    assert str(summary["candidate_settle_window_end_profile"]) == "all_off"
+    assert str(summary["baseline_settle_window_end_source_profile"]) == "unknown"
+    assert str(summary["candidate_settle_window_end_source_profile"]) == "unknown"
+    assert int(summary["settle_mismatch_slice_count"]) == 0
 
     markdown = module.render_markdown(
         {
@@ -276,10 +281,10 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert "# S10 Parameter Grid Compare" in markdown
     assert "| rank | candidate | prob_tol |" in markdown
     assert (
-        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | min(Δpnl) | max(ΔmaxDD) |"
+        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | base_settle | cand_settle | settle_mismatch | min(Δpnl) | max(ΔmaxDD) |"
         in markdown
     )
     assert (
-        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
+        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | unknown | unknown | +0 | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
         in markdown
     )
