@@ -78,6 +78,10 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "s10_generation_floor_adjusted_leg_reject_share=",
         "s9_minus_s10_pnl=",
         "sx12_cfg_diff_only=",
+        "s9_cfg_cross_src_baseline=",
+        "s9_cfg_cross_src_candidate=",
+        "s10_cfg_same_src_baseline=",
+        "s10_cfg_same_src_candidate=",
         "s10_grid_available=",
         "s10_grid_candidates=",
         "s10_grid_settle_mismatch_rate=",
@@ -870,6 +874,10 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
         in line
     )
     assert "sx12_cfg_diff_only=true" in line
+    assert "s9_cfg_cross_src_baseline=n/a" in line
+    assert "s9_cfg_cross_src_candidate=n/a" in line
+    assert "s10_cfg_same_src_baseline=false" in line
+    assert "s10_cfg_same_src_candidate=true" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -913,6 +921,16 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
             "require_same_source",
         ],
     }
+    assert config_context["guard_snapshot"] == {
+        "s9_cross_market_require_same_source": {
+            "baseline": None,
+            "candidate": None,
+        },
+        "s10_require_same_source": {
+            "baseline": False,
+            "candidate": True,
+        },
+    }
 
     s9_config_context = focus["s9"]["config_context"]
     assert s9_config_context["baseline"] == {
@@ -924,6 +942,10 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
         "require_same_market": False,
     }
     assert s9_config_context["diff_keys"] == ["min_effective_edge_bps", "require_same_market"]
+    assert s9_config_context["cross_market_require_same_source"] == {
+        "baseline": None,
+        "candidate": None,
+    }
 
     s10_config_context = focus["s10"]["config_context"]
     assert s10_config_context["baseline"] == {
@@ -943,6 +965,10 @@ def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compar
         "convert_value",
         "require_same_source",
     ]
+    assert s10_config_context["require_same_source"] == {
+        "baseline": False,
+        "candidate": True,
+    }
 
 
 def test_nightly_summary_surfaces_s9_s10_no_activity_hints(tmp_path: Path) -> None:

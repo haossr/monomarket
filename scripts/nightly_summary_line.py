@@ -104,6 +104,21 @@ def _strategy_config_diff_keys(
     return [key for key in keys if baseline.get(key) != candidate.get(key)]
 
 
+def _strategy_config_bool_flag(
+    config_payload: dict[str, Any],
+    *,
+    key: str,
+) -> bool | None:
+    value = config_payload.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def _format_bool_flag(value: bool | None) -> str:
+    if value is None:
+        return "n/a"
+    return str(value).lower()
+
+
 def _strategy_focus_config_context(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {
@@ -1138,6 +1153,36 @@ def build_summary_bundle(
     s10_config_diff_keys_text = ",".join(str(x) for x in s10_config_diff_keys if str(x).strip())
     strategy_config_diff_only = bool(strategy_config_context.get("strategy_config_diff_only", False))
 
+    s9_baseline_config = strategy_focus_baseline_config.get("s9")
+    if not isinstance(s9_baseline_config, dict):
+        s9_baseline_config = {}
+    s9_candidate_config = strategy_focus_candidate_config.get("s9")
+    if not isinstance(s9_candidate_config, dict):
+        s9_candidate_config = {}
+    s10_baseline_config = strategy_focus_baseline_config.get("s10")
+    if not isinstance(s10_baseline_config, dict):
+        s10_baseline_config = {}
+    s10_candidate_config = strategy_focus_candidate_config.get("s10")
+    if not isinstance(s10_candidate_config, dict):
+        s10_candidate_config = {}
+
+    s9_cross_source_guard_baseline = _strategy_config_bool_flag(
+        s9_baseline_config,
+        key="cross_market_require_same_source",
+    )
+    s9_cross_source_guard_candidate = _strategy_config_bool_flag(
+        s9_candidate_config,
+        key="cross_market_require_same_source",
+    )
+    s10_same_source_guard_baseline = _strategy_config_bool_flag(
+        s10_baseline_config,
+        key="require_same_source",
+    )
+    s10_same_source_guard_candidate = _strategy_config_bool_flag(
+        s10_candidate_config,
+        key="require_same_source",
+    )
+
     window_coverage = _compute_window_coverage(payload)
     window_coverage_ratio = float(window_coverage.get("coverage_ratio", 0.0))
     window_note = str(window_coverage.get("note", ""))
@@ -1435,6 +1480,10 @@ def build_summary_bundle(
         f"s9_cfg_diff_keys={s9_config_diff_keys_text or "none"} "
         f"s10_cfg_diff_keys={s10_config_diff_keys_text or "none"} "
         f"sx12_cfg_diff_only={str(strategy_config_diff_only).lower()} "
+        f"s9_cfg_cross_src_baseline={_format_bool_flag(s9_cross_source_guard_baseline)} "
+        f"s9_cfg_cross_src_candidate={_format_bool_flag(s9_cross_source_guard_candidate)} "
+        f"s10_cfg_same_src_baseline={_format_bool_flag(s10_same_source_guard_baseline)} "
+        f"s10_cfg_same_src_candidate={_format_bool_flag(s10_same_source_guard_candidate)} "
         f"{s10_grid_focus_text} "
         f"| {best_text} "
         f"best_strategy_basis={best_strategy_basis} "
@@ -1536,6 +1585,16 @@ def build_summary_bundle(
                     for strategy, keys in strategy_focus_diff_keys.items()
                     if isinstance(strategy, str) and isinstance(keys, list)
                 },
+                "guard_snapshot": {
+                    "s9_cross_market_require_same_source": {
+                        "baseline": s9_cross_source_guard_baseline,
+                        "candidate": s9_cross_source_guard_candidate,
+                    },
+                    "s10_require_same_source": {
+                        "baseline": s10_same_source_guard_baseline,
+                        "candidate": s10_same_source_guard_candidate,
+                    },
+                },
             },
             "s9": {
                 "strategy": str(strategy_focus_s9.get("strategy", "s9")),
@@ -1598,6 +1657,10 @@ def build_summary_bundle(
                     "baseline": strategy_focus_baseline_config.get("s9", {}),
                     "candidate": strategy_focus_candidate_config.get("s9", {}),
                     "diff_keys": [str(key) for key in s9_config_diff_keys if str(key).strip()],
+                    "cross_market_require_same_source": {
+                        "baseline": s9_cross_source_guard_baseline,
+                        "candidate": s9_cross_source_guard_candidate,
+                    },
                 },
                 "text": str(strategy_focus_s9.get("text") or ""),
             },
@@ -1662,6 +1725,10 @@ def build_summary_bundle(
                     "baseline": strategy_focus_baseline_config.get("s10", {}),
                     "candidate": strategy_focus_candidate_config.get("s10", {}),
                     "diff_keys": [str(key) for key in s10_config_diff_keys if str(key).strip()],
+                    "require_same_source": {
+                        "baseline": s10_same_source_guard_baseline,
+                        "candidate": s10_same_source_guard_candidate,
+                    },
                 },
                 "grid_compare": {
                     "available": bool(s10_grid_focus.get("available", False)),
