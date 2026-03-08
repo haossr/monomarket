@@ -337,6 +337,7 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- rebuild_market_limit: {result.get('rebuild_market_limit')}",
         f"- rebuild_ingest_limit: {result.get('rebuild_ingest_limit')}",
         f"- skip_ingest_rebuild: {bool(result.get('skip_ingest_rebuild', False))}",
+        f"- inject_candidate_settle_mismatch: {bool(result.get('inject_candidate_settle_mismatch', False))}",
         f"- total_candidates: {result.get('total_candidates')}",
         "",
         "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | "
@@ -395,6 +396,8 @@ def _build_dual_slice_compare_cmd(
     rebuild_market_limit: int,
     rebuild_ingest_limit: int,
     skip_ingest_rebuild: bool,
+    baseline_settle_window_end: bool,
+    candidate_settle_window_end: bool,
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -428,6 +431,11 @@ def _build_dual_slice_compare_cmd(
         if skip_ingest_rebuild:
             cmd.append("--skip-ingest-rebuild")
 
+    if not baseline_settle_window_end:
+        cmd.append("--baseline-no-settle-window-end")
+    if not candidate_settle_window_end:
+        cmd.append("--candidate-no-settle-window-end")
+
     return cmd
 
 
@@ -445,6 +453,8 @@ def _run_dual_slice_compare(
     rebuild_market_limit: int,
     rebuild_ingest_limit: int,
     skip_ingest_rebuild: bool,
+    baseline_settle_window_end: bool,
+    candidate_settle_window_end: bool,
 ) -> dict[str, Any]:
     cmd = _build_dual_slice_compare_cmd(
         compare_script=compare_script,
@@ -459,6 +469,8 @@ def _run_dual_slice_compare(
         rebuild_market_limit=rebuild_market_limit,
         rebuild_ingest_limit=rebuild_ingest_limit,
         skip_ingest_rebuild=skip_ingest_rebuild,
+        baseline_settle_window_end=baseline_settle_window_end,
+        candidate_settle_window_end=candidate_settle_window_end,
     )
 
     env = os.environ.copy()
@@ -621,6 +633,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "sx12_dual_slice_compare for deterministic baseline/candidate comparisons."
         ),
     )
+    parser.add_argument(
+        "--inject-candidate-settle-mismatch",
+        action="store_true",
+        help=(
+            "Force candidate compare runs to disable settle-window-end while baseline keeps it enabled "
+            "(QA mode for settle-profile guard regression)."
+        ),
+    )
     return parser
 
 
@@ -712,6 +732,8 @@ def main() -> int:
             rebuild_market_limit=int(args.rebuild_market_limit),
             rebuild_ingest_limit=int(args.rebuild_ingest_limit),
             skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
+            baseline_settle_window_end=True,
+            candidate_settle_window_end=not bool(args.inject_candidate_settle_mismatch),
         )
         summary = summarize_compare_payload(
             compare_payload,
@@ -772,6 +794,7 @@ def main() -> int:
         "rebuild_market_limit": int(args.rebuild_market_limit),
         "rebuild_ingest_limit": int(args.rebuild_ingest_limit),
         "skip_ingest_rebuild": bool(args.skip_ingest_rebuild),
+        "inject_candidate_settle_mismatch": bool(args.inject_candidate_settle_mismatch),
         "total_candidates": len(entries),
         "candidates": entries,
     }

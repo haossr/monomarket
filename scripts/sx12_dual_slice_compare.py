@@ -132,6 +132,7 @@ def _build_backtest_cycle_cmd(
     rebuild_market_limit: int,
     rebuild_ingest_limit: int,
     skip_ingest: bool,
+    settle_window_end: bool,
 ) -> list[str]:
     cmd = [
         "bash",
@@ -155,6 +156,8 @@ def _build_backtest_cycle_cmd(
     ]
     if skip_ingest:
         cmd.append("--skip-ingest")
+    if not settle_window_end:
+        cmd.append("--no-settle-window-end")
     return cmd
 
 
@@ -404,6 +407,7 @@ def _run_backtest(
     rebuild_ingest_limit: int,
     skip_ingest_rebuild: bool,
     isolated_run_dir: Path | None,
+    settle_window_end: bool,
 ) -> dict[str, Any]:
     env = os.environ.copy()
     env["ENABLE_LIVE_TRADING"] = "false"
@@ -429,6 +433,7 @@ def _run_backtest(
             rebuild_market_limit=rebuild_market_limit,
             rebuild_ingest_limit=rebuild_ingest_limit,
             skip_ingest=skip_ingest_rebuild,
+            settle_window_end=settle_window_end,
         )
         proc = subprocess.run(
             cmd,
@@ -475,6 +480,7 @@ def _run_backtest(
             str(config_path),
             "--out-json",
             str(out_json),
+            "--settle-window-end" if settle_window_end else "--no-settle-window-end",
         ]
         proc = subprocess.run(
             cmd,
@@ -517,6 +523,8 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- rebuild_market_limit: {result.get('rebuild_market_limit')}",
         f"- rebuild_ingest_limit: {result.get('rebuild_ingest_limit')}",
         f"- skip_ingest_rebuild: {bool(result.get('skip_ingest_rebuild', False))}",
+        f"- baseline_settle_window_end: {bool(result.get('baseline_settle_window_end', True))}",
+        f"- candidate_settle_window_end: {bool(result.get('candidate_settle_window_end', True))}",
         "",
     ]
 
@@ -655,6 +663,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "for deterministic baseline/candidate comparisons on the same DB snapshot."
         ),
     )
+    parser.add_argument(
+        "--baseline-no-settle-window-end",
+        action="store_true",
+        help=(
+            "Run baseline slices with --no-settle-window-end (default baseline settle is on)."
+        ),
+    )
+    parser.add_argument(
+        "--candidate-no-settle-window-end",
+        action="store_true",
+        help=(
+            "Run candidate slices with --no-settle-window-end (default candidate settle is on)."
+        ),
+    )
     return parser
 
 
@@ -698,6 +720,8 @@ def main() -> int:
         "rebuild_market_limit": int(args.rebuild_market_limit),
         "rebuild_ingest_limit": int(args.rebuild_ingest_limit),
         "skip_ingest_rebuild": bool(args.skip_ingest_rebuild),
+        "baseline_settle_window_end": not bool(args.baseline_no_settle_window_end),
+        "candidate_settle_window_end": not bool(args.candidate_no_settle_window_end),
         "slices": [],
     }
 
@@ -731,6 +755,7 @@ def main() -> int:
             rebuild_ingest_limit=int(args.rebuild_ingest_limit),
             skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
             isolated_run_dir=baseline_isolated_dir,
+            settle_window_end=not bool(args.baseline_no_settle_window_end),
         )
         candidate_report = _run_backtest(
             config_path=candidate_config,
@@ -744,6 +769,7 @@ def main() -> int:
             rebuild_ingest_limit=int(args.rebuild_ingest_limit),
             skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
             isolated_run_dir=candidate_isolated_dir,
+            settle_window_end=not bool(args.candidate_no_settle_window_end),
         )
 
         baseline_cycle_meta = baseline_report.get("_cycle_meta")

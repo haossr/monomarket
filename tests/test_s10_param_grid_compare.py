@@ -71,6 +71,7 @@ def test_s10_grid_default_slices_include_recent14d() -> None:
     assert int(args.rebuild_ingest_limit) == 300
     assert bool(args.skip_ingest_rebuild) is False
     assert bool(args.enforce_settle_profile_match) is True
+    assert bool(args.inject_candidate_settle_mismatch) is False
 
 
 def test_s10_grid_parser_allows_settle_profile_mismatch_override() -> None:
@@ -86,6 +87,23 @@ def test_s10_grid_parser_allows_settle_profile_mismatch_override() -> None:
     )
 
     assert bool(args.enforce_settle_profile_match) is False
+    assert bool(args.inject_candidate_settle_mismatch) is False
+
+
+def test_s10_grid_parser_allows_candidate_settle_mismatch_injection() -> None:
+    module = _load_module()
+
+    parser = module._build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--baseline-config",
+            "base.yaml",
+            "--inject-candidate-settle-mismatch",
+        ]
+    )
+
+    assert bool(args.inject_candidate_settle_mismatch) is True
+    assert bool(args.enforce_settle_profile_match) is True
 
 
 def test_build_dual_slice_compare_cmd_includes_rebuild_flags() -> None:
@@ -104,6 +122,8 @@ def test_build_dual_slice_compare_cmd_includes_rebuild_flags() -> None:
         rebuild_market_limit=123,
         rebuild_ingest_limit=45,
         skip_ingest_rebuild=True,
+        baseline_settle_window_end=True,
+        candidate_settle_window_end=False,
     )
 
     assert cmd[:2] == [sys.executable, "/tmp/sx12.py"]
@@ -115,6 +135,8 @@ def test_build_dual_slice_compare_cmd_includes_rebuild_flags() -> None:
     assert "--rebuild-ingest-limit" in cmd
     assert "45" in cmd
     assert "--skip-ingest-rebuild" in cmd
+    assert "--candidate-no-settle-window-end" in cmd
+    assert "--baseline-no-settle-window-end" not in cmd
 
 
 def test_apply_s10_overrides_keeps_base_immutable() -> None:
@@ -216,6 +238,52 @@ def test_apply_constraint_flags_respects_settle_profile_guard() -> None:
     )
     assert bool(relaxed_entry["passes_settle_profile_match"]) is True
     assert bool(relaxed_entry["passes_constraints"]) is True
+
+
+def test_candidate_sort_key_downgrades_settle_mismatch_candidate() -> None:
+    module = _load_module()
+
+    matched = {
+        "candidate_id": "cand-match",
+        "min_slice_delta_pnl": 0.0,
+        "max_slice_delta_max_drawdown": 0.0,
+        "total_delta_pnl": 0.0,
+        "total_delta_exec": 0,
+        "total_delta_rej": 0,
+        "total_delta_max_drawdown": 0.0,
+        "settle_mismatch_slice_count": 0,
+    }
+    mismatched = {
+        "candidate_id": "cand-mismatch",
+        "min_slice_delta_pnl": 0.4,
+        "max_slice_delta_max_drawdown": -0.1,
+        "total_delta_pnl": 1.2,
+        "total_delta_exec": 3,
+        "total_delta_rej": -2,
+        "total_delta_max_drawdown": -0.1,
+        "settle_mismatch_slice_count": 1,
+    }
+
+    module.apply_constraint_flags(
+        matched,
+        min_slice_delta_pnl_threshold=0.0,
+        max_slice_delta_max_drawdown_threshold=0.0,
+        enforce_settle_profile_match=True,
+    )
+    module.apply_constraint_flags(
+        mismatched,
+        min_slice_delta_pnl_threshold=0.0,
+        max_slice_delta_max_drawdown_threshold=0.0,
+        enforce_settle_profile_match=True,
+    )
+
+    assert bool(matched["passes_settle_profile_match"]) is True
+    assert bool(matched["passes_constraints"]) is True
+    assert bool(mismatched["passes_settle_profile_match"]) is False
+    assert bool(mismatched["passes_constraints"]) is False
+
+    ranked = sorted([mismatched, matched], key=module.candidate_sort_key)
+    assert [row["candidate_id"] for row in ranked] == ["cand-match", "cand-mismatch"]
 
 
 def test_summarize_compare_payload_and_markdown() -> None:
