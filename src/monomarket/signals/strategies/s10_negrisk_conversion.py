@@ -14,6 +14,7 @@ OUTCOME_TOKEN_YES = "YES"  # nosec B105
 class _LegCost:
     total_bps: float
     depth_penalty_bps: float
+    spread_penalty_bps: float
 
 
 @dataclass(slots=True)
@@ -188,6 +189,7 @@ class S10NegRiskConversionArb(Strategy):
             float(cfg.get("depth_reference_liquidity", 1000.0)),
         )
         depth_penalty_max_bps = max(0.0, float(cfg.get("depth_penalty_max_bps", 35.0)))
+        spread_penalty_max_bps = max(0.0, float(cfg.get("spread_penalty_max_bps", 0.0)))
         liquidity_fraction = max(0.0, float(cfg.get("liquidity_fraction", 0.01)))
         min_qty = max(0.1, float(cfg.get("min_qty", 1.0)))
         max_signals = max(0, int(float(cfg.get("max_signals", 180))))
@@ -236,6 +238,7 @@ class S10NegRiskConversionArb(Strategy):
                     "convert_value": convert_value,
                     "conversion_fee_bps": conversion_fee_bps,
                     "price_floor": executable_price_floor,
+                    "spread_penalty_max_bps": spread_penalty_max_bps,
                     "max_tiny_price_leg_share": max_tiny_price_leg_share,
                     "max_floor_adjusted_leg_share": max_floor_adjusted_leg_share,
                     "pair_candidates_priced": 0,
@@ -360,6 +363,7 @@ class S10NegRiskConversionArb(Strategy):
                     slippage_bps=slippage_bps,
                     depth_reference_liquidity=depth_reference_liquidity,
                     depth_penalty_max_bps=depth_penalty_max_bps,
+                    spread_penalty_max_bps=spread_penalty_max_bps,
                     max_weighted_total_cost_bps=max_weighted_total_cost_bps,
                     max_leg_total_cost_bps=max_leg_total_cost_bps,
                     liquidity_fraction=liquidity_fraction,
@@ -461,6 +465,7 @@ class S10NegRiskConversionArb(Strategy):
                         slippage_bps=slippage_bps,
                         depth_reference_liquidity=depth_reference_liquidity,
                         depth_penalty_max_bps=depth_penalty_max_bps,
+                        spread_penalty_max_bps=spread_penalty_max_bps,
                         max_weighted_total_cost_bps=max_weighted_total_cost_bps,
                         max_leg_total_cost_bps=max_leg_total_cost_bps,
                         liquidity_fraction=liquidity_fraction,
@@ -567,6 +572,7 @@ class S10NegRiskConversionArb(Strategy):
                 "convert_value": convert_value,
                 "conversion_fee_bps": conversion_fee_bps,
                 "price_floor": executable_price_floor,
+                "spread_penalty_max_bps": spread_penalty_max_bps,
                 "max_tiny_price_leg_share": max_tiny_price_leg_share,
                 "max_floor_adjusted_leg_share": max_floor_adjusted_leg_share,
                 "pair_candidates_priced": pricing_diag_count,
@@ -770,20 +776,52 @@ class S10NegRiskConversionArb(Strategy):
         )
 
     @staticmethod
+    def _spread_penalty_bps(
+        *,
+        best_bid: float | None,
+        best_ask: float | None,
+        spread_penalty_max_bps: float,
+    ) -> float:
+        if spread_penalty_max_bps <= 0:
+            return 0.0
+        if best_bid is None or best_ask is None:
+            return 0.0
+        bid = float(best_bid)
+        ask = float(best_ask)
+        if bid <= 0 or ask <= 0 or ask < bid:
+            return 0.0
+        mid = (bid + ask) / 2.0
+        if mid <= 0:
+            return 0.0
+        half_spread = max(0.0, ask - bid) / 2.0
+        implied_bps = (half_spread / mid) * 10000.0
+        return min(max(0.0, spread_penalty_max_bps), implied_bps)
+
+    @classmethod
     def _leg_cost(
+        cls,
         *,
         liquidity: float,
         fee_bps: float,
         slippage_bps: float,
         depth_reference_liquidity: float,
         depth_penalty_max_bps: float,
+        best_bid: float | None,
+        best_ask: float | None,
+        spread_penalty_max_bps: float,
     ) -> _LegCost:
         liq = max(0.0, float(liquidity))
         liq_ratio = min(1.0, liq / max(1e-9, depth_reference_liquidity))
         depth_penalty = (1.0 - liq_ratio) * max(0.0, depth_penalty_max_bps)
+        spread_penalty = cls._spread_penalty_bps(
+            best_bid=best_bid,
+            best_ask=best_ask,
+            spread_penalty_max_bps=spread_penalty_max_bps,
+        )
         return _LegCost(
-            total_bps=max(0.0, fee_bps) + max(0.0, slippage_bps) + depth_penalty,
+            total_bps=(max(0.0, fee_bps) + max(0.0, slippage_bps) + depth_penalty + spread_penalty),
             depth_penalty_bps=depth_penalty,
+            spread_penalty_bps=spread_penalty,
         )
 
     def _emit_conversion_signals(
@@ -798,6 +836,7 @@ class S10NegRiskConversionArb(Strategy):
         slippage_bps: float,
         depth_reference_liquidity: float,
         depth_penalty_max_bps: float,
+        spread_penalty_max_bps: float,
         max_weighted_total_cost_bps: float,
         max_leg_total_cost_bps: float,
         liquidity_fraction: float,
@@ -878,6 +917,7 @@ class S10NegRiskConversionArb(Strategy):
         weighted_cost_numerator = 0.0
         weighted_non_slippage_cost_numerator = 0.0
         depth_penalties: dict[str, float] = {}
+        spread_penalties: dict[str, float] = {}
         leg_cost_bps: dict[str, float] = {}
 
         for row in rows:
@@ -888,13 +928,19 @@ class S10NegRiskConversionArb(Strategy):
                 slippage_bps=slippage_bps,
                 depth_reference_liquidity=depth_reference_liquidity,
                 depth_penalty_max_bps=depth_penalty_max_bps,
+                best_bid=row.best_bid,
+                best_ask=row.best_ask,
+                spread_penalty_max_bps=spread_penalty_max_bps,
             )
             weighted_cost_numerator += target_px * cost.total_bps
 
-            non_slippage_leg_cost = max(0.0, fee_bps) + cost.depth_penalty_bps
+            non_slippage_leg_cost = (
+                max(0.0, fee_bps) + cost.depth_penalty_bps + cost.spread_penalty_bps
+            )
             weighted_non_slippage_cost_numerator += target_px * non_slippage_leg_cost
 
             depth_penalties[row.market_id] = cost.depth_penalty_bps
+            spread_penalties[row.market_id] = cost.spread_penalty_bps
             leg_cost_bps[row.market_id] = cost.total_bps
 
         weighted_total_cost_bps = weighted_cost_numerator / max(post_quote_sum_yes, 1e-9)
@@ -1052,6 +1098,7 @@ class S10NegRiskConversionArb(Strategy):
                     "slippage_bps_per_leg": slippage_bps,
                     "depth_reference_liquidity": depth_reference_liquidity,
                     "depth_penalty_max_bps_per_leg": depth_penalty_max_bps,
+                    "spread_penalty_max_bps_per_leg": spread_penalty_max_bps,
                     "weighted_total_cost_bps": weighted_total_cost_bps,
                     "weighted_non_slippage_cost_bps": weighted_non_slippage_cost_bps,
                     "conversion_fee_bps": conversion_cost_bps,
@@ -1059,6 +1106,7 @@ class S10NegRiskConversionArb(Strategy):
                     "leg_total_cost_bps": leg_cost_bps.get(row.market_id, 0.0),
                     "max_leg_total_cost_bps": max_leg_total_cost_bps,
                     "leg_depth_penalty_bps": depth_penalties.get(row.market_id, 0.0),
+                    "leg_spread_penalty_bps": spread_penalties.get(row.market_id, 0.0),
                 },
                 "primary_leg": {
                     "token": OUTCOME_TOKEN_YES,
