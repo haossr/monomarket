@@ -334,7 +334,8 @@ python scripts/s10_param_grid_compare.py \
 输出目录：`artifacts/backtest/s10-grid-<anchor>/`
 - `candidates/cand-*.yaml`：每组参数对应的 candidate 配置
 - `runs/cand-*/compare.json`：调用 `sx12_dual_slice_compare.py` 的原始对照结果
-- `grid-results.json` / `grid-results.md`：按 `pass(min_slice_delta_pnl + max_slice_delta_max_drawdown)` -> `min(Δpnl)` -> `max(ΔmaxDD)` -> `ΣΔpnl`（再按 `ΣΔexec`、`ΣΔrej`、`ΣΔmaxDD`）排序的网格排名摘要
+- `grid-results.json` / `grid-results.md`：按 `pass(min_slice_delta_pnl + max_slice_delta_max_drawdown + settle_profile_match)` -> `min(Δpnl)` -> `max(ΔmaxDD)` -> `ΣΔpnl`（再按 `ΣΔexec`、`ΣΔrej`、`ΣΔmaxDD`）排序的网格排名摘要
+- 结算口径门控默认开启：若某候选在任一切片出现 `settle_mismatch_slice_count>0`，会显示 `pass_settle?=no` 且 `pass=false`。若只想观测不拦截，可加 `--allow-settle-profile-mismatch`。
 
 `--rolling-reject-top-k` 语义：`0=disabled`（关闭拒单原因摘要输出），`N>0` 输出前 N 个原因（无数据时为 `none`）。
 `rolling_reject_top` 使用 `;` 作为原因分隔符（如 `reasonA:3;reasonB:1`）；`rolling_reject_top_normalized` 为模板归一后的同口径摘要（如 `strategy notional limit exceeded:1088;circuit breaker open:5`）；消费端优先读取 `summary.json` 的 `reject_top_pairs` / `reject_top_pairs_normalized`。
