@@ -784,8 +784,14 @@ def _render_html(
       gap: 16px;
       margin: 16px 0 24px;
     }}
+    .chart-grid.large {{
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 18px;
+    }}
     .chart-card {{ border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; background: #fff; }}
+    .chart-grid.large .chart-card {{ padding: 14px; }}
     .chart-title {{ margin: 0 0 8px; font-size: 14px; font-weight: 600; }}
+    .chart-grid.large .chart-title {{ font-size: 15px; }}
     canvas {{ width: 100% !important; height: auto !important; display: block; }}
     ul {{ margin: 6px 0; padding-left: 18px; }}
 
@@ -794,6 +800,7 @@ def _render_html(
       .cards {{ grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }}
       .value {{ font-size: 18px; }}
       .chart-grid {{ grid-template-columns: 1fr; gap: 12px; }}
+      .chart-grid.large {{ grid-template-columns: 1fr; gap: 14px; }}
       th, td {{ font-size: 12px; padding: 6px 8px; }}
     }}
   </style>
@@ -829,8 +836,9 @@ def _render_html(
     </table>
   </div>
 
-  <h2>Charts</h2>
-  <div class='chart-grid'>
+  <h2>待续稿 · Charts</h2>
+  <div class='muted'>关键图表已放大（mobile/desktop 都更易读）。</div>
+  <div class='chart-grid large'>
     <div class='chart-card'>
       <div class='chart-title'>Cumulative PnL (Total MTM vs Realized)</div>
       <canvas id='chart-cumulative-pnl'></canvas>
@@ -898,6 +906,7 @@ def _render_html(
   <script src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'></script>
   <script>
     const REPORT_DATA = {chart_data_json};
+    const CHART_ASPECT = window.innerWidth <= 640 ? 1.45 : 1.75;
 
     function _mkChart(id, cfg) {{
       const el = document.getElementById(id);
@@ -948,7 +957,7 @@ def _render_html(
       options: {{
         responsive: true,
         maintainAspectRatio: true,
-        aspectRatio: 2,
+        aspectRatio: CHART_ASPECT,
         interaction: {{ mode: 'index', intersect: false }},
         scales: {{
           x: {{
@@ -984,7 +993,7 @@ def _render_html(
       options: {{
         responsive: true,
         maintainAspectRatio: true,
-        aspectRatio: 2,
+        aspectRatio: CHART_ASPECT,
         scales: {{ x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }} }},
       }},
     }});
@@ -1002,7 +1011,7 @@ def _render_html(
       options: {{
         responsive: true,
         maintainAspectRatio: true,
-        aspectRatio: 2,
+        aspectRatio: CHART_ASPECT,
         scales: {{ x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }} }},
       }},
     }});
@@ -1020,7 +1029,7 @@ def _render_html(
       options: {{
         responsive: true,
         maintainAspectRatio: true,
-        aspectRatio: 2,
+        aspectRatio: CHART_ASPECT,
         scales: {{
           x: {{ ticks: {{ maxRotation: 0, minRotation: 0 }} }},
           y: {{ min: 0, max: 100 }},
@@ -1051,7 +1060,7 @@ def _render_html(
       options: {{
         responsive: true,
         maintainAspectRatio: true,
-        aspectRatio: 2,
+        aspectRatio: CHART_ASPECT,
         scales: {{ x: {{ ticks: {{ autoSkip: true, maxTicksLimit: 8, maxRotation: 0, minRotation: 0 }} }} }},
       }},
     }});
