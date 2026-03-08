@@ -220,10 +220,19 @@ python scripts/sx12_dual_slice_compare.py \
 
 输出目录：`artifacts/backtest/sx12-dual-slice-<anchor>/`
 - `baseline/<slice>.json` / `candidate/<slice>.json`：每个切片的回测报告
-- `compare.json`：结构化对照（含每策略 `pnl/max_drawdown/trade_count/executed_rows/rejected_rows/mtm_winrate` 与 delta），并附 `guard_snapshot`（S9/S10 同源守卫开关）
+- `compare.json`：结构化对照（含每策略 `pnl/max_drawdown/trade_count/executed_rows/rejected_rows/mtm_winrate` 与 delta），并附 `guard_snapshot`（S9/S10 同源守卫开关）与 `guard_snapshot_only` 标记
 - `compare.md`：可直接贴进进度日志的表格摘要（含 `Guard snapshot` 区块）
 
 脚本会强制 `ENABLE_LIVE_TRADING=false`。
+
+若只想快速审计 S9/S10 同源守卫开关（不跑切片回测），可用：
+
+```bash
+python scripts/sx12_dual_slice_compare.py \
+  --baseline-config configs/config.example.yaml \
+  --candidate-config configs/config.example.yaml \
+  --guard-snapshot-only
+```
 
 若需要在每个切片对 baseline/candidate 先重建信号（隔离 DB，避免污染主库），可开启：
 
