@@ -39,6 +39,27 @@ def test_slice_default_includes_recent14d() -> None:
     assert [s.label for s in specs] == ["recent24h", "recent7d", "recent14d"]
     assert [s.hours for s in specs] == [24.0, 168.0, 336.0]
     assert bool(args.skip_ingest_rebuild) is False
+    assert bool(args.baseline_no_settle_window_end) is False
+    assert bool(args.candidate_no_settle_window_end) is False
+
+
+def test_slice_parser_accepts_settle_override_flags() -> None:
+    module = _load_module()
+
+    parser = module._build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--baseline-config",
+            "base.yaml",
+            "--candidate-config",
+            "cand.yaml",
+            "--baseline-no-settle-window-end",
+            "--candidate-no-settle-window-end",
+        ]
+    )
+
+    assert bool(args.baseline_no_settle_window_end) is True
+    assert bool(args.candidate_no_settle_window_end) is True
 
 
 def test_prepare_isolated_config_copies_db_and_rewrites_config(tmp_path: Path) -> None:
@@ -81,6 +102,7 @@ def test_build_backtest_cycle_cmd_includes_rebuild_flags(tmp_path: Path) -> None
         rebuild_market_limit=120,
         rebuild_ingest_limit=40,
         skip_ingest=True,
+        settle_window_end=False,
     )
 
     cmd_str = " ".join(str(x) for x in cmd)
@@ -91,6 +113,7 @@ def test_build_backtest_cycle_cmd_includes_rebuild_flags(tmp_path: Path) -> None
     assert "--ingest-limit" in cmd
     assert "--market-limit" in cmd
     assert "--skip-ingest" in cmd
+    assert "--no-settle-window-end" in cmd
 
 
 def test_extract_settle_window_end_prefers_cycle_meta_then_execution_config() -> None:
