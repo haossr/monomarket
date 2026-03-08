@@ -122,4 +122,5 @@ strategies:
     max_tiny_price_leg_share: 0.25
     max_floor_adjusted_leg_share: 0.35
     allow_sell_conversion: false
+    require_same_source: false
     exclude_event_ids: []
