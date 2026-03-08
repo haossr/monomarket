@@ -767,6 +767,165 @@ def test_nightly_summary_surfaces_s10_grid_mismatch_metrics(tmp_path: Path) -> N
     assert str(s10_grid["source"]).endswith("s10-grid-results.json")
 
 
+def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compare(
+    tmp_path: Path,
+) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    sx12_compare_json = tmp_path / "compare.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T04:00:00Z",
+        "total_signals": 4,
+        "executed_signals": 2,
+        "rejected_signals": 2,
+        "results": [
+            {"strategy": "s9", "pnl": 0.5, "trade_count": 1},
+            {"strategy": "s10", "pnl": 0.2, "trade_count": 1},
+        ],
+        "replay": [],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 0.5,
+            "positive_window_rate": 1.0,
+            "empty_window_count": 0,
+            "range_hours": 4,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    sx12_compare_payload = {
+        "baseline_strategy_config": {
+            "s9": {
+                "min_effective_edge_bps": 20.0,
+                "require_same_market": True,
+                "ignored_list": [1, 2, 3],
+            },
+            "s10": {
+                "convert_value": 1.0,
+                "conversion_fee_bps": 0.0,
+            },
+        },
+        "candidate_strategy_config": {
+            "s9": {
+                "min_effective_edge_bps": 35.0,
+                "require_same_market": False,
+            },
+            "s10": {
+                "convert_value": 1.02,
+                "conversion_fee_bps": 12.0,
+                "allow_sell_conversion": True,
+            },
+        },
+    }
+    sx12_compare_json.write_text(json.dumps(sx12_compare_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--sx12-compare-json",
+            str(sx12_compare_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "s9_cfg_diff_keys=min_effective_edge_bps,require_same_market" in line
+    assert "s10_cfg_diff_keys=allow_sell_conversion,conversion_fee_bps,convert_value" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    assert verify_nightly_summary_sidecar_checksum(sidecar)
+
+    focus = sidecar["strategy_focus"]
+    config_context = focus["config_context"]
+    assert bool(config_context["available"]) is True
+    assert str(config_context["source"]).endswith("compare.json")
+
+    assert config_context["baseline_strategy_config"] == {
+        "s9": {
+            "min_effective_edge_bps": 20.0,
+            "require_same_market": True,
+        },
+        "s10": {
+            "convert_value": 1.0,
+            "conversion_fee_bps": 0.0,
+        },
+    }
+    assert config_context["candidate_strategy_config"] == {
+        "s9": {
+            "min_effective_edge_bps": 35.0,
+            "require_same_market": False,
+        },
+        "s10": {
+            "convert_value": 1.02,
+            "conversion_fee_bps": 12.0,
+            "allow_sell_conversion": True,
+        },
+    }
+    assert config_context["strategy_diff_keys"] == {
+        "s9": ["min_effective_edge_bps", "require_same_market"],
+        "s10": ["allow_sell_conversion", "conversion_fee_bps", "convert_value"],
+    }
+
+    s9_config_context = focus["s9"]["config_context"]
+    assert s9_config_context["baseline"] == {
+        "min_effective_edge_bps": 20.0,
+        "require_same_market": True,
+    }
+    assert s9_config_context["candidate"] == {
+        "min_effective_edge_bps": 35.0,
+        "require_same_market": False,
+    }
+    assert s9_config_context["diff_keys"] == ["min_effective_edge_bps", "require_same_market"]
+
+    s10_config_context = focus["s10"]["config_context"]
+    assert s10_config_context["baseline"] == {
+        "convert_value": 1.0,
+        "conversion_fee_bps": 0.0,
+    }
+    assert s10_config_context["candidate"] == {
+        "convert_value": 1.02,
+        "conversion_fee_bps": 12.0,
+        "allow_sell_conversion": True,
+    }
+    assert s10_config_context["diff_keys"] == [
+        "allow_sell_conversion",
+        "conversion_fee_bps",
+        "convert_value",
+    ]
+
+
 def test_nightly_summary_surfaces_s9_s10_no_activity_hints(tmp_path: Path) -> None:
     backtest_json = tmp_path / "latest.json"
     rolling_json = tmp_path / "rolling.json"
@@ -2467,6 +2626,7 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "--s10-grid-json" in content
     assert "--no-auto-s10-grid-json" in content
     assert "--s10-grid-max-age-hours" in content
+    assert "--sx12-compare-json" in content
     assert "auto-detected s10-grid-json" in content
     assert "same-nightly-date match" in content
     assert "latest recent fallback" in content
@@ -2476,6 +2636,7 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "${CYCLE_CLEAR_ARGS[@]-}" in content
     assert "${CYCLE_REBUILD_ARGS[@]-}" in content
     assert '${S10_GRID_ARGS[@]+"${S10_GRID_ARGS[@]}"}' in content
+    assert '${SX12_COMPARE_ARGS[@]+"${SX12_COMPARE_ARGS[@]}"}' in content
     assert '--rolling-json "$ROLLING_JSON"' in content
 
 
