@@ -24,6 +24,7 @@ REBUILD_SIGNALS_WINDOW="0"
 REBUILD_STEP_HOURS="12"
 REQUIRE_INTERPRETABLE="0"
 SETTLE_WINDOW_END="1"
+S10_GRID_JSON=""
 
 usage() {
   cat <<'USAGE'
@@ -51,6 +52,7 @@ Options:
                                   (requires --clear-signals-window)
   --rebuild-step-hours <f>        Step hours for rebuild-signals-window (default: 12)
   --no-settle-window-end          Disable expired-event settlement at window end (default: enabled)
+  --s10-grid-json <path>          Optional S10 grid-results.json for settle-mismatch sidecar metrics
   --require-interpretable         Fail if summary marks experiment_interpretable=false
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
@@ -130,6 +132,10 @@ while [[ $# -gt 0 ]]; do
     --no-settle-window-end)
       SETTLE_WINDOW_END="0"
       shift 1
+      ;;
+    --s10-grid-json)
+      S10_GRID_JSON="$2"
+      shift 2
       ;;
     --require-interpretable)
       REQUIRE_INTERPRETABLE="1"
@@ -327,12 +333,18 @@ if [[ "$NIGHTLY_SUMMARY_CHECKSUM" == "1" ]]; then
   SUMMARY_CHECKSUM_ARGS=(--with-checksum)
 fi
 
+S10_GRID_ARGS=()
+if [[ -n "$S10_GRID_JSON" ]]; then
+  S10_GRID_ARGS=(--s10-grid-json "$S10_GRID_JSON")
+fi
+
 "$PYTHON_BIN" scripts/nightly_summary_line.py \
   --backtest-json "$RUN_DIR/latest.json" \
   --pdf-path "$PDF_PATH" \
   --rolling-json "$ROLLING_JSON" \
   --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
   --analysis-json "$ANALYSIS_JSON" \
+  ${S10_GRID_ARGS[@]+"${S10_GRID_ARGS[@]}"} \
   --summary-path "$SUMMARY_TXT" \
   --summary-json-path "$SUMMARY_JSON" \
   --nightly-date "$NIGHTLY_DATE" \
