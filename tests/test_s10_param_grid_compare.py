@@ -183,6 +183,8 @@ def test_summarize_compare_payload_and_markdown() -> None:
                         "executed_rows": 3,
                         "rejected_rows": -1,
                         "mtm_winrate": 0.1,
+                        "generation_pass": 5,
+                        "generation_rejected_candidates": -4,
                     }
                 },
             },
@@ -196,6 +198,8 @@ def test_summarize_compare_payload_and_markdown() -> None:
                         "executed_rows": 1,
                         "rejected_rows": -2,
                         "mtm_winrate": -0.02,
+                        "generation_pass": 2,
+                        "generation_rejected_candidates": -3,
                     }
                 },
             },
@@ -211,6 +215,8 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert abs(float(summary["total_delta_max_drawdown"]) - (-0.3)) < 1e-12
     assert abs(float(summary["max_slice_delta_max_drawdown"]) - (-0.1)) < 1e-12
     assert abs(float(summary["total_delta_mtm_winrate"]) - 0.08) < 1e-12
+    assert int(summary["total_delta_generation_pass"]) == 7
+    assert int(summary["total_delta_generation_rejected_candidates"]) == -7
 
     markdown = module.render_markdown(
         {
@@ -238,6 +244,8 @@ def test_summarize_compare_payload_and_markdown() -> None:
                     "total_delta_pnl": 0.5,
                     "total_delta_exec": 4,
                     "total_delta_rej": -3,
+                    "total_delta_generation_pass": 7,
+                    "total_delta_generation_rejected_candidates": -7,
                     "total_delta_max_drawdown": -0.2,
                     "total_delta_mtm_winrate": 0.08,
                 }
@@ -252,6 +260,6 @@ def test_summarize_compare_payload_and_markdown() -> None:
         in markdown
     )
     assert (
-        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | -0.2000 | +0.0800 | yes |"
+        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -0.2000 | +0.0800 | yes |"
         in markdown
     )

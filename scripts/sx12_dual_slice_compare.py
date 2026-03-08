@@ -163,6 +163,7 @@ def summarize_strategy(
     *,
     strategy: str,
     normalize_reject_reasons: bool = True,
+    cycle_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     target = strategy.strip().lower()
     results = report.get("results", []) if isinstance(report.get("results"), list) else []
@@ -192,6 +193,46 @@ def summarize_strategy(
     top_pairs = aggregate_reject_reasons(reason_counts, normalize=normalize_reject_reasons)
     top_reason = "none" if not top_pairs else f"{top_pairs[0][0]}:{top_pairs[0][1]}"
 
+    generation_by_strategy: dict[str, Any] = {}
+    if isinstance(cycle_meta, dict):
+        signal_generation = cycle_meta.get("signal_generation")
+        if isinstance(signal_generation, dict):
+            edge_gate = signal_generation.get("edge_gate")
+            if isinstance(edge_gate, dict):
+                by_strategy = edge_gate.get("by_strategy")
+                if isinstance(by_strategy, dict):
+                    generation_by_strategy = {
+                        str(k).strip().lower(): v for k, v in by_strategy.items() if isinstance(v, dict)
+                    }
+
+    generation_row = generation_by_strategy.get(target, {})
+    generation_raw = _safe_int(generation_row.get("raw"))
+    generation_pass = _safe_int(generation_row.get("pass"))
+    generation_fail = _safe_int(generation_row.get("fail"))
+    generation_pass_rate = _safe_float(generation_row.get("pass_rate"))
+
+    generation_reason_counts: Counter[str] = Counter()
+    strategy_diag = generation_row.get("strategy_diagnostics")
+    if isinstance(strategy_diag, dict):
+        candidate_reject_reasons = strategy_diag.get("candidate_reject_reasons")
+        if isinstance(candidate_reject_reasons, dict):
+            for reason, raw_count in candidate_reject_reasons.items():
+                count = _safe_int(raw_count)
+                if count <= 0:
+                    continue
+                generation_reason_counts[str(reason)] += count
+
+    generation_reject_top_pairs = aggregate_reject_reasons(
+        generation_reason_counts,
+        normalize=normalize_reject_reasons,
+    )
+    generation_top_reject_reason = (
+        "none"
+        if not generation_reject_top_pairs
+        else f"{generation_reject_top_pairs[0][0]}:{generation_reject_top_pairs[0][1]}"
+    )
+    generation_rejected_candidates = sum(generation_reason_counts.values())
+
     return {
         "strategy": target,
         "pnl": _safe_float(result_row.get("pnl")),
@@ -209,6 +250,15 @@ def summarize_strategy(
         ),
         "top_reject_reason": top_reason,
         "reject_reasons": [[reason, count] for reason, count in top_pairs],
+        "generation_raw": generation_raw,
+        "generation_pass": generation_pass,
+        "generation_fail": generation_fail,
+        "generation_pass_rate": generation_pass_rate,
+        "generation_rejected_candidates": generation_rejected_candidates,
+        "generation_top_reject_reason": generation_top_reject_reason,
+        "generation_reject_reasons": [
+            [reason, count] for reason, count in generation_reject_top_pairs
+        ],
     }
 
 
@@ -235,6 +285,19 @@ def _summary_delta(
             "mtm_winrate": _safe_float(c.get("mtm_winrate")) - _safe_float(b.get("mtm_winrate")),
             "closed_winrate": _safe_float(c.get("closed_winrate"))
             - _safe_float(b.get("closed_winrate")),
+            "generation_raw": float(
+                _safe_int(c.get("generation_raw")) - _safe_int(b.get("generation_raw"))
+            ),
+            "generation_pass": float(
+                _safe_int(c.get("generation_pass")) - _safe_int(b.get("generation_pass"))
+            ),
+            "generation_fail": float(
+                _safe_int(c.get("generation_fail")) - _safe_int(b.get("generation_fail"))
+            ),
+            "generation_rejected_candidates": float(
+                _safe_int(c.get("generation_rejected_candidates"))
+                - _safe_int(b.get("generation_rejected_candidates"))
+            ),
         }
     return delta
 
@@ -255,6 +318,7 @@ def _run_backtest(
 ) -> dict[str, Any]:
     env = os.environ.copy()
     env["ENABLE_LIVE_TRADING"] = "false"
+    cycle_meta_payload: dict[str, Any] | None = None
 
     if rebuild_signals_window:
         if isolated_run_dir is None:
@@ -298,6 +362,12 @@ def _run_backtest(
             raise RuntimeError(f"backtest cycle produced no latest.json: {cycle_output_dir}")
         out_json.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(latest_json, out_json)
+
+        cycle_meta_json = cycle_output_dir / "cycle-meta.json"
+        if cycle_meta_json.exists():
+            raw_cycle_meta = json.loads(cycle_meta_json.read_text())
+            if isinstance(raw_cycle_meta, dict):
+                cycle_meta_payload = raw_cycle_meta
     else:
         cmd = [
             "uv",
@@ -339,6 +409,8 @@ def _run_backtest(
     payload = json.loads(out_json.read_text())
     if not isinstance(payload, dict):
         raise RuntimeError(f"invalid backtest json payload: {out_json}")
+    if isinstance(cycle_meta_payload, dict):
+        payload["_cycle_meta"] = cycle_meta_payload
     return payload
 
 
@@ -368,11 +440,13 @@ def render_markdown(result: dict[str, Any]) -> str:
         lines.append("")
         lines.append(
             "| strategy | base_pnl | cand_pnl | Δpnl | base_exec | cand_exec | Δexec | "
-            "base_rej | cand_rej | Δrej | base_maxdd | cand_maxdd | Δmaxdd | base_mtm_wr | cand_mtm_wr | Δmtm_wr | "
-            "base_top_reject | cand_top_reject |"
+            "base_rej | cand_rej | Δrej | base_gen_pass | cand_gen_pass | Δgen_pass | "
+            "base_gen_reject | cand_gen_reject | Δgen_reject | base_maxdd | cand_maxdd | Δmaxdd | "
+            "base_mtm_wr | cand_mtm_wr | Δmtm_wr | base_top_reject | cand_top_reject | "
+            "base_gen_top_reject | cand_gen_top_reject |"
         )
         lines.append(
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|"
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|"
         )
 
         baseline = item.get("baseline", {}) if isinstance(item.get("baseline"), dict) else {}
@@ -398,9 +472,12 @@ def render_markdown(result: dict[str, Any]) -> str:
                 f"{_safe_float(b.get('pnl')):.4f} | {_safe_float(c.get('pnl')):.4f} | {(_safe_float(d.get('pnl'))):+.4f} | "
                 f"{_safe_int(b.get('executed_rows'))} | {_safe_int(c.get('executed_rows'))} | {(_safe_int(c.get('executed_rows')) - _safe_int(b.get('executed_rows'))):+d} | "
                 f"{_safe_int(b.get('rejected_rows'))} | {_safe_int(c.get('rejected_rows'))} | {(_safe_int(c.get('rejected_rows')) - _safe_int(b.get('rejected_rows'))):+d} | "
+                f"{_safe_int(b.get('generation_pass'))} | {_safe_int(c.get('generation_pass'))} | {(_safe_int(c.get('generation_pass')) - _safe_int(b.get('generation_pass'))):+d} | "
+                f"{_safe_int(b.get('generation_rejected_candidates'))} | {_safe_int(c.get('generation_rejected_candidates'))} | {(_safe_int(c.get('generation_rejected_candidates')) - _safe_int(b.get('generation_rejected_candidates'))):+d} | "
                 f"{_safe_float(b.get('max_drawdown')):.4f} | {_safe_float(c.get('max_drawdown')):.4f} | {(_safe_float(d.get('max_drawdown'))):+.4f} | "
                 f"{_safe_float(b.get('mtm_winrate')):.4f} | {_safe_float(c.get('mtm_winrate')):.4f} | {(_safe_float(d.get('mtm_winrate'))):+.4f} | "
-                f"{str(b.get('top_reject_reason', 'none'))} | {str(c.get('top_reject_reason', 'none'))} |"
+                f"{str(b.get('top_reject_reason', 'none'))} | {str(c.get('top_reject_reason', 'none'))} | "
+                f"{str(b.get('generation_top_reject_reason', 'none'))} | {str(c.get('generation_top_reject_reason', 'none'))} |"
             )
         lines.append("")
 
@@ -566,11 +643,19 @@ def main() -> int:
             isolated_run_dir=candidate_isolated_dir,
         )
 
+        baseline_cycle_meta = baseline_report.get("_cycle_meta")
+        baseline_cycle_meta_payload = baseline_cycle_meta if isinstance(baseline_cycle_meta, dict) else None
+        candidate_cycle_meta = candidate_report.get("_cycle_meta")
+        candidate_cycle_meta_payload = (
+            candidate_cycle_meta if isinstance(candidate_cycle_meta, dict) else None
+        )
+
         baseline_by_strategy = {
             strategy: summarize_strategy(
                 baseline_report,
                 strategy=strategy,
                 normalize_reject_reasons=normalize_reject_reasons,
+                cycle_meta=baseline_cycle_meta_payload,
             )
             for strategy in strategies
         }
@@ -579,6 +664,7 @@ def main() -> int:
                 candidate_report,
                 strategy=strategy,
                 normalize_reject_reasons=normalize_reject_reasons,
+                cycle_meta=candidate_cycle_meta_payload,
             )
             for strategy in strategies
         }
@@ -629,7 +715,9 @@ def main() -> int:
             print(
                 f"  [{label}] {strategy} Δpnl={_safe_float(sd.get('pnl')):+.4f} "
                 f"Δexec={_safe_int(sd.get('executed_rows')):+d} "
-                f"Δrej={_safe_int(sd.get('rejected_rows')):+d}"
+                f"Δrej={_safe_int(sd.get('rejected_rows')):+d} "
+                f"Δgen_pass={_safe_int(sd.get('generation_pass')):+d} "
+                f"Δgen_reject={_safe_int(sd.get('generation_rejected_candidates')):+d}"
             )
 
     return 0
