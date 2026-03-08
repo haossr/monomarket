@@ -203,6 +203,7 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- rebuild_step_hours: {result.get('rebuild_step_hours')}",
         f"- rebuild_market_limit: {result.get('rebuild_market_limit')}",
         f"- rebuild_ingest_limit: {result.get('rebuild_ingest_limit')}",
+        f"- skip_ingest_rebuild: {bool(result.get('skip_ingest_rebuild', False))}",
         f"- total_candidates: {result.get('total_candidates')}",
         "",
         "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | "
@@ -250,6 +251,7 @@ def _build_dual_slice_compare_cmd(
     rebuild_step_hours: float,
     rebuild_market_limit: int,
     rebuild_ingest_limit: int,
+    skip_ingest_rebuild: bool,
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -280,6 +282,8 @@ def _build_dual_slice_compare_cmd(
                 str(rebuild_ingest_limit),
             ]
         )
+        if skip_ingest_rebuild:
+            cmd.append("--skip-ingest-rebuild")
 
     return cmd
 
@@ -297,6 +301,7 @@ def _run_dual_slice_compare(
     rebuild_step_hours: float,
     rebuild_market_limit: int,
     rebuild_ingest_limit: int,
+    skip_ingest_rebuild: bool,
 ) -> dict[str, Any]:
     cmd = _build_dual_slice_compare_cmd(
         compare_script=compare_script,
@@ -310,6 +315,7 @@ def _run_dual_slice_compare(
         rebuild_step_hours=rebuild_step_hours,
         rebuild_market_limit=rebuild_market_limit,
         rebuild_ingest_limit=rebuild_ingest_limit,
+        skip_ingest_rebuild=skip_ingest_rebuild,
     )
 
     env = os.environ.copy()
@@ -444,6 +450,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=300,
         help="Ingest limit when --rebuild-signals-window is enabled (default: 300)",
     )
+    parser.add_argument(
+        "--skip-ingest-rebuild",
+        action="store_true",
+        help=(
+            "When rebuild-signals-window is enabled, pass --skip-ingest-rebuild to "
+            "sx12_dual_slice_compare for deterministic baseline/candidate comparisons."
+        ),
+    )
     return parser
 
 
@@ -534,6 +548,7 @@ def main() -> int:
             rebuild_step_hours=float(args.rebuild_step_hours),
             rebuild_market_limit=int(args.rebuild_market_limit),
             rebuild_ingest_limit=int(args.rebuild_ingest_limit),
+            skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
         )
         summary = summarize_compare_payload(
             compare_payload,
@@ -588,6 +603,7 @@ def main() -> int:
         "rebuild_step_hours": float(args.rebuild_step_hours),
         "rebuild_market_limit": int(args.rebuild_market_limit),
         "rebuild_ingest_limit": int(args.rebuild_ingest_limit),
+        "skip_ingest_rebuild": bool(args.skip_ingest_rebuild),
         "total_candidates": len(entries),
         "candidates": entries,
     }

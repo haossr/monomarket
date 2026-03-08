@@ -17,6 +17,7 @@ TO_TS=""
 CLEAR_SIGNALS_WINDOW="0"
 REBUILD_SIGNALS_WINDOW="0"
 REBUILD_STEP_HOURS="12"
+SKIP_INGEST="0"
 
 usage() {
   cat <<'USAGE'
@@ -35,6 +36,7 @@ Options:
                              Liquidity top-fraction universe before strategy generation (default: 0.30)
   --ingest-limit <int>       Ingest limit for gamma source (default: 5000)
   --ingest-mode <mode>       gamma ingest mode: full|incremental (default: full)
+  --skip-ingest              Skip ingest step (use existing DB snapshot as-is)
   --config <path>            Config path (default: configs/config.yaml)
   --output-dir <path>        Output run directory (default: artifacts/backtest/runs/<timestamp>)
   --clear-signals-window     Delete existing signals in [from_ts,to_ts] before generate-signals
@@ -79,6 +81,10 @@ while [[ $# -gt 0 ]]; do
     --ingest-mode)
       INGEST_MODE="$2"
       shift 2
+      ;;
+    --skip-ingest)
+      SKIP_INGEST="1"
+      shift 1
       ;;
     --config)
       CONFIG_PATH="$2"
@@ -559,11 +565,15 @@ echo "[backtest-cycle] run_dir=$RUN_DIR"
 echo "[backtest-cycle] init-db"
 monomarket init-db --config "$CONFIG_PATH"
 
-echo "[backtest-cycle] ingest gamma ${INGEST_MODE}"
-if [[ "$INGEST_MODE" == "incremental" ]]; then
-  monomarket ingest --source gamma --limit "$INGEST_LIMIT" --incremental --config "$CONFIG_PATH"
+if [[ "$SKIP_INGEST" == "1" ]]; then
+  echo "[backtest-cycle] ingest skipped (--skip-ingest)"
 else
-  monomarket ingest --source gamma --limit "$INGEST_LIMIT" --full --config "$CONFIG_PATH"
+  echo "[backtest-cycle] ingest gamma ${INGEST_MODE}"
+  if [[ "$INGEST_MODE" == "incremental" ]]; then
+    monomarket ingest --source gamma --limit "$INGEST_LIMIT" --incremental --config "$CONFIG_PATH"
+  else
+    monomarket ingest --source gamma --limit "$INGEST_LIMIT" --full --config "$CONFIG_PATH"
+  fi
 fi
 
 CLEARED_SIGNALS_IN_WINDOW="0"
@@ -731,7 +741,7 @@ for row in rows:
 out_md.write_text("\n".join(lines) + "\n")
 PY
 
-"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" "$REBUILD_SIGNALS_WINDOW" "$REBUILD_STEP_HOURS" "$REBUILD_SAMPLED_STEPS" "$EDGE_GATE_RUN_JSON" <<'PY'
+"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" "$REBUILD_SIGNALS_WINDOW" "$REBUILD_STEP_HOURS" "$REBUILD_SAMPLED_STEPS" "$SKIP_INGEST" "$EDGE_GATE_RUN_JSON" <<'PY'
 from __future__ import annotations
 
 import json
@@ -753,7 +763,8 @@ cleared_signals_in_window = int(float(sys.argv[11]))
 rebuild_signals_window = str(sys.argv[12]).strip() == "1"
 rebuild_step_hours = float(sys.argv[13])
 rebuild_sampled_steps = int(float(sys.argv[14]))
-edge_gate_run_raw = str(sys.argv[15] or "{}")
+skip_ingest = str(sys.argv[15]).strip() == "1"
+edge_gate_run_raw = str(sys.argv[16] or "{}")
 
 edge_gate_run: dict[str, object] = {}
 try:
@@ -798,6 +809,7 @@ cycle_meta = {
         "historical_replay_only": new_signals_total > 0 and new_signals_in_window == 0,
         "clear_signals_window": clear_signals_window,
         "cleared_signals_in_window": cleared_signals_in_window,
+        "skip_ingest": skip_ingest,
         "rebuild_signals_window": rebuild_signals_window,
         "rebuild_step_hours": rebuild_step_hours,
         "rebuild_sampled_steps": rebuild_sampled_steps,

@@ -69,6 +69,7 @@ def test_s10_grid_default_slices_include_recent14d() -> None:
     assert float(args.rebuild_step_hours) == 12.0
     assert int(args.rebuild_market_limit) == 2000
     assert int(args.rebuild_ingest_limit) == 300
+    assert bool(args.skip_ingest_rebuild) is False
 
 
 def test_build_dual_slice_compare_cmd_includes_rebuild_flags() -> None:
@@ -86,6 +87,7 @@ def test_build_dual_slice_compare_cmd_includes_rebuild_flags() -> None:
         rebuild_step_hours=6.0,
         rebuild_market_limit=123,
         rebuild_ingest_limit=45,
+        skip_ingest_rebuild=True,
     )
 
     assert cmd[:2] == [sys.executable, "/tmp/sx12.py"]
@@ -96,6 +98,7 @@ def test_build_dual_slice_compare_cmd_includes_rebuild_flags() -> None:
     assert "123" in cmd
     assert "--rebuild-ingest-limit" in cmd
     assert "45" in cmd
+    assert "--skip-ingest-rebuild" in cmd
 
 
 def test_apply_s10_overrides_keeps_base_immutable() -> None:
