@@ -165,36 +165,72 @@ def _collect_strategies(payload: dict[str, Any]) -> list[StrategyRow]:
 
 def _collect_replay_timeline(payload: dict[str, Any], run_dir: Path) -> list[dict[str, Any]]:
     replay = payload.get("replay", [])
-    points: list[tuple[datetime | None, str, float]] = []
+
+    records: list[tuple[datetime | None, str, str, float, float | None]] = []
+
+    def _as_float_or_none(value: Any) -> float | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
 
     if isinstance(replay, list) and replay:
-        cumulative = 0.0
         for row in replay:
+            if not isinstance(row, dict):
+                continue
             ts = str(row.get("ts", ""))
-            change = float(row.get("realized_change", 0.0) or 0.0)
-            cumulative += change
-            points.append((_parse_iso_maybe(ts), ts, cumulative))
+            strategy = str(row.get("strategy", "")).strip().lower() or "unknown"
+            change = _as_float_or_none(row.get("realized_change")) or 0.0
+            strategy_equity = _as_float_or_none(row.get("strategy_equity"))
+            records.append((_parse_iso_maybe(ts), ts, strategy, change, strategy_equity))
     else:
         replay_csv = run_dir / "replay.csv"
         if replay_csv.exists():
-            cumulative = 0.0
             with replay_csv.open("r", encoding="utf-8", newline="") as f:
                 for row in csv.DictReader(f):
                     ts = str(row.get("ts", ""))
-                    change = float(row.get("realized_change", 0.0) or 0.0)
-                    cumulative += change
-                    points.append((_parse_iso_maybe(ts), ts, cumulative))
+                    strategy = str(row.get("strategy", "")).strip().lower() or "unknown"
+                    change = _as_float_or_none(row.get("realized_change")) or 0.0
+                    strategy_equity = _as_float_or_none(row.get("strategy_equity"))
+                    records.append((_parse_iso_maybe(ts), ts, strategy, change, strategy_equity))
 
-    points.sort(key=lambda x: (x[0] or datetime.min.replace(tzinfo=UTC), x[1]))
+    records.sort(
+        key=lambda x: (
+            x[0] or datetime.min.replace(tzinfo=UTC),
+            x[1],
+            x[2],
+        )
+    )
 
-    # Collapse identical timestamps (keep latest cumulative at that ts) to reduce clutter.
-    collapsed: list[tuple[datetime | None, str, float]] = []
-    for dt, ts, cumulative in points:
+    # Build both realized-only and total-equity(MTM) timeline.
+    cumulative_realized = 0.0
+    last_equity_by_strategy: dict[str, float] = {}
+    points: list[tuple[datetime | None, str, float, float]] = []
+
+    for dt, ts, strategy, change, strategy_equity in records:
+        cumulative_realized += change
+        if strategy_equity is not None:
+            last_equity_by_strategy[strategy] = strategy_equity
+        total_equity = (
+            sum(last_equity_by_strategy.values())
+            if last_equity_by_strategy
+            else cumulative_realized
+        )
+        points.append((dt, ts, cumulative_realized, total_equity))
+
+    # Collapse identical timestamps (keep latest values at that ts) to reduce clutter.
+    collapsed: list[tuple[datetime | None, str, float, float]] = []
+    for dt, ts, cumulative_realized, total_equity in points:
         key = ts.strip()
         if collapsed and collapsed[-1][1] == key:
-            collapsed[-1] = (dt, key, cumulative)
+            collapsed[-1] = (dt, key, cumulative_realized, total_equity)
         else:
-            collapsed.append((dt, key, cumulative))
+            collapsed.append((dt, key, cumulative_realized, total_equity))
 
     # Downsample very dense timelines for mobile readability.
     if len(collapsed) > MAX_REPLAY_CHART_POINTS:
@@ -204,7 +240,7 @@ def _collect_replay_timeline(payload: dict[str, Any], run_dir: Path) -> list[dic
         collapsed = [collapsed[i] for i in idxs]
 
     out: list[dict[str, Any]] = []
-    for idx, (_, ts, cumulative) in enumerate(collapsed, start=1):
+    for idx, (_, ts, cumulative_realized, total_equity) in enumerate(collapsed, start=1):
         short_label = ts
         dt = _parse_iso_maybe(ts)
         if dt is not None:
@@ -216,7 +252,8 @@ def _collect_replay_timeline(payload: dict[str, Any], run_dir: Path) -> list[dic
                 "label": short_label,
                 "full_label": ts or short_label,
                 "index": idx,
-                "cumulative_realized_pnl": cumulative,
+                "cumulative_realized_pnl": cumulative_realized,
+                "cumulative_total_equity": total_equity,
             }
         )
     return out
@@ -581,7 +618,11 @@ def _build_chart_data(
         "cumulative_pnl": {
             "labels": [row["label"] for row in replay_timeline],
             "full_labels": [row.get("full_label", row["label"]) for row in replay_timeline],
-            "values": [row["cumulative_realized_pnl"] for row in replay_timeline],
+            "realized_values": [row["cumulative_realized_pnl"] for row in replay_timeline],
+            "total_values": [
+                row.get("cumulative_total_equity", row["cumulative_realized_pnl"])
+                for row in replay_timeline
+            ],
         },
         "strategy_pnl": {
             "labels": [row.strategy for row in strategy_rows],
@@ -641,8 +682,15 @@ def _render_html(
         for r in strategy_rows
     )
 
+    realized_pnl = (
+        float(replay_timeline[-1].get("cumulative_realized_pnl", 0.0))
+        if replay_timeline
+        else 0.0
+    )
+
     summary_items = [
-        ("Total PnL", _fmt_num(total_pnl)),
+        ("Total PnL (MTM)", _fmt_num(total_pnl)),
+        ("Realized PnL", _fmt_num(realized_pnl)),
         ("Max Drawdown", _fmt_num(max_dd)),
         ("Executed Signals", str(int(payload.get("executed_signals", 0) or 0))),
         ("Rejected Signals", str(int(payload.get("rejected_signals", 0) or 0))),
@@ -786,7 +834,7 @@ def _render_html(
   <h2>Charts</h2>
   <div class='chart-grid'>
     <div class='chart-card'>
-      <div class='chart-title'>Cumulative Realized PnL (Replay Timeline)</div>
+      <div class='chart-title'>Cumulative PnL (Total MTM vs Realized)</div>
       <canvas id='chart-cumulative-pnl'></canvas>
     </div>
     <div class='chart-card'>
@@ -877,15 +925,27 @@ def _render_html(
       type: 'line',
       data: {{
         labels: REPORT_DATA.cumulative_pnl.labels,
-        datasets: [{{
-          label: 'Cumulative realized pnl',
-          data: REPORT_DATA.cumulative_pnl.values,
-          borderColor: '#2563eb',
-          backgroundColor: 'rgba(37,99,235,0.1)',
-          tension: 0.25,
-          fill: true,
-          pointRadius: 0,
-        }}],
+        datasets: [
+          {{
+            label: 'Total pnl (mtm)',
+            data: REPORT_DATA.cumulative_pnl.total_values,
+            borderColor: '#16a34a',
+            backgroundColor: 'rgba(22,163,74,0.10)',
+            tension: 0.25,
+            fill: true,
+            pointRadius: 0,
+          }},
+          {{
+            label: 'Realized pnl',
+            data: REPORT_DATA.cumulative_pnl.realized_values,
+            borderColor: '#2563eb',
+            backgroundColor: 'rgba(37,99,235,0.08)',
+            tension: 0.2,
+            fill: false,
+            pointRadius: 0,
+            borderDash: [6, 4],
+          }},
+        ],
       }},
       options: {{
         responsive: true,
