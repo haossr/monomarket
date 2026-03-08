@@ -2468,6 +2468,8 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "--no-auto-s10-grid-json" in content
     assert "--s10-grid-max-age-hours" in content
     assert "auto-detected s10-grid-json" in content
+    assert "same-nightly-date match" in content
+    assert "latest recent fallback" in content
     assert "no recent s10-grid-*/grid-results.json found" in content
     assert "--require-interpretable" in content
     assert "${CYCLE_WINDOW_ARGS[@]-}" in content

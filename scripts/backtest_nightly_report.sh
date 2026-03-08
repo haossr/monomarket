@@ -57,6 +57,7 @@ Options:
   --s10-grid-json <path>          Optional S10 grid-results.json for settle-mismatch sidecar metrics
   --no-auto-s10-grid-json         Disable auto-discovery of latest s10-grid-*/grid-results.json
   --s10-grid-max-age-hours <f>    Max age window for auto-discovered S10 grid json (default: 36)
+                                  Auto-discovery prefers same-nightly-date artifacts first.
   --require-interpretable         Fail if summary marks experiment_interpretable=false
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
@@ -346,7 +347,8 @@ if [[ "$NIGHTLY_SUMMARY_CHECKSUM" == "1" ]]; then
 fi
 
 if [[ -z "$S10_GRID_JSON" && "$AUTO_FIND_S10_GRID_JSON" == "1" ]]; then
-  AUTO_FOUND_S10_GRID_JSON="$($PYTHON_BIN - "$ROOT" "$S10_GRID_MAX_AGE_HOURS" <<'PY'
+  NIGHTLY_DATE_COMPACT="${NIGHTLY_DATE//-/}"
+  AUTO_FOUND_S10_GRID_INFO="$($PYTHON_BIN - "$ROOT" "$S10_GRID_MAX_AGE_HOURS" "$NIGHTLY_DATE_COMPACT" <<'PY'
 from __future__ import annotations
 
 import sys
@@ -355,10 +357,12 @@ from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
 max_age_hours = float(sys.argv[2])
+nightly_date_compact = sys.argv[3].strip()
 search_root = root / "artifacts" / "backtest"
 now = time.time()
 
-latest: tuple[float, Path] | None = None
+same_day: list[tuple[float, Path]] = []
+recent: list[tuple[float, Path]] = []
 for path in search_root.glob("s10-grid-*/grid-results.json"):
     if not path.is_file():
         continue
@@ -366,16 +370,27 @@ for path in search_root.glob("s10-grid-*/grid-results.json"):
     age_hours = (now - mtime) / 3600.0
     if max_age_hours >= 0.0 and age_hours > max_age_hours:
         continue
-    if latest is None or mtime > latest[0]:
-        latest = (mtime, path)
+    recent.append((mtime, path))
+    if nightly_date_compact and nightly_date_compact in path.parent.name:
+        same_day.append((mtime, path))
 
-if latest is not None:
-    print(str(latest[1]))
+selected_bucket = same_day if same_day else recent
+if selected_bucket:
+    selected = max(selected_bucket, key=lambda item: item[0])
+    mode = "same-nightly-date" if same_day else "latest-recent"
+    print(str(selected[1]))
+    print(mode)
 PY
 )"
+  AUTO_FOUND_S10_GRID_JSON="$(echo "$AUTO_FOUND_S10_GRID_INFO" | sed -n '1p')"
+  AUTO_FOUND_S10_GRID_MODE="$(echo "$AUTO_FOUND_S10_GRID_INFO" | sed -n '2p')"
   if [[ -n "$AUTO_FOUND_S10_GRID_JSON" ]]; then
     S10_GRID_JSON="$AUTO_FOUND_S10_GRID_JSON"
-    echo "[nightly] auto-detected s10-grid-json: $S10_GRID_JSON"
+    if [[ "$AUTO_FOUND_S10_GRID_MODE" == "same-nightly-date" ]]; then
+      echo "[nightly] auto-detected s10-grid-json: $S10_GRID_JSON (same-nightly-date match)"
+    else
+      echo "[nightly] auto-detected s10-grid-json: $S10_GRID_JSON (latest recent fallback)"
+    fi
   else
     echo "[nightly] no recent s10-grid-*/grid-results.json found within ${S10_GRID_MAX_AGE_HOURS}h"
   fi
