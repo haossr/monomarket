@@ -98,6 +98,8 @@ strategies:
     diagnostics_event_top_k: 20
   s10:
     prob_sum_tolerance: 0.02
+    convert_value: 1.0
+    conversion_fee_bps: 0.0
     max_abs_deviation: 0.20
     min_leg_liquidity: 80.0
     max_order_notional: 10.0

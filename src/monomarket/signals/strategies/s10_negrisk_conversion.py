@@ -102,10 +102,11 @@ class S10NegRiskConversionArb(Strategy):
     S10: NegRisk conversion/rebalance arbitrage.
 
     Event-level logic on negRisk events:
-      - buy conversion: buy YES basket when sum(yes) < 1 - tolerance
-      - sell conversion: sell YES basket when sum(yes) > 1 + tolerance (optional)
+      - buy conversion: buy YES basket when sum(yes) < convert_value - tolerance
+      - sell conversion: sell YES basket when sum(yes) > convert_value + tolerance (optional)
 
-    Effective edge uses depth/fee/slippage-aware per-leg costs.
+    Effective edge uses depth/fee/slippage-aware per-leg costs
+    with optional conversion_fee_bps.
     """
 
     name = "s10"
@@ -139,14 +140,24 @@ class S10NegRiskConversionArb(Strategy):
         return max(price_floor, px - slip)
 
     @staticmethod
-    def _gross_edge_from_sum_yes(*, direction: str, sum_yes: float) -> float:
+    def _gross_edge_from_sum_yes(*, direction: str, sum_yes: float, convert_value: float) -> float:
         if direction == "buy_conversion":
-            return 1.0 - sum_yes
-        return sum_yes - 1.0
+            return convert_value - sum_yes
+        return sum_yes - convert_value
 
     @classmethod
-    def _gross_edge_bps_from_sum_yes(cls, *, direction: str, sum_yes: float) -> float:
-        gross_edge = cls._gross_edge_from_sum_yes(direction=direction, sum_yes=sum_yes)
+    def _gross_edge_bps_from_sum_yes(
+        cls,
+        *,
+        direction: str,
+        sum_yes: float,
+        convert_value: float,
+    ) -> float:
+        gross_edge = cls._gross_edge_from_sum_yes(
+            direction=direction,
+            sum_yes=sum_yes,
+            convert_value=convert_value,
+        )
         return (gross_edge / max(sum_yes, 1e-9)) * 10000.0
 
     def generate(
@@ -157,6 +168,8 @@ class S10NegRiskConversionArb(Strategy):
         cfg = strategy_config or {}
 
         prob_sum_tolerance = max(0.0, float(cfg.get("prob_sum_tolerance", 0.02)))
+        convert_value = max(1e-6, float(cfg.get("convert_value", 1.0)))
+        conversion_fee_bps = max(0.0, float(cfg.get("conversion_fee_bps", 0.0)))
         max_abs_deviation = max(
             prob_sum_tolerance,
             float(cfg.get("max_abs_deviation", 0.20)),
@@ -214,6 +227,8 @@ class S10NegRiskConversionArb(Strategy):
                 "candidate_reject_reasons_by_event_top_k": diagnostics_event_top_k,
                 "candidate_reject_reasons_by_event_top": {},
                 "pricing_consistency": {
+                    "convert_value": convert_value,
+                    "conversion_fee_bps": conversion_fee_bps,
                     "price_floor": executable_price_floor,
                     "max_tiny_price_leg_share": max_tiny_price_leg_share,
                     "max_floor_adjusted_leg_share": max_floor_adjusted_leg_share,
@@ -303,6 +318,7 @@ class S10NegRiskConversionArb(Strategy):
                 max_leg_weight=max_leg_weight,
                 min_unique_canonicals=min_unique_canonicals,
                 raw_leg_count=len(event_rows),
+                convert_value=convert_value,
             )
             if buy_candidate is not None:
                 (
@@ -326,6 +342,8 @@ class S10NegRiskConversionArb(Strategy):
                     executable_price_floor=executable_price_floor,
                     max_tiny_price_leg_share=max_tiny_price_leg_share,
                     max_floor_adjusted_leg_share=max_floor_adjusted_leg_share,
+                    convert_value=convert_value,
+                    conversion_fee_bps=conversion_fee_bps,
                 )
                 if buy_pricing_diag is not None:
                     pricing_diag_count += 1
@@ -397,6 +415,7 @@ class S10NegRiskConversionArb(Strategy):
                     max_leg_weight=max_leg_weight,
                     min_unique_canonicals=min_unique_canonicals,
                     raw_leg_count=len(event_rows),
+                    convert_value=convert_value,
                 )
                 if sell_candidate is not None:
                     (
@@ -420,6 +439,8 @@ class S10NegRiskConversionArb(Strategy):
                         executable_price_floor=executable_price_floor,
                         max_tiny_price_leg_share=max_tiny_price_leg_share,
                         max_floor_adjusted_leg_share=max_floor_adjusted_leg_share,
+                        convert_value=convert_value,
+                        conversion_fee_bps=conversion_fee_bps,
                     )
                     if sell_pricing_diag is not None:
                         pricing_diag_count += 1
@@ -513,6 +534,8 @@ class S10NegRiskConversionArb(Strategy):
                 top_k=diagnostics_event_top_k,
             ),
             "pricing_consistency": {
+                "convert_value": convert_value,
+                "conversion_fee_bps": conversion_fee_bps,
                 "price_floor": executable_price_floor,
                 "max_tiny_price_leg_share": max_tiny_price_leg_share,
                 "max_floor_adjusted_leg_share": max_floor_adjusted_leg_share,
@@ -633,6 +656,7 @@ class S10NegRiskConversionArb(Strategy):
         max_leg_weight: float,
         min_unique_canonicals: int,
         raw_leg_count: int,
+        convert_value: float,
     ) -> tuple[_ConversionCandidate | None, str | None]:
         if len(rows) < min_unique_canonicals:
             return None, "under_min_unique_canonicals"
@@ -641,19 +665,19 @@ class S10NegRiskConversionArb(Strategy):
         if sum_yes <= 1e-9:
             return None, "non_positive_sum_yes"
 
-        deviation = sum_yes - 1.0
+        deviation = sum_yes - convert_value
         if abs(deviation) > max_abs_deviation:
             return None, "deviation_above_max_abs"
 
         if direction == "buy_conversion":
             if deviation >= -prob_sum_tolerance:
                 return None, "deviation_not_below_tolerance"
-            gross_edge = 1.0 - sum_yes
+            gross_edge = convert_value - sum_yes
             selection_mode = "min_yes_per_canonical"
         else:
             if deviation <= prob_sum_tolerance:
                 return None, "deviation_not_above_tolerance"
-            gross_edge = sum_yes - 1.0
+            gross_edge = sum_yes - convert_value
             selection_mode = "max_yes_per_canonical"
 
         if gross_edge <= 0:
@@ -713,6 +737,8 @@ class S10NegRiskConversionArb(Strategy):
         executable_price_floor: float,
         max_tiny_price_leg_share: float,
         max_floor_adjusted_leg_share: float,
+        convert_value: float,
+        conversion_fee_bps: float,
     ) -> tuple[list[Signal], str | None, _ConversionPricingDiagnostics | None]:
         rows = candidate.rows
         side = "buy" if candidate.direction == "buy_conversion" else "sell"
@@ -721,10 +747,12 @@ class S10NegRiskConversionArb(Strategy):
         pre_quote_gross_edge = self._gross_edge_from_sum_yes(
             direction=candidate.direction,
             sum_yes=pre_quote_sum_yes,
+            convert_value=convert_value,
         )
         pre_quote_gross_edge_bps = self._gross_edge_bps_from_sum_yes(
             direction=candidate.direction,
             sum_yes=pre_quote_sum_yes,
+            convert_value=convert_value,
         )
 
         target_prices: dict[str, float] = {}
@@ -760,19 +788,23 @@ class S10NegRiskConversionArb(Strategy):
         post_quote_gross_edge = self._gross_edge_from_sum_yes(
             direction=candidate.direction,
             sum_yes=post_quote_sum_yes,
+            convert_value=convert_value,
         )
         post_slippage_gross_edge = self._gross_edge_from_sum_yes(
             direction=candidate.direction,
             sum_yes=post_slippage_sum_yes,
+            convert_value=convert_value,
         )
 
         post_quote_gross_edge_bps = self._gross_edge_bps_from_sum_yes(
             direction=candidate.direction,
             sum_yes=post_quote_sum_yes,
+            convert_value=convert_value,
         )
         post_slippage_gross_edge_bps = self._gross_edge_bps_from_sum_yes(
             direction=candidate.direction,
             sum_yes=post_slippage_sum_yes,
+            convert_value=convert_value,
         )
 
         weighted_cost_numerator = 0.0
@@ -801,6 +833,10 @@ class S10NegRiskConversionArb(Strategy):
         weighted_non_slippage_cost_bps = weighted_non_slippage_cost_numerator / max(
             post_quote_sum_yes, 1e-9
         )
+
+        conversion_cost_bps = max(0.0, conversion_fee_bps)
+        weighted_total_cost_bps += conversion_cost_bps
+        weighted_non_slippage_cost_bps += conversion_cost_bps
 
         post_quote_effective_edge_bps = post_quote_gross_edge_bps - weighted_total_cost_bps
         post_slippage_effective_edge_bps = (
@@ -869,13 +905,13 @@ class S10NegRiskConversionArb(Strategy):
 
         if side == "buy":
             rationale = (
-                f"NegRisk转换套利({candidate.direction}): post_quote_sum_yes={post_quote_sum_yes:.4f}<1, "
+                f"NegRisk转换套利({candidate.direction}): post_quote_sum_yes={post_quote_sum_yes:.4f}<convert={convert_value:.4f}, "
                 f"gross_exec={post_slippage_gross_edge_bps:.1f}bps, "
                 f"eff_exec={effective_edge_bps:.1f}bps"
             )
         else:
             rationale = (
-                f"NegRisk转换套利({candidate.direction}): post_quote_sum_yes={post_quote_sum_yes:.4f}>1, "
+                f"NegRisk转换套利({candidate.direction}): post_quote_sum_yes={post_quote_sum_yes:.4f}>convert={convert_value:.4f}, "
                 f"gross_exec={post_slippage_gross_edge_bps:.1f}bps, "
                 f"eff_exec={effective_edge_bps:.1f}bps"
             )
@@ -910,6 +946,7 @@ class S10NegRiskConversionArb(Strategy):
                 "selection_mode": candidate.selection_mode,
                 "sum_yes": post_quote_sum_yes,
                 "deviation": candidate.deviation,
+                "convert_value": convert_value,
                 "gross_edge": post_quote_gross_edge,
                 "gross_edge_bps": post_quote_gross_edge_bps,
                 "effective_edge_bps": effective_edge_bps,
@@ -931,7 +968,6 @@ class S10NegRiskConversionArb(Strategy):
                 "estimated_fill_price": estimated_fill_prices.get(row.market_id, target),
                 "basket_qty": qty,
                 "basket_notional": basket_notional,
-                "convert_value": 1.0,
                 "raw_leg_count": candidate.raw_leg_count,
                 "unique_canonical_count": total_legs,
                 "max_leg_weight": candidate.max_leg_weight,
@@ -945,6 +981,7 @@ class S10NegRiskConversionArb(Strategy):
                     "depth_penalty_max_bps_per_leg": depth_penalty_max_bps,
                     "weighted_total_cost_bps": weighted_total_cost_bps,
                     "weighted_non_slippage_cost_bps": weighted_non_slippage_cost_bps,
+                    "conversion_fee_bps": conversion_cost_bps,
                     "max_weighted_total_cost_bps": max_weighted_total_cost_bps,
                     "leg_total_cost_bps": leg_cost_bps.get(row.market_id, 0.0),
                     "max_leg_total_cost_bps": max_leg_total_cost_bps,
