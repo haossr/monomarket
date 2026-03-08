@@ -38,6 +38,7 @@ def test_slice_default_includes_recent14d() -> None:
     specs = module.parse_slice_specs(str(args.slices))
     assert [s.label for s in specs] == ["recent24h", "recent7d", "recent14d"]
     assert [s.hours for s in specs] == [24.0, 168.0, 336.0]
+    assert bool(args.skip_ingest_rebuild) is False
 
 
 def test_prepare_isolated_config_copies_db_and_rewrites_config(tmp_path: Path) -> None:
@@ -79,6 +80,7 @@ def test_build_backtest_cycle_cmd_includes_rebuild_flags(tmp_path: Path) -> None
         rebuild_step_hours=6.0,
         rebuild_market_limit=120,
         rebuild_ingest_limit=40,
+        skip_ingest=True,
     )
 
     cmd_str = " ".join(str(x) for x in cmd)
@@ -88,6 +90,7 @@ def test_build_backtest_cycle_cmd_includes_rebuild_flags(tmp_path: Path) -> None
     assert "--rebuild-step-hours" in cmd
     assert "--ingest-limit" in cmd
     assert "--market-limit" in cmd
+    assert "--skip-ingest" in cmd
 
 
 def test_summarize_strategy_normalizes_reject_reason_prefix() -> None:

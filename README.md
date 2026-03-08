@@ -232,12 +232,13 @@ python scripts/sx12_dual_slice_compare.py \
   --strategies s9,s10 \
   --slices recent24h:24,recent7d:168,recent14d:336 \
   --rebuild-signals-window \
+  --skip-ingest-rebuild \
   --rebuild-step-hours 6 \
   --rebuild-market-limit 600 \
   --rebuild-ingest-limit 120
 ```
 
-该模式内部调用 `scripts/backtest_cycle.sh --clear-signals-window --rebuild-signals-window`，并为每次 baseline/candidate 运行复制独立 DB。
+该模式内部调用 `scripts/backtest_cycle.sh --clear-signals-window --rebuild-signals-window`，并为每次 baseline/candidate 运行复制独立 DB；加上 `--skip-ingest-rebuild` 可避免 baseline/candidate 因实时 ingest 漂移产生对照噪声。
 
 S10 参数小网格（自动生成 candidate config + 多切片 compare 排名）：
 
@@ -254,6 +255,7 @@ python scripts/s10_param_grid_compare.py \
   --max-tiny-price-leg-share-grid 0.20,0.25 \
   --max-floor-adjusted-leg-share-grid 0.25,0.35 \
   --rebuild-signals-window \
+  --skip-ingest-rebuild \
   --rebuild-step-hours 24 \
   --rebuild-market-limit 600 \
   --rebuild-ingest-limit 300

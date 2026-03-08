@@ -131,8 +131,9 @@ def _build_backtest_cycle_cmd(
     rebuild_step_hours: float,
     rebuild_market_limit: int,
     rebuild_ingest_limit: int,
+    skip_ingest: bool,
 ) -> list[str]:
-    return [
+    cmd = [
         "bash",
         "scripts/backtest_cycle.sh",
         "--from-ts",
@@ -152,6 +153,9 @@ def _build_backtest_cycle_cmd(
         "--rebuild-step-hours",
         str(rebuild_step_hours),
     ]
+    if skip_ingest:
+        cmd.append("--skip-ingest")
+    return cmd
 
 
 def summarize_strategy(
@@ -246,6 +250,7 @@ def _run_backtest(
     rebuild_step_hours: float,
     rebuild_market_limit: int,
     rebuild_ingest_limit: int,
+    skip_ingest_rebuild: bool,
     isolated_run_dir: Path | None,
 ) -> dict[str, Any]:
     env = os.environ.copy()
@@ -270,6 +275,7 @@ def _run_backtest(
             rebuild_step_hours=rebuild_step_hours,
             rebuild_market_limit=rebuild_market_limit,
             rebuild_ingest_limit=rebuild_ingest_limit,
+            skip_ingest=skip_ingest_rebuild,
         )
         proc = subprocess.run(
             cmd,
@@ -346,6 +352,10 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- candidate_config: {result.get('candidate_config')}",
         f"- strategies: {','.join(result.get('strategies', []))}",
         f"- rebuild_signals_window: {bool(result.get('rebuild_signals_window', False))}",
+        f"- rebuild_step_hours: {result.get('rebuild_step_hours')}",
+        f"- rebuild_market_limit: {result.get('rebuild_market_limit')}",
+        f"- rebuild_ingest_limit: {result.get('rebuild_ingest_limit')}",
+        f"- skip_ingest_rebuild: {bool(result.get('skip_ingest_rebuild', False))}",
         "",
     ]
 
@@ -457,6 +467,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=300,
         help="Ingest limit passed to backtest_cycle in rebuild mode (default: 300)",
     )
+    parser.add_argument(
+        "--skip-ingest-rebuild",
+        action="store_true",
+        help=(
+            "When rebuild-signals-window is enabled, pass --skip-ingest to backtest_cycle "
+            "for deterministic baseline/candidate comparisons on the same DB snapshot."
+        ),
+    )
     return parser
 
 
@@ -499,6 +517,7 @@ def main() -> int:
         "rebuild_step_hours": float(args.rebuild_step_hours),
         "rebuild_market_limit": int(args.rebuild_market_limit),
         "rebuild_ingest_limit": int(args.rebuild_ingest_limit),
+        "skip_ingest_rebuild": bool(args.skip_ingest_rebuild),
         "slices": [],
     }
 
@@ -530,6 +549,7 @@ def main() -> int:
             rebuild_step_hours=float(args.rebuild_step_hours),
             rebuild_market_limit=int(args.rebuild_market_limit),
             rebuild_ingest_limit=int(args.rebuild_ingest_limit),
+            skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
             isolated_run_dir=baseline_isolated_dir,
         )
         candidate_report = _run_backtest(
@@ -542,6 +562,7 @@ def main() -> int:
             rebuild_step_hours=float(args.rebuild_step_hours),
             rebuild_market_limit=int(args.rebuild_market_limit),
             rebuild_ingest_limit=int(args.rebuild_ingest_limit),
+            skip_ingest_rebuild=bool(args.skip_ingest_rebuild),
             isolated_run_dir=candidate_isolated_dir,
         )
 
