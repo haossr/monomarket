@@ -141,6 +141,9 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "Guard snapshot source",
         "s9_cross_market_require_same_source:",
         "s10_require_same_source:",
+        "S10 same-source rollup source",
+        "s10_grid_same_source_false:",
+        "s10_grid_same_source_true:",
         "top_reject_reason_source=",
         "generation_rejected_candidates=",
         "generation_top_reject_reason=",
@@ -159,8 +162,10 @@ def test_pdf_report_includes_main_window_coverage_section_tokens() -> None:
         "def _load_payload_results_rows",
         "winrate_source_rows = _load_payload_results_rows(payload) or strategy_rows",
         "def _extract_sx12_guard_snapshot",
+        "def _extract_s10_same_source_rollup",
         "def _format_guard_bool",
         "--sx12-compare-json",
+        "--s10-grid-json",
         "def _build_strategy_focus_metrics",
         "def _build_strategy_focus_activity_hints",
         "def _extract_rolling_summary",
@@ -256,6 +261,50 @@ def test_pdf_extract_sx12_guard_snapshot() -> None:
         "baseline": False,
         "candidate": True,
     }
+
+
+def test_pdf_extract_s10_same_source_rollup() -> None:
+    module = _load_pdf_report_module()
+
+    default_rollup = module._extract_s10_same_source_rollup(None)
+    assert bool(default_rollup["available"]) is False
+    assert default_rollup["source"] == ""
+    assert int(default_rollup["same_source_false"]["candidate_count"]) == 0
+    assert int(default_rollup["same_source_true"]["candidate_count"]) == 0
+
+    rollup = module._extract_s10_same_source_rollup(
+        {
+            "_source": "/tmp/s10-grid-results.json",
+            "same_source_rollup": [
+                {
+                    "require_same_source": False,
+                    "candidate_count": 2,
+                    "pass_count": 1,
+                    "pass_rate": 0.2,
+                    "avg_total_delta_pnl": 0.15,
+                },
+                {
+                    "require_same_source": True,
+                    "candidate_count": 1,
+                    "pass_count": 1,
+                    "pass_rate": 0.0,
+                    "avg_total_delta_pnl": -0.05,
+                },
+            ],
+        }
+    )
+
+    assert bool(rollup["available"]) is True
+    assert rollup["source"] == "/tmp/s10-grid-results.json"
+    assert int(rollup["same_source_false"]["candidate_count"]) == 2
+    assert int(rollup["same_source_false"]["pass_count"]) == 1
+    assert abs(float(rollup["same_source_false"]["pass_rate"]) - 0.5) < 1e-12
+    assert abs(float(rollup["same_source_false"]["avg_total_delta_pnl"]) - 0.15) < 1e-12
+
+    assert int(rollup["same_source_true"]["candidate_count"]) == 1
+    assert int(rollup["same_source_true"]["pass_count"]) == 1
+    assert abs(float(rollup["same_source_true"]["pass_rate"]) - 1.0) < 1e-12
+    assert abs(float(rollup["same_source_true"]["avg_total_delta_pnl"]) - (-0.05)) < 1e-12
 
 
 def test_pdf_strategy_focus_activity_hints_from_payload() -> None:
