@@ -70,6 +70,22 @@ def test_s10_grid_default_slices_include_recent14d() -> None:
     assert int(args.rebuild_market_limit) == 2000
     assert int(args.rebuild_ingest_limit) == 300
     assert bool(args.skip_ingest_rebuild) is False
+    assert bool(args.enforce_settle_profile_match) is True
+
+
+def test_s10_grid_parser_allows_settle_profile_mismatch_override() -> None:
+    module = _load_module()
+
+    parser = module._build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--baseline-config",
+            "base.yaml",
+            "--allow-settle-profile-mismatch",
+        ]
+    )
+
+    assert bool(args.enforce_settle_profile_match) is False
 
 
 def test_build_dual_slice_compare_cmd_includes_rebuild_flags() -> None:
@@ -166,6 +182,40 @@ def test_candidate_sort_key_prefers_constraint_pass_then_slice_stability() -> No
 
     ranked = sorted(rows, key=module.candidate_sort_key)
     assert [row["candidate_id"] for row in ranked] == ["cand-a", "cand-b", "cand-c"]
+
+
+def test_apply_constraint_flags_respects_settle_profile_guard() -> None:
+    module = _load_module()
+
+    strict_entry = {
+        "min_slice_delta_pnl": 0.1,
+        "max_slice_delta_max_drawdown": -0.05,
+        "settle_mismatch_slice_count": 1,
+    }
+    module.apply_constraint_flags(
+        strict_entry,
+        min_slice_delta_pnl_threshold=0.0,
+        max_slice_delta_max_drawdown_threshold=0.0,
+        enforce_settle_profile_match=True,
+    )
+    assert bool(strict_entry["passes_min_slice_delta_pnl"]) is True
+    assert bool(strict_entry["passes_max_slice_delta_max_drawdown"]) is True
+    assert bool(strict_entry["passes_settle_profile_match"]) is False
+    assert bool(strict_entry["passes_constraints"]) is False
+
+    relaxed_entry = {
+        "min_slice_delta_pnl": 0.1,
+        "max_slice_delta_max_drawdown": -0.05,
+        "settle_mismatch_slice_count": 1,
+    }
+    module.apply_constraint_flags(
+        relaxed_entry,
+        min_slice_delta_pnl_threshold=0.0,
+        max_slice_delta_max_drawdown_threshold=0.0,
+        enforce_settle_profile_match=False,
+    )
+    assert bool(relaxed_entry["passes_settle_profile_match"]) is True
+    assert bool(relaxed_entry["passes_constraints"]) is True
 
 
 def test_summarize_compare_payload_and_markdown() -> None:
@@ -281,10 +331,10 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert "# S10 Parameter Grid Compare" in markdown
     assert "| rank | candidate | prob_tol |" in markdown
     assert (
-        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | base_settle | cand_settle | settle_mismatch | min(Δpnl) | max(ΔmaxDD) |"
+        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | base_settle | cand_settle | settle_mismatch | pass_settle? | min(Δpnl) | max(ΔmaxDD) |"
         in markdown
     )
     assert (
-        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | unknown | unknown | +0 | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
+        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | unknown | unknown | +0 | yes | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
         in markdown
     )

@@ -181,7 +181,9 @@ def summarize_compare_payload(
         candidate = candidate_raw if isinstance(candidate_raw, dict) else {}
         baseline_settle_window_end = bool(baseline.get("settle_window_end", False))
         candidate_settle_window_end = bool(candidate.get("settle_window_end", False))
-        baseline_settle_window_end_source = str(baseline.get("settle_window_end_source") or "unknown")
+        baseline_settle_window_end_source = str(
+            baseline.get("settle_window_end_source") or "unknown"
+        )
         candidate_settle_window_end_source = str(
             candidate.get("settle_window_end_source") or "unknown"
         )
@@ -296,6 +298,28 @@ def candidate_sort_key(item: dict[str, Any]) -> tuple[float | int | str, ...]:
     )
 
 
+def apply_constraint_flags(
+    entry: dict[str, Any],
+    *,
+    min_slice_delta_pnl_threshold: float,
+    max_slice_delta_max_drawdown_threshold: float,
+    enforce_settle_profile_match: bool,
+) -> None:
+    passes_min = _safe_float(entry.get("min_slice_delta_pnl")) >= float(
+        min_slice_delta_pnl_threshold
+    )
+    passes_max = _safe_float(entry.get("max_slice_delta_max_drawdown")) <= float(
+        max_slice_delta_max_drawdown_threshold
+    )
+    settle_mismatch_count = _safe_int(entry.get("settle_mismatch_slice_count"))
+    passes_settle_match = (not enforce_settle_profile_match) or settle_mismatch_count <= 0
+
+    entry["passes_min_slice_delta_pnl"] = passes_min
+    entry["passes_max_slice_delta_max_drawdown"] = passes_max
+    entry["passes_settle_profile_match"] = passes_settle_match
+    entry["passes_constraints"] = bool(passes_min and passes_max and passes_settle_match)
+
+
 def render_markdown(result: dict[str, Any]) -> str:
     lines: list[str] = [
         "# S10 Parameter Grid Compare",
@@ -307,6 +331,7 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- objective_strategy: {result.get('objective_strategy')}",
         f"- min_slice_delta_pnl_threshold: {result.get('min_slice_delta_pnl_threshold')}",
         f"- max_slice_delta_max_drawdown_threshold: {result.get('max_slice_delta_max_drawdown_threshold')}",
+        f"- enforce_settle_profile_match: {bool(result.get('enforce_settle_profile_match', True))}",
         f"- rebuild_signals_window: {bool(result.get('rebuild_signals_window', False))}",
         f"- rebuild_step_hours: {result.get('rebuild_step_hours')}",
         f"- rebuild_market_limit: {result.get('rebuild_market_limit')}",
@@ -315,10 +340,10 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- total_candidates: {result.get('total_candidates')}",
         "",
         "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | "
-        "base_settle | cand_settle | settle_mismatch | "
+        "base_settle | cand_settle | settle_mismatch | pass_settle? | "
         "min(Δpnl) | max(ΔmaxDD) | ΣΔpnl | ΣΔexec | ΣΔrej | ΣΔgen_pass | ΣΔgen_reject | "
         "ΣΔgen_top_event_count | event_shift_slices | ΣΔmaxDD | ΣΔmtm_wr | pass? |",
-        "|---:|---|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "|---:|---|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
 
     for item in result.get("candidates", []):
@@ -337,6 +362,7 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{str(item.get('baseline_settle_window_end_profile', 'unknown'))} | "
             f"{str(item.get('candidate_settle_window_end_profile', 'unknown'))} | "
             f"{_safe_int(item.get('settle_mismatch_slice_count')):+d} | "
+            f"{'yes' if bool(item.get('passes_settle_profile_match', True)) else 'no'} | "
             f"{_safe_float(item.get('min_slice_delta_pnl')):+.4f} | "
             f"{_safe_float(item.get('max_slice_delta_max_drawdown')):+.4f} | "
             f"{_safe_float(item.get('total_delta_pnl')):+.4f} | "
@@ -504,6 +530,26 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Maximum per-slice Δmax_drawdown allowed for pass (default keeps all candidates). "
             "Use 0 to disallow any per-slice drawdown worsening."
+        ),
+    )
+    settle_guard = parser.add_mutually_exclusive_group()
+    settle_guard.add_argument(
+        "--enforce-settle-profile-match",
+        dest="enforce_settle_profile_match",
+        action="store_true",
+        default=True,
+        help=(
+            "Require baseline/candidate settle profile consistency across slices "
+            "(default: enabled)."
+        ),
+    )
+    settle_guard.add_argument(
+        "--allow-settle-profile-mismatch",
+        dest="enforce_settle_profile_match",
+        action="store_false",
+        help=(
+            "Allow settle profile mismatch and keep candidate in pass path "
+            "(still recorded as settle_mismatch_slice_count)."
         ),
     )
 
@@ -679,14 +725,11 @@ def main() -> int:
             "compare_json": str(compare_out_dir / "compare.json"),
             **summary,
         }
-        entry["passes_min_slice_delta_pnl"] = _safe_float(
-            entry.get("min_slice_delta_pnl")
-        ) >= float(args.min_slice_delta_pnl)
-        entry["passes_max_slice_delta_max_drawdown"] = _safe_float(
-            entry.get("max_slice_delta_max_drawdown")
-        ) <= float(args.max_slice_delta_max_drawdown)
-        entry["passes_constraints"] = bool(entry.get("passes_min_slice_delta_pnl")) and bool(
-            entry.get("passes_max_slice_delta_max_drawdown")
+        apply_constraint_flags(
+            entry,
+            min_slice_delta_pnl_threshold=float(args.min_slice_delta_pnl),
+            max_slice_delta_max_drawdown_threshold=float(args.max_slice_delta_max_drawdown),
+            enforce_settle_profile_match=bool(args.enforce_settle_profile_match),
         )
         entries.append(entry)
 
@@ -703,6 +746,7 @@ def main() -> int:
             f" event_shift_slices={_safe_int(entry.get('generation_top_reject_event_shift_slices')):+d}"
             f" settle(base/cand)={entry.get('baseline_settle_window_end_profile')}/{entry.get('candidate_settle_window_end_profile')}"
             f" settle_mismatch={_safe_int(entry.get('settle_mismatch_slice_count')):+d}"
+            f" pass_settle={bool(entry.get('passes_settle_profile_match'))}"
             f" ΣΔmaxDD={_safe_float(entry.get('total_delta_max_drawdown')):+.4f}"
             f" pass={bool(entry.get('passes_constraints'))}"
             f" overrides={overrides}"
@@ -722,6 +766,7 @@ def main() -> int:
         "slices": str(args.slices),
         "min_slice_delta_pnl_threshold": float(args.min_slice_delta_pnl),
         "max_slice_delta_max_drawdown_threshold": float(args.max_slice_delta_max_drawdown),
+        "enforce_settle_profile_match": bool(args.enforce_settle_profile_match),
         "rebuild_signals_window": bool(args.rebuild_signals_window),
         "rebuild_step_hours": float(args.rebuild_step_hours),
         "rebuild_market_limit": int(args.rebuild_market_limit),
@@ -753,6 +798,7 @@ def main() -> int:
             f"ΣΔgen_reject={_safe_int(top.get('total_delta_generation_rejected_candidates')):+d} "
             f"ΣΔgen_top_event_count={_safe_int(top.get('total_delta_generation_top_reject_event_count')):+d} "
             f"event_shift_slices={_safe_int(top.get('generation_top_reject_event_shift_slices')):+d} "
+            f"pass_settle={bool(top.get('passes_settle_profile_match'))} "
             f"ΣΔmaxDD={_safe_float(top.get('total_delta_max_drawdown')):+.4f} "
             f"pass={bool(top.get('passes_constraints'))}"
         )
