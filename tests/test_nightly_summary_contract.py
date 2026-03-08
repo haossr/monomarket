@@ -86,6 +86,10 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "s10_grid_candidates=",
         "s10_grid_settle_mismatch_rate=",
         "s10_grid_top_settle_mismatch_rate=",
+        "s10_grid_same_source_false_candidates=",
+        "s10_grid_same_source_false_pass_rate=",
+        "s10_grid_same_source_true_candidates=",
+        "s10_grid_same_source_true_pass_rate=",
         "negative_strategies=",
         "worst_negative_strategy=",
         "worst_negative_pnl=",
@@ -741,6 +745,26 @@ def test_nightly_summary_surfaces_s10_grid_mismatch_metrics(tmp_path: Path) -> N
     rolling_json.write_text(json.dumps(rolling_payload))
 
     s10_grid_payload = {
+        "same_source_rollup": [
+            {
+                "require_same_source": False,
+                "candidate_count": 1,
+                "pass_count": 1,
+                "pass_rate": 1.0,
+                "avg_total_delta_pnl": 0.15,
+                "best_candidate_id": "cand-001",
+                "best_pass_candidate_id": "cand-001",
+            },
+            {
+                "require_same_source": True,
+                "candidate_count": 1,
+                "pass_count": 0,
+                "pass_rate": 0.0,
+                "avg_total_delta_pnl": -0.05,
+                "best_candidate_id": "cand-002",
+                "best_pass_candidate_id": "",
+            },
+        ],
         "candidates": [
             {
                 "candidate_id": "cand-001",
@@ -760,7 +784,7 @@ def test_nightly_summary_surfaces_s10_grid_mismatch_metrics(tmp_path: Path) -> N
                 "passes_settle_profile_match": False,
                 "passes_constraints": False,
             },
-        ]
+        ],
     }
     s10_grid_json.write_text(json.dumps(s10_grid_payload))
 
@@ -798,6 +822,10 @@ def test_nightly_summary_surfaces_s10_grid_mismatch_metrics(tmp_path: Path) -> N
     assert "s10_grid_settle_mismatch_rate=50.00%" in line
     assert "s10_grid_top_candidate=cand-001" in line
     assert "s10_grid_top_settle_mismatch_rate=0.00%" in line
+    assert "s10_grid_same_source_false_candidates=1" in line
+    assert "s10_grid_same_source_false_pass_rate=100.00%" in line
+    assert "s10_grid_same_source_true_candidates=1" in line
+    assert "s10_grid_same_source_true_pass_rate=0.00%" in line
 
     sidecar = json.loads(summary_json.read_text())
     validate_nightly_summary_sidecar(sidecar)
@@ -817,6 +845,23 @@ def test_nightly_summary_surfaces_s10_grid_mismatch_metrics(tmp_path: Path) -> N
     assert bool(s10_grid["best_passes_settle_profile_match"]) is True
     assert bool(s10_grid["best_passes_constraints"]) is True
     assert str(s10_grid["source"]).endswith("s10-grid-results.json")
+
+    same_source_rollup = s10_grid["same_source_rollup"]
+    assert isinstance(same_source_rollup, list)
+    assert len(same_source_rollup) == 2
+    assert same_source_rollup[0]["require_same_source"] is False
+    assert int(same_source_rollup[0]["candidate_count"]) == 1
+    assert int(same_source_rollup[0]["pass_count"]) == 1
+    assert abs(float(same_source_rollup[0]["pass_rate"]) - 1.0) < 1e-12
+    assert abs(float(same_source_rollup[0]["avg_total_delta_pnl"]) - 0.15) < 1e-12
+    assert same_source_rollup[0]["best_candidate_id"] == "cand-001"
+
+    assert same_source_rollup[1]["require_same_source"] is True
+    assert int(same_source_rollup[1]["candidate_count"]) == 1
+    assert int(same_source_rollup[1]["pass_count"]) == 0
+    assert abs(float(same_source_rollup[1]["pass_rate"])) < 1e-12
+    assert abs(float(same_source_rollup[1]["avg_total_delta_pnl"]) - (-0.05)) < 1e-12
+    assert same_source_rollup[1]["best_candidate_id"] == "cand-002"
 
 
 def test_nightly_summary_surfaces_strategy_focus_config_context_from_sx12_compare(
