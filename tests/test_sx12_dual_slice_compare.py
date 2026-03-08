@@ -42,6 +42,7 @@ def test_slice_default_includes_recent14d() -> None:
     assert bool(args.baseline_no_settle_window_end) is False
     assert bool(args.candidate_no_settle_window_end) is False
     assert bool(args.strategy_config_diff_only) is False
+    assert str(args.config_context_strategies) == ""
 
 
 def test_slice_parser_accepts_settle_override_flags() -> None:
@@ -78,6 +79,24 @@ def test_slice_parser_accepts_strategy_config_diff_only_flag() -> None:
     )
 
     assert bool(args.strategy_config_diff_only) is True
+
+
+def test_slice_parser_accepts_config_context_strategies() -> None:
+    module = _load_module()
+
+    parser = module._build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--baseline-config",
+            "base.yaml",
+            "--candidate-config",
+            "cand.yaml",
+            "--config-context-strategies",
+            "s10",
+        ]
+    )
+
+    assert str(args.config_context_strategies) == "s10"
 
 
 def test_prepare_isolated_config_copies_db_and_rewrites_config(tmp_path: Path) -> None:
@@ -454,3 +473,41 @@ def test_render_markdown_strategy_config_diff_only_filters_unchanged_keys() -> N
     assert "require_same_market" not in rendered
     assert "- s10 baseline:" not in rendered
     assert "- no strategy config diffs" not in rendered
+
+
+def test_render_markdown_strategy_config_context_can_focus_subset() -> None:
+    module = _load_module()
+
+    rendered = module.render_markdown(
+        {
+            "generated_at": "2026-03-08T07:00:00Z",
+            "anchor_ts": "2026-03-08T06:59:59Z",
+            "baseline_config": "/tmp/base.yaml",
+            "candidate_config": "/tmp/candidate.yaml",
+            "strategies": ["s9", "s10"],
+            "config_context_strategies": ["s10"],
+            "strategy_config_diff_only": False,
+            "baseline_strategy_config": {
+                "s9": {
+                    "min_effective_edge_bps": 20.0,
+                },
+                "s10": {
+                    "convert_value": 1.0,
+                },
+            },
+            "candidate_strategy_config": {
+                "s9": {
+                    "min_effective_edge_bps": 35.0,
+                },
+                "s10": {
+                    "convert_value": 1.01,
+                },
+            },
+            "slices": [],
+        }
+    )
+
+    assert "- config_context_strategies: s10" in rendered
+    assert "- s10 baseline: convert_value=1" in rendered
+    assert "- s10 candidate: convert_value=1.01" in rendered
+    assert "- s9 baseline:" not in rendered

@@ -111,6 +111,18 @@ def parse_slice_specs(raw: str) -> list[SliceSpec]:
     return specs
 
 
+def parse_strategy_list(raw: str) -> list[str]:
+    strategies = [s.strip().lower() for s in str(raw).split(",") if s.strip()]
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for strategy in strategies:
+        if strategy in seen:
+            continue
+        seen.add(strategy)
+        deduped.append(strategy)
+    return deduped
+
+
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     raw = yaml.safe_load(path.read_text())
     return raw if isinstance(raw, dict) else {}
@@ -626,6 +638,7 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- baseline_config: {result.get('baseline_config')}",
         f"- candidate_config: {result.get('candidate_config')}",
         f"- strategies: {','.join(result.get('strategies', []))}",
+        f"- config_context_strategies: {','.join(result.get('config_context_strategies', result.get('strategies', [])))}",
         f"- rebuild_signals_window: {bool(result.get('rebuild_signals_window', False))}",
         f"- rebuild_step_hours: {result.get('rebuild_step_hours')}",
         f"- rebuild_market_limit: {result.get('rebuild_market_limit')}",
@@ -649,7 +662,8 @@ def render_markdown(result: dict[str, Any]) -> str:
     if baseline_strategy_config or candidate_strategy_config:
         lines.append("## Strategy config context")
         rendered_strategy_rows = 0
-        for strategy_raw in result.get("strategies", []):
+        context_strategies = result.get("config_context_strategies", result.get("strategies", []))
+        for strategy_raw in context_strategies:
             strategy = str(strategy_raw).strip().lower()
             base_payload = baseline_strategy_config.get(strategy)
             base = base_payload if isinstance(base_payload, dict) else {}
@@ -754,6 +768,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Comma-separated strategy ids (default: s9,s10)",
     )
     parser.add_argument(
+        "--config-context-strategies",
+        default="",
+        help=(
+            "Optional comma-separated strategy ids used only for strategy config context "
+            "extraction/rendering (default: same as --strategies)."
+        ),
+    )
+    parser.add_argument(
         "--slices",
         default="recent24h:24,recent7d:168,recent14d:336",
         help=("Slice specs label:hours,... " "(default: recent24h:24,recent7d:168,recent14d:336)"),
@@ -842,9 +864,27 @@ def main() -> int:
     if not candidate_config.exists():
         raise FileNotFoundError(f"candidate config not found: {candidate_config}")
 
-    strategies = [s.strip().lower() for s in str(args.strategies).split(",") if s.strip()]
+    strategies = parse_strategy_list(str(args.strategies))
     if not strategies:
         raise ValueError("no strategies selected")
+
+    config_context_raw = str(args.config_context_strategies or "").strip()
+    config_context_strategies = (
+        parse_strategy_list(config_context_raw) if config_context_raw else list(strategies)
+    )
+    if not config_context_strategies:
+        raise ValueError("no config_context_strategies selected")
+
+    unknown_context_strategies = [
+        strategy
+        for strategy in config_context_strategies
+        if strategy not in STRATEGY_CONFIG_KEYS
+    ]
+    if unknown_context_strategies:
+        raise ValueError(
+            "unsupported config_context_strategies: "
+            + ",".join(unknown_context_strategies)
+        )
 
     specs = parse_slice_specs(str(args.slices))
     anchor = _parse_iso_utc(args.anchor_ts) if args.anchor_ts else datetime.now(UTC)
@@ -869,13 +909,14 @@ def main() -> int:
         "candidate_config": str(candidate_config),
         "baseline_strategy_config": _extract_strategy_config_context(
             config_payload=baseline_config_payload,
-            strategies=strategies,
+            strategies=config_context_strategies,
         ),
         "candidate_strategy_config": _extract_strategy_config_context(
             config_payload=candidate_config_payload,
-            strategies=strategies,
+            strategies=config_context_strategies,
         ),
         "strategies": strategies,
+        "config_context_strategies": config_context_strategies,
         "normalize_reject_reasons": normalize_reject_reasons,
         "rebuild_signals_window": bool(args.rebuild_signals_window),
         "rebuild_step_hours": float(args.rebuild_step_hours),
