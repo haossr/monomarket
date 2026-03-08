@@ -18,6 +18,125 @@ INTERPRETABLE_MIN_EXECUTED_SIGNALS = 10
 FOCUS_STRATEGIES = ("s9", "s10")
 
 
+def _format_slice_labels(raw: object) -> str:
+    if not isinstance(raw, list):
+        return "none"
+    labels = [str(item).strip() for item in raw if str(item).strip()]
+    return ",".join(labels) if labels else "none"
+
+
+def _s10_grid_compare_focus(payload: dict[str, Any] | None) -> dict[str, Any]:
+    default = {
+        "available": False,
+        "candidate_count": 0,
+        "settle_mismatch_candidate_count": 0,
+        "settle_mismatch_candidate_rate": 0.0,
+        "settle_profile_match_pass_count": 0,
+        "settle_profile_match_pass_rate": 0.0,
+        "best_candidate_id": "n/a",
+        "best_rank": 0,
+        "best_settle_mismatch_slice_rate": 0.0,
+        "best_settle_mismatch_slice_labels": [],
+        "best_passes_settle_profile_match": False,
+        "best_passes_constraints": False,
+        "source": "",
+        "text": (
+            "s10_grid_available=false s10_grid_candidates=0 "
+            "s10_grid_settle_mismatch_candidates=0 s10_grid_settle_mismatch_rate=0.00% "
+            "s10_grid_pass_settle_candidates=0 s10_grid_pass_settle_rate=0.00% "
+            "s10_grid_top_candidate=n/a s10_grid_top_rank=0 "
+            "s10_grid_top_settle_mismatch_rate=0.00% s10_grid_top_settle_mismatch_labels=none "
+            "s10_grid_top_pass_settle=false s10_grid_top_pass_constraints=false"
+        ),
+    }
+    if not isinstance(payload, dict):
+        return default
+
+    rows_obj = payload.get("candidates")
+    if not isinstance(rows_obj, list):
+        rows_obj = []
+
+    rows = [row for row in rows_obj if isinstance(row, dict)]
+    if not rows:
+        return {
+            **default,
+            "available": True,
+            "source": str(payload.get("_source", "")),
+            "text": (
+                "s10_grid_available=true s10_grid_candidates=0 "
+                "s10_grid_settle_mismatch_candidates=0 s10_grid_settle_mismatch_rate=0.00% "
+                "s10_grid_pass_settle_candidates=0 s10_grid_pass_settle_rate=0.00% "
+                "s10_grid_top_candidate=n/a s10_grid_top_rank=0 "
+                "s10_grid_top_settle_mismatch_rate=0.00% s10_grid_top_settle_mismatch_labels=none "
+                "s10_grid_top_pass_settle=false s10_grid_top_pass_constraints=false"
+            ),
+        }
+
+    candidate_count = len(rows)
+    settle_mismatch_candidate_count = sum(
+        1 for row in rows if int(_f(row.get("settle_mismatch_slice_count"))) > 0
+    )
+    settle_profile_match_pass_count = sum(
+        1 for row in rows if bool(row.get("passes_settle_profile_match", False))
+    )
+
+    def _sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
+        rank = int(_f(row.get("rank")))
+        rank_key = rank if rank > 0 else 10**9
+        idx = int(_f(row.get("candidate_index")))
+        candidate_id = str(row.get("candidate_id", ""))
+        return rank_key, idx, candidate_id
+
+    best = min(rows, key=_sort_key)
+    best_rank = int(_f(best.get("rank")))
+    best_candidate_id = str(best.get("candidate_id") or "n/a")
+    best_settle_mismatch_slice_rate = float(_f(best.get("settle_mismatch_slice_rate")))
+    best_settle_mismatch_slice_labels = best.get("settle_mismatch_slice_labels")
+    if not isinstance(best_settle_mismatch_slice_labels, list):
+        best_settle_mismatch_slice_labels = []
+
+    settle_mismatch_candidate_rate = (
+        float(settle_mismatch_candidate_count) / float(candidate_count)
+        if candidate_count > 0
+        else 0.0
+    )
+    settle_profile_match_pass_rate = (
+        float(settle_profile_match_pass_count) / float(candidate_count)
+        if candidate_count > 0
+        else 0.0
+    )
+
+    return {
+        "available": True,
+        "candidate_count": candidate_count,
+        "settle_mismatch_candidate_count": settle_mismatch_candidate_count,
+        "settle_mismatch_candidate_rate": settle_mismatch_candidate_rate,
+        "settle_profile_match_pass_count": settle_profile_match_pass_count,
+        "settle_profile_match_pass_rate": settle_profile_match_pass_rate,
+        "best_candidate_id": best_candidate_id,
+        "best_rank": best_rank,
+        "best_settle_mismatch_slice_rate": best_settle_mismatch_slice_rate,
+        "best_settle_mismatch_slice_labels": best_settle_mismatch_slice_labels,
+        "best_passes_settle_profile_match": bool(best.get("passes_settle_profile_match", False)),
+        "best_passes_constraints": bool(best.get("passes_constraints", False)),
+        "source": str(payload.get("_source", "")),
+        "text": (
+            f"s10_grid_available=true "
+            f"s10_grid_candidates={candidate_count} "
+            f"s10_grid_settle_mismatch_candidates={settle_mismatch_candidate_count} "
+            f"s10_grid_settle_mismatch_rate={settle_mismatch_candidate_rate:.2%} "
+            f"s10_grid_pass_settle_candidates={settle_profile_match_pass_count} "
+            f"s10_grid_pass_settle_rate={settle_profile_match_pass_rate:.2%} "
+            f"s10_grid_top_candidate={best_candidate_id} "
+            f"s10_grid_top_rank={best_rank} "
+            f"s10_grid_top_settle_mismatch_rate={best_settle_mismatch_slice_rate:.2%} "
+            f"s10_grid_top_settle_mismatch_labels={_format_slice_labels(best_settle_mismatch_slice_labels)} "
+            f"s10_grid_top_pass_settle={str(bool(best.get('passes_settle_profile_match', False))).lower()} "
+            f"s10_grid_top_pass_constraints={str(bool(best.get('passes_constraints', False))).lower()}"
+        ),
+    }
+
+
 def _f(raw: object) -> float:
     try:
         return float(raw)  # type: ignore[arg-type]
@@ -775,6 +894,7 @@ def build_summary_bundle(
     rolling_payload: dict[str, Any] | None,
     cycle_meta_payload: dict[str, Any] | None,
     analysis_payload: dict[str, Any] | None,
+    s10_grid_payload: dict[str, Any] | None,
     pdf_path: Path,
     rolling_path: Path,
     nightly_date: str,
@@ -872,6 +992,14 @@ def build_summary_bundle(
     )
     strategy_focus_pnl_diff_s9_minus_s10 = float(
         _f(strategy_focus_s9.get("pnl")) - _f(strategy_focus_s10.get("pnl"))
+    )
+    s10_grid_focus = _s10_grid_compare_focus(s10_grid_payload)
+    s10_grid_focus_text = str(s10_grid_focus.get("text") or "")
+    raw_s10_grid_best_labels = s10_grid_focus.get("best_settle_mismatch_slice_labels")
+    s10_grid_best_labels = (
+        [str(label) for label in raw_s10_grid_best_labels if str(label).strip()]
+        if isinstance(raw_s10_grid_best_labels, list)
+        else []
     )
 
     window_coverage = _compute_window_coverage(payload)
@@ -1168,6 +1296,7 @@ def build_summary_bundle(
         f"| {strategy_focus_s9_text} {strategy_focus_s9_activity_hint_text} "
         f"| {strategy_focus_s10_text} {strategy_focus_s10_activity_hint_text} "
         f"s9_minus_s10_pnl={strategy_focus_pnl_diff_s9_minus_s10:.4f} "
+        f"{s10_grid_focus_text} "
         f"| {best_text} "
         f"best_strategy_basis={best_strategy_basis} "
         f"| {negative_text} "
@@ -1373,6 +1502,36 @@ def build_summary_bundle(
                     ),
                     "text": str(strategy_focus_s10_activity_hint.get("text") or ""),
                 },
+                "grid_compare": {
+                    "available": bool(s10_grid_focus.get("available", False)),
+                    "source": str(s10_grid_focus.get("source", "")),
+                    "candidate_count": int(_f(s10_grid_focus.get("candidate_count"))),
+                    "settle_mismatch_candidate_count": int(
+                        _f(s10_grid_focus.get("settle_mismatch_candidate_count"))
+                    ),
+                    "settle_mismatch_candidate_rate": float(
+                        _f(s10_grid_focus.get("settle_mismatch_candidate_rate"))
+                    ),
+                    "settle_profile_match_pass_count": int(
+                        _f(s10_grid_focus.get("settle_profile_match_pass_count"))
+                    ),
+                    "settle_profile_match_pass_rate": float(
+                        _f(s10_grid_focus.get("settle_profile_match_pass_rate"))
+                    ),
+                    "best_candidate_id": str(s10_grid_focus.get("best_candidate_id", "n/a")),
+                    "best_rank": int(_f(s10_grid_focus.get("best_rank"))),
+                    "best_settle_mismatch_slice_rate": float(
+                        _f(s10_grid_focus.get("best_settle_mismatch_slice_rate"))
+                    ),
+                    "best_settle_mismatch_slice_labels": s10_grid_best_labels,
+                    "best_passes_settle_profile_match": bool(
+                        s10_grid_focus.get("best_passes_settle_profile_match", False)
+                    ),
+                    "best_passes_constraints": bool(
+                        s10_grid_focus.get("best_passes_constraints", False)
+                    ),
+                    "text": s10_grid_focus_text,
+                },
                 "text": str(strategy_focus_s10.get("text") or ""),
             },
         },
@@ -1554,6 +1713,7 @@ def build_summary_line(
     rolling_payload: dict[str, Any] | None,
     cycle_meta_payload: dict[str, Any] | None = None,
     analysis_payload: dict[str, Any] | None = None,
+    s10_grid_payload: dict[str, Any] | None = None,
     pdf_path: Path,
     rolling_path: Path,
     nightly_date: str,
@@ -1564,6 +1724,7 @@ def build_summary_line(
         rolling_payload=rolling_payload,
         cycle_meta_payload=cycle_meta_payload,
         analysis_payload=analysis_payload,
+        s10_grid_payload=s10_grid_payload,
         pdf_path=pdf_path,
         rolling_path=rolling_path,
         nightly_date=nightly_date,
@@ -1579,6 +1740,7 @@ def main() -> None:
     parser.add_argument("--rolling-json", required=True)
     parser.add_argument("--cycle-meta-json", default=None)
     parser.add_argument("--analysis-json", default=None)
+    parser.add_argument("--s10-grid-json", default=None)
     parser.add_argument("--summary-path", required=True)
     parser.add_argument("--summary-json-path", default=None)
     parser.add_argument("--nightly-date", required=True)
@@ -1604,11 +1766,21 @@ def main() -> None:
         if analysis_path.exists():
             analysis_payload = json.loads(analysis_path.read_text())
 
+    s10_grid_payload: dict[str, Any] | None = None
+    if args.s10_grid_json:
+        s10_grid_path = Path(args.s10_grid_json)
+        if s10_grid_path.exists():
+            loaded_s10_grid = json.loads(s10_grid_path.read_text())
+            if isinstance(loaded_s10_grid, dict):
+                loaded_s10_grid["_source"] = str(s10_grid_path.resolve())
+                s10_grid_payload = loaded_s10_grid
+
     line, sidecar = build_summary_bundle(
         payload=payload,
         rolling_payload=rolling_payload,
         cycle_meta_payload=cycle_meta_payload,
         analysis_payload=analysis_payload,
+        s10_grid_payload=s10_grid_payload,
         pdf_path=Path(args.pdf_path),
         rolling_path=rolling_path,
         nightly_date=args.nightly_date,

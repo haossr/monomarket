@@ -77,6 +77,10 @@ def test_nightly_summary_contains_canonical_alias_fields() -> None:
         "s10_generation_floor_adjusted_leg_rejected=",
         "s10_generation_floor_adjusted_leg_reject_share=",
         "s9_minus_s10_pnl=",
+        "s10_grid_available=",
+        "s10_grid_candidates=",
+        "s10_grid_settle_mismatch_rate=",
+        "s10_grid_top_settle_mismatch_rate=",
         "negative_strategies=",
         "worst_negative_strategy=",
         "worst_negative_pnl=",
@@ -645,6 +649,122 @@ def test_nightly_summary_surfaces_s9_s10_focus_metrics(tmp_path: Path) -> None:
     assert int(s10_hint["rejected_rows"]) == 0
     assert abs(float(s10_hint["reject_share"])) < 1e-12
     assert s10_hint["top_reject_reason"] == "none"
+
+
+def test_nightly_summary_surfaces_s10_grid_mismatch_metrics(tmp_path: Path) -> None:
+    backtest_json = tmp_path / "latest.json"
+    rolling_json = tmp_path / "rolling.json"
+    s10_grid_json = tmp_path / "s10-grid-results.json"
+    summary_txt = tmp_path / "summary.txt"
+    summary_json = tmp_path / "summary.json"
+    pdf_path = tmp_path / "report.pdf"
+
+    backtest_payload = {
+        "from_ts": "2026-02-24T00:00:00Z",
+        "to_ts": "2026-02-24T04:00:00Z",
+        "total_signals": 4,
+        "executed_signals": 2,
+        "rejected_signals": 2,
+        "results": [
+            {"strategy": "s9", "pnl": 0.5, "trade_count": 1},
+            {"strategy": "s10", "pnl": 0.2, "trade_count": 1},
+        ],
+        "replay": [],
+    }
+    backtest_json.write_text(json.dumps(backtest_payload))
+
+    rolling_payload = {
+        "summary": {
+            "run_count": 1,
+            "execution_rate": 0.5,
+            "positive_window_rate": 1.0,
+            "empty_window_count": 0,
+            "range_hours": 4,
+            "coverage_ratio": 1.0,
+            "overlap_ratio": 0.0,
+            "coverage_label": "full",
+            "risk_rejection_reasons": {},
+        }
+    }
+    rolling_json.write_text(json.dumps(rolling_payload))
+
+    s10_grid_payload = {
+        "candidates": [
+            {
+                "candidate_id": "cand-001",
+                "rank": 1,
+                "settle_mismatch_slice_count": 0,
+                "settle_mismatch_slice_rate": 0.0,
+                "settle_mismatch_slice_labels": [],
+                "passes_settle_profile_match": True,
+                "passes_constraints": True,
+            },
+            {
+                "candidate_id": "cand-002",
+                "rank": 2,
+                "settle_mismatch_slice_count": 1,
+                "settle_mismatch_slice_rate": 1.0,
+                "settle_mismatch_slice_labels": ["recent14d"],
+                "passes_settle_profile_match": False,
+                "passes_constraints": False,
+            },
+        ]
+    }
+    s10_grid_json.write_text(json.dumps(s10_grid_payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SUMMARY_SCRIPT_PATH),
+            "--backtest-json",
+            str(backtest_json),
+            "--pdf-path",
+            str(pdf_path),
+            "--rolling-json",
+            str(rolling_json),
+            "--s10-grid-json",
+            str(s10_grid_json),
+            "--summary-path",
+            str(summary_txt),
+            "--summary-json-path",
+            str(summary_json),
+            "--nightly-date",
+            "2026-02-24",
+            "--rolling-reject-top-k",
+            "2",
+            "--with-checksum",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    line = summary_txt.read_text().strip()
+    assert "s10_grid_available=true" in line
+    assert "s10_grid_candidates=2" in line
+    assert "s10_grid_settle_mismatch_candidates=1" in line
+    assert "s10_grid_settle_mismatch_rate=50.00%" in line
+    assert "s10_grid_top_candidate=cand-001" in line
+    assert "s10_grid_top_settle_mismatch_rate=0.00%" in line
+
+    sidecar = json.loads(summary_json.read_text())
+    validate_nightly_summary_sidecar(sidecar)
+    assert verify_nightly_summary_sidecar_checksum(sidecar)
+
+    s10_grid = sidecar["strategy_focus"]["s10"]["grid_compare"]
+    assert bool(s10_grid["available"]) is True
+    assert int(s10_grid["candidate_count"]) == 2
+    assert int(s10_grid["settle_mismatch_candidate_count"]) == 1
+    assert abs(float(s10_grid["settle_mismatch_candidate_rate"]) - 0.5) < 1e-12
+    assert int(s10_grid["settle_profile_match_pass_count"]) == 1
+    assert abs(float(s10_grid["settle_profile_match_pass_rate"]) - 0.5) < 1e-12
+    assert s10_grid["best_candidate_id"] == "cand-001"
+    assert int(s10_grid["best_rank"]) == 1
+    assert abs(float(s10_grid["best_settle_mismatch_slice_rate"]) - 0.0) < 1e-12
+    assert s10_grid["best_settle_mismatch_slice_labels"] == []
+    assert bool(s10_grid["best_passes_settle_profile_match"]) is True
+    assert bool(s10_grid["best_passes_constraints"]) is True
+    assert str(s10_grid["source"]).endswith("s10-grid-results.json")
 
 
 def test_nightly_summary_surfaces_s9_s10_no_activity_hints(tmp_path: Path) -> None:
@@ -2344,10 +2464,12 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "--clear-signals-window" in content
     assert "--rebuild-signals-window" in content
     assert "--rebuild-step-hours" in content
+    assert "--s10-grid-json" in content
     assert "--require-interpretable" in content
     assert "${CYCLE_WINDOW_ARGS[@]-}" in content
     assert "${CYCLE_CLEAR_ARGS[@]-}" in content
     assert "${CYCLE_REBUILD_ARGS[@]-}" in content
+    assert '${S10_GRID_ARGS[@]+"${S10_GRID_ARGS[@]}"}' in content
     assert '--rolling-json "$ROLLING_JSON"' in content
 
 
