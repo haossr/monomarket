@@ -12,6 +12,8 @@ def _market(
     yes: float,
     liq: float,
     neg_risk: bool = True,
+    best_bid: float | None = None,
+    best_ask: float | None = None,
 ) -> MarketView:
     return MarketView(
         source="gamma" if i % 2 else "clob",
@@ -25,8 +27,8 @@ def _market(
         volume=100,
         yes_price=yes,
         no_price=1 - yes,
-        best_bid=None,
-        best_ask=None,
+        best_bid=best_bid,
+        best_ask=best_ask,
         mid_price=yes,
     )
 
@@ -107,6 +109,74 @@ def test_s10_cost_model_blocks_weak_conversion() -> None:
     )
 
     assert signals == []
+
+
+def test_s10_spread_penalty_can_gate_wide_book_conversion() -> None:
+    strategy = S10NegRiskConversionArb()
+    markets = [
+        _market(
+            1,
+            event_id="e-spread",
+            canonical_id="c1",
+            yes=0.28,
+            liq=900,
+            best_bid=0.14,
+            best_ask=0.42,
+        ),
+        _market(
+            2,
+            event_id="e-spread",
+            canonical_id="c2",
+            yes=0.31,
+            liq=880,
+            best_bid=0.16,
+            best_ask=0.46,
+        ),
+        _market(
+            3,
+            event_id="e-spread",
+            canonical_id="c3",
+            yes=0.34,
+            liq=860,
+            best_bid=0.19,
+            best_ask=0.49,
+        ),
+    ]
+
+    relaxed = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 500.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "spread_penalty_max_bps": 0.0,
+            "max_weighted_total_cost_bps": 500.0,
+            "max_leg_total_cost_bps": 500.0,
+        },
+    )
+    assert len(relaxed) == 3
+    relaxed_cost = relaxed[0].payload.get("cost_model", {})
+    assert abs(float(relaxed_cost.get("leg_spread_penalty_bps", 1.0))) < 1e-12
+
+    gated = strategy.generate(
+        markets,
+        {
+            "prob_sum_tolerance": 0.01,
+            "min_effective_edge_bps": 500.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "spread_penalty_max_bps": 300.0,
+            "max_weighted_total_cost_bps": 500.0,
+            "max_leg_total_cost_bps": 500.0,
+        },
+    )
+
+    assert gated == []
+    reject_reasons = strategy.last_diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy_conversion:effective_edge_below_min") == 1
 
 
 def test_s10_allow_sell_conversion_emits_sell_legs() -> None:
@@ -619,8 +689,13 @@ def test_s10_convert_value_can_shift_conversion_anchor() -> None:
 
     assert len(shifted_anchor_signals) == 3
     assert all(str(s.payload.get("direction")) == "buy_conversion" for s in shifted_anchor_signals)
-    assert all(abs(float(s.payload.get("convert_value", 0.0)) - 1.02) < 1e-12 for s in shifted_anchor_signals)
-    assert all(abs(float(s.payload.get("deviation", 0.0)) + 0.035) < 1e-9 for s in shifted_anchor_signals)
+    assert all(
+        abs(float(s.payload.get("convert_value", 0.0)) - 1.02) < 1e-12
+        for s in shifted_anchor_signals
+    )
+    assert all(
+        abs(float(s.payload.get("deviation", 0.0)) + 0.035) < 1e-9 for s in shifted_anchor_signals
+    )
 
 
 def test_s10_conversion_fee_bps_can_gate_weak_edge() -> None:

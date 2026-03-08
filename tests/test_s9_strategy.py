@@ -13,6 +13,8 @@ def _market(
     no: float,
     liq: float,
     question: str | None = None,
+    best_bid: float | None = None,
+    best_ask: float | None = None,
 ) -> MarketView:
     return MarketView(
         source="gamma" if i % 2 else "clob",
@@ -26,8 +28,8 @@ def _market(
         volume=100,
         yes_price=yes,
         no_price=no,
-        best_bid=None,
-        best_ask=None,
+        best_bid=best_bid,
+        best_ask=best_ask,
         mid_price=yes,
     )
 
@@ -101,6 +103,62 @@ def test_s9_cost_model_blocks_weak_edge() -> None:
     )
 
     assert signals == []
+
+
+def test_s9_spread_penalty_can_gate_wide_book_pairs() -> None:
+    strategy = S9YesNoParityArb()
+    markets = [
+        _market(
+            1,
+            canonical_id="c-spread",
+            event_id="e-spread",
+            yes=0.44,
+            no=0.53,
+            liq=900,
+            best_bid=0.30,
+            best_ask=0.58,
+        ),
+        _market(
+            2,
+            canonical_id="c-spread",
+            event_id="e-spread",
+            yes=0.49,
+            no=0.58,
+            liq=900,
+            best_bid=0.45,
+            best_ask=0.53,
+        ),
+    ]
+
+    relaxed = strategy.generate(
+        markets,
+        {
+            "min_effective_edge_bps": 20.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "spread_penalty_max_bps": 0.0,
+        },
+    )
+    assert len(relaxed) == 2
+    relaxed_cost = relaxed[0].payload.get("cost_model", {})
+    assert abs(float(relaxed_cost.get("yes_spread_penalty_bps", 1.0))) < 1e-12
+
+    gated = strategy.generate(
+        markets,
+        {
+            "min_effective_edge_bps": 20.0,
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+            "depth_penalty_max_bps": 0.0,
+            "spread_penalty_max_bps": 200.0,
+            "max_total_cost_bps": 500.0,
+        },
+    )
+
+    assert gated == []
+    reject_reasons = strategy.last_diagnostics.get("candidate_reject_reasons", {})
+    assert reject_reasons.get("buy:effective_edge_below_min") == 1
 
 
 def test_s9_allow_sell_parity_emits_sell_legs() -> None:

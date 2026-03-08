@@ -81,6 +81,7 @@ strategies:
     slippage_bps: 6.0
     depth_reference_liquidity: 1000.0
     depth_penalty_max_bps: 30.0
+    spread_penalty_max_bps: 0.0
     max_total_cost_bps: 140.0
     liquidity_fraction: 0.01
     min_qty: 1.0
@@ -108,6 +109,7 @@ strategies:
     slippage_bps: 6.0
     depth_reference_liquidity: 1000.0
     depth_penalty_max_bps: 35.0
+    spread_penalty_max_bps: 0.0
     liquidity_fraction: 0.01
     min_qty: 1.0
     max_legs_per_event: 24

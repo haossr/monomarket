@@ -17,6 +17,7 @@ OUTCOME_TOKEN_YES = "YES"  # nosec B105
 class _LegCost:
     total_bps: float
     depth_penalty_bps: float
+    spread_penalty_bps: float
 
 
 @dataclass(slots=True)
@@ -199,6 +200,7 @@ class S9YesNoParityArb(Strategy):
         slippage_bps = float(cfg.get("slippage_bps", 6.0))
         depth_reference_liquidity = max(1.0, float(cfg.get("depth_reference_liquidity", 1000.0)))
         depth_penalty_max_bps = max(0.0, float(cfg.get("depth_penalty_max_bps", 30.0)))
+        spread_penalty_max_bps = max(0.0, float(cfg.get("spread_penalty_max_bps", 0.0)))
         max_total_cost_bps = max(0.0, float(cfg.get("max_total_cost_bps", 140.0)))
         liquidity_fraction = max(0.0, float(cfg.get("liquidity_fraction", 0.01)))
         min_qty = max(0.1, float(cfg.get("min_qty", 1.0)))
@@ -268,6 +270,7 @@ class S9YesNoParityArb(Strategy):
                 },
                 "pricing_consistency": {
                     "price_floor": executable_price_floor,
+                    "spread_penalty_max_bps": spread_penalty_max_bps,
                     "pair_candidates_priced": 0,
                     "pairs_with_floor_adjustment": 0,
                     "tiny_price_legs": 0,
@@ -441,6 +444,7 @@ class S9YesNoParityArb(Strategy):
                     slippage_bps=slippage_bps,
                     depth_reference_liquidity=depth_reference_liquidity,
                     depth_penalty_max_bps=depth_penalty_max_bps,
+                    spread_penalty_max_bps=spread_penalty_max_bps,
                     max_total_cost_bps=max_total_cost_bps,
                     liquidity_fraction=liquidity_fraction,
                     min_qty=min_qty,
@@ -552,6 +556,7 @@ class S9YesNoParityArb(Strategy):
             },
             "pricing_consistency": {
                 "price_floor": executable_price_floor,
+                "spread_penalty_max_bps": spread_penalty_max_bps,
                 "pair_candidates_priced": pricing_diag_count,
                 "pairs_with_floor_adjustment": pricing_diag_floor_adjusted_pairs,
                 "tiny_price_legs": pricing_diag_tiny_price_legs,
@@ -752,20 +757,52 @@ class S9YesNoParityArb(Strategy):
         return None, stats
 
     @staticmethod
+    def _spread_penalty_bps(
+        *,
+        best_bid: float | None,
+        best_ask: float | None,
+        spread_penalty_max_bps: float,
+    ) -> float:
+        if spread_penalty_max_bps <= 0:
+            return 0.0
+        if best_bid is None or best_ask is None:
+            return 0.0
+        bid = float(best_bid)
+        ask = float(best_ask)
+        if bid <= 0 or ask <= 0 or ask < bid:
+            return 0.0
+        mid = (bid + ask) / 2.0
+        if mid <= 0:
+            return 0.0
+        half_spread = max(0.0, ask - bid) / 2.0
+        implied_bps = (half_spread / mid) * 10000.0
+        return min(max(0.0, spread_penalty_max_bps), implied_bps)
+
+    @classmethod
     def _leg_cost(
+        cls,
         *,
         liquidity: float,
         fee_bps: float,
         slippage_bps: float,
         depth_reference_liquidity: float,
         depth_penalty_max_bps: float,
+        best_bid: float | None,
+        best_ask: float | None,
+        spread_penalty_max_bps: float,
     ) -> _LegCost:
         liq = max(0.0, float(liquidity))
         liq_ratio = min(1.0, liq / max(1e-9, depth_reference_liquidity))
         depth_penalty = (1.0 - liq_ratio) * max(0.0, depth_penalty_max_bps)
+        spread_penalty = cls._spread_penalty_bps(
+            best_bid=best_bid,
+            best_ask=best_ask,
+            spread_penalty_max_bps=spread_penalty_max_bps,
+        )
         return _LegCost(
-            total_bps=max(0.0, fee_bps) + max(0.0, slippage_bps) + depth_penalty,
+            total_bps=(max(0.0, fee_bps) + max(0.0, slippage_bps) + depth_penalty + spread_penalty),
             depth_penalty_bps=depth_penalty,
+            spread_penalty_bps=spread_penalty,
         )
 
     def _emit_pair_signals(
@@ -785,6 +822,7 @@ class S9YesNoParityArb(Strategy):
         slippage_bps: float,
         depth_reference_liquidity: float,
         depth_penalty_max_bps: float,
+        spread_penalty_max_bps: float,
         max_total_cost_bps: float,
         liquidity_fraction: float,
         min_qty: float,
@@ -860,6 +898,9 @@ class S9YesNoParityArb(Strategy):
             slippage_bps=slippage_bps,
             depth_reference_liquidity=depth_reference_liquidity,
             depth_penalty_max_bps=depth_penalty_max_bps,
+            best_bid=yes_leg.best_bid,
+            best_ask=yes_leg.best_ask,
+            spread_penalty_max_bps=spread_penalty_max_bps,
         )
         no_cost = self._leg_cost(
             liquidity=no_leg.liquidity,
@@ -867,14 +908,19 @@ class S9YesNoParityArb(Strategy):
             slippage_bps=slippage_bps,
             depth_reference_liquidity=depth_reference_liquidity,
             depth_penalty_max_bps=depth_penalty_max_bps,
+            best_bid=no_leg.best_bid,
+            best_ask=no_leg.best_ask,
+            spread_penalty_max_bps=spread_penalty_max_bps,
         )
 
         total_cost_bps = yes_cost.total_bps + no_cost.total_bps
         non_slippage_cost_bps = (
             max(0.0, fee_bps)
             + yes_cost.depth_penalty_bps
+            + yes_cost.spread_penalty_bps
             + max(0.0, fee_bps)
             + no_cost.depth_penalty_bps
+            + no_cost.spread_penalty_bps
         )
         post_floor_effective_edge_bps = post_floor_gross_edge_bps - total_cost_bps
         effective_edge_bps = post_slippage_gross_edge_bps - non_slippage_cost_bps
@@ -1008,8 +1054,11 @@ class S9YesNoParityArb(Strategy):
                 "slippage_bps_per_leg": slippage_bps,
                 "depth_reference_liquidity": depth_reference_liquidity,
                 "depth_penalty_max_bps_per_leg": depth_penalty_max_bps,
+                "spread_penalty_max_bps_per_leg": spread_penalty_max_bps,
                 "yes_depth_penalty_bps": yes_cost.depth_penalty_bps,
                 "no_depth_penalty_bps": no_cost.depth_penalty_bps,
+                "yes_spread_penalty_bps": yes_cost.spread_penalty_bps,
+                "no_spread_penalty_bps": no_cost.spread_penalty_bps,
                 "yes_total_cost_bps": yes_cost.total_bps,
                 "no_total_cost_bps": no_cost.total_bps,
                 "total_cost_bps": total_cost_bps,
