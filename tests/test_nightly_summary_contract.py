@@ -2359,4 +2359,5 @@ def test_backtest_cycle_defaults_include_s9_s10() -> None:
 
 def test_nightly_rolling_includes_s9_s10() -> None:
     content = BASH_SCRIPT_PATH.read_text()
-    assert '--strategies "s1,s2,s4,s8,s9,s10" \\' in content
+    assert 'STRATEGIES="s1,s2,s4,s8,s9,s10"' in content
+    assert '--strategies "$STRATEGIES" \\' in content

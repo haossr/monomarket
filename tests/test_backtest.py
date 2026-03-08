@@ -2232,6 +2232,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
             "2026-02-20T02:00:00Z",
             "--slippage-bps",
             "0",
+            "--settle-window-end",
             "--out-json",
             str(json_out),
             "--out-replay-csv",
@@ -2268,6 +2269,7 @@ def test_cli_backtest_command(tmp_path: Path) -> None:
     assert payload["executed_signals"] == 4
     assert payload["rejected_signals"] == 0
     assert payload["execution_config"]["slippage_bps"] == 0.0
+    assert payload["execution_config"]["settle_window_end_positions"] is True
     assert payload["risk_config"]["max_event_notional"] == 1500.0
     assert len(payload["results"]) == 1
     assert len(payload["event_results"]) == 2
@@ -2367,6 +2369,7 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
             "1",
             "--slippage-bps",
             "0",
+            "--settle-window-end",
             "--out-json",
             str(out_json),
             "--config",
@@ -2390,6 +2393,7 @@ def test_cli_backtest_rolling_command(tmp_path: Path) -> None:
     assert payload["overlap_mode"] == "tiled"
     assert payload["execution_config"]["slippage_bps"] == 0.0
     assert payload["execution_config"]["fee_bps"] == 0.0
+    assert payload["execution_config"]["settle_window_end_positions"] is True
     assert payload["risk_config"]["max_event_notional"] == 1500.0
 
     assert payload["summary"]["run_count"] == 2

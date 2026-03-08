@@ -753,7 +753,7 @@ for row in rows:
 out_md.write_text("\n".join(lines) + "\n")
 PY
 
-"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" "$REBUILD_SIGNALS_WINDOW" "$REBUILD_STEP_HOURS" "$REBUILD_SAMPLED_STEPS" "$SKIP_INGEST" "$EDGE_GATE_RUN_JSON" <<'PY'
+"$PYTHON_BIN" - "$RUN_DIR" "$FROM_TS" "$TO_TS" "$RUN_START_TS" "$NEW_SIGNALS_TOTAL" "$NEW_SIGNALS_IN_WINDOW" "$NEW_SIGNALS_FIRST_TS" "$NEW_SIGNALS_LAST_TS" "$FIXED_WINDOW_MODE" "$CLEAR_SIGNALS_WINDOW" "$CLEARED_SIGNALS_IN_WINDOW" "$REBUILD_SIGNALS_WINDOW" "$REBUILD_STEP_HOURS" "$REBUILD_SAMPLED_STEPS" "$SKIP_INGEST" "$SETTLE_WINDOW_END" "$EDGE_GATE_RUN_JSON" <<'PY'
 from __future__ import annotations
 
 import json
@@ -776,7 +776,8 @@ rebuild_signals_window = str(sys.argv[12]).strip() == "1"
 rebuild_step_hours = float(sys.argv[13])
 rebuild_sampled_steps = int(float(sys.argv[14]))
 skip_ingest = str(sys.argv[15]).strip() == "1"
-edge_gate_run_raw = str(sys.argv[16] or "{}")
+settle_window_end = str(sys.argv[16]).strip() == "1"
+edge_gate_run_raw = str(sys.argv[17] or "{}")
 
 edge_gate_run: dict[str, object] = {}
 try:
@@ -822,6 +823,7 @@ cycle_meta = {
         "clear_signals_window": clear_signals_window,
         "cleared_signals_in_window": cleared_signals_in_window,
         "skip_ingest": skip_ingest,
+        "settle_window_end": settle_window_end,
         "rebuild_signals_window": rebuild_signals_window,
         "rebuild_step_hours": rebuild_step_hours,
         "rebuild_sampled_steps": rebuild_sampled_steps,
