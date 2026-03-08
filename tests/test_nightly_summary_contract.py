@@ -2465,6 +2465,10 @@ def test_nightly_script_help_mentions_disabled_semantics() -> None:
     assert "--rebuild-signals-window" in content
     assert "--rebuild-step-hours" in content
     assert "--s10-grid-json" in content
+    assert "--no-auto-s10-grid-json" in content
+    assert "--s10-grid-max-age-hours" in content
+    assert "auto-detected s10-grid-json" in content
+    assert "no recent s10-grid-*/grid-results.json found" in content
     assert "--require-interpretable" in content
     assert "${CYCLE_WINDOW_ARGS[@]-}" in content
     assert "${CYCLE_CLEAR_ARGS[@]-}" in content
