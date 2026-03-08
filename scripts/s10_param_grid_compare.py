@@ -95,19 +95,41 @@ def parse_float_values(
     return values
 
 
+def parse_bool_values(raw: str, *, field_name: str) -> list[bool]:
+    values: list[bool] = []
+    for token in raw.split(","):
+        text = token.strip().lower()
+        if not text:
+            continue
+        if text in {"1", "true", "yes", "y", "on"}:
+            value = True
+        elif text in {"0", "false", "no", "n", "off"}:
+            value = False
+        else:
+            raise ValueError(f"invalid bool for {field_name}: {token.strip()}")
+        if value not in values:
+            values.append(value)
+
+    if not values:
+        raise ValueError(f"no values provided for {field_name}")
+    return values
+
+
 def build_s10_param_grid(
     *,
     prob_sum_tolerance: list[float],
     max_abs_deviation: list[float],
     max_tiny_price_leg_share: list[float],
     max_floor_adjusted_leg_share: list[float],
-) -> list[dict[str, float]]:
-    grid: list[dict[str, float]] = []
-    for prob_tol, max_abs, tiny_share, floor_share in itertools.product(
+    require_same_source: list[bool],
+) -> list[dict[str, float | bool]]:
+    grid: list[dict[str, float | bool]] = []
+    for prob_tol, max_abs, tiny_share, floor_share, same_source in itertools.product(
         prob_sum_tolerance,
         max_abs_deviation,
         max_tiny_price_leg_share,
         max_floor_adjusted_leg_share,
+        require_same_source,
     ):
         grid.append(
             {
@@ -115,6 +137,7 @@ def build_s10_param_grid(
                 "max_abs_deviation": float(max_abs),
                 "max_tiny_price_leg_share": float(tiny_share),
                 "max_floor_adjusted_leg_share": float(floor_share),
+                "require_same_source": bool(same_source),
             }
         )
     return grid
@@ -122,7 +145,7 @@ def build_s10_param_grid(
 
 def apply_s10_overrides(
     base_config: dict[str, Any],
-    overrides: dict[str, float],
+    overrides: dict[str, float | bool],
 ) -> dict[str, Any]:
     out = copy.deepcopy(base_config)
 
@@ -135,7 +158,10 @@ def apply_s10_overrides(
         raise ValueError("config field 'strategies.s10' must be a mapping")
 
     for key, value in overrides.items():
-        s10_raw[key] = float(value)
+        if isinstance(value, bool):
+            s10_raw[key] = value
+        else:
+            s10_raw[key] = float(value)
 
     return out
 
@@ -365,11 +391,11 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- inject_candidate_settle_mismatch: {bool(result.get('inject_candidate_settle_mismatch', False))}",
         f"- total_candidates: {result.get('total_candidates')}",
         "",
-        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | "
+        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | same_source | "
         "base_settle | cand_settle | settle_mismatch | mismatch_rate | mismatch_slices | pass_settle? | "
         "min(Δpnl) | max(ΔmaxDD) | ΣΔpnl | ΣΔexec | ΣΔrej | ΣΔgen_pass | ΣΔgen_reject | "
         "ΣΔgen_top_event_count | event_shift_slices | ΣΔmaxDD | ΣΔmtm_wr | pass? |",
-        "|---:|---|---:|---:|---:|---:|---|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "|---:|---|---:|---:|---:|---:|---|---|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
 
     for item in result.get("candidates", []):
@@ -385,6 +411,7 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{_safe_float(ov.get('max_abs_deviation')):.4f} | "
             f"{_safe_float(ov.get('max_tiny_price_leg_share')):.4f} | "
             f"{_safe_float(ov.get('max_floor_adjusted_leg_share')):.4f} | "
+            f"{str(bool(ov.get('require_same_source', False))).lower()} | "
             f"{str(item.get('baseline_settle_window_end_profile', 'unknown'))} | "
             f"{str(item.get('candidate_settle_window_end_profile', 'unknown'))} | "
             f"{_safe_int(item.get('settle_mismatch_slice_count')):+d} | "
@@ -612,6 +639,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="0.25,0.35,0.50",
         help="Comma-separated grid for strategies.s10.max_floor_adjusted_leg_share",
     )
+    parser.add_argument(
+        "--require-same-source-grid",
+        default="false,true",
+        help="Comma-separated bool grid for strategies.s10.require_same_source",
+    )
 
     parser.add_argument(
         "--max-candidates",
@@ -716,6 +748,10 @@ def main() -> int:
             field_name="max_floor_adjusted_leg_share_grid",
             min_value=0.0,
             max_value=1.0,
+        ),
+        require_same_source=parse_bool_values(
+            str(args.require_same_source_grid),
+            field_name="require_same_source_grid",
         ),
     )
 

@@ -265,6 +265,7 @@ python scripts/s10_param_grid_compare.py \
   --max-abs-deviation-grid 0.15,0.20 \
   --max-tiny-price-leg-share-grid 0.20,0.25 \
   --max-floor-adjusted-leg-share-grid 0.25,0.35 \
+  --require-same-source-grid false,true \
   --rebuild-signals-window \
   --skip-ingest-rebuild \
   --rebuild-step-hours 24 \

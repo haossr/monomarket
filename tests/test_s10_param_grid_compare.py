@@ -31,6 +31,16 @@ def test_parse_float_values_dedup_and_range() -> None:
     assert values == [0.02, 0.03]
 
 
+def test_parse_bool_values_dedup_and_aliases() -> None:
+    module = _load_module()
+
+    values = module.parse_bool_values(
+        "false,TRUE,0,yes,false",
+        field_name="require_same_source_grid",
+    )
+    assert values == [False, True]
+
+
 def test_build_s10_param_grid_cartesian_size() -> None:
     module = _load_module()
 
@@ -39,9 +49,10 @@ def test_build_s10_param_grid_cartesian_size() -> None:
         max_abs_deviation=[0.1],
         max_tiny_price_leg_share=[0.2, 0.3],
         max_floor_adjusted_leg_share=[0.25],
+        require_same_source=[False, True],
     )
 
-    assert len(grid) == 4
+    assert len(grid) == 8
     assert {tuple(sorted(item.items())) for item in grid} == {
         tuple(
             sorted(
@@ -50,11 +61,13 @@ def test_build_s10_param_grid_cartesian_size() -> None:
                     "max_abs_deviation": 0.1,
                     "max_tiny_price_leg_share": tiny,
                     "max_floor_adjusted_leg_share": 0.25,
+                    "require_same_source": same_source,
                 }.items()
             )
         )
         for prob_tol in [0.01, 0.02]
         for tiny in [0.2, 0.3]
+        for same_source in [False, True]
     }
 
 
@@ -65,6 +78,7 @@ def test_s10_grid_default_slices_include_recent14d() -> None:
     args = parser.parse_args(["--baseline-config", "base.yaml"])
 
     assert str(args.slices) == "recent24h:24,recent7d:168,recent14d:336"
+    assert str(args.require_same_source_grid) == "false,true"
     assert bool(args.rebuild_signals_window) is False
     assert float(args.rebuild_step_hours) == 12.0
     assert int(args.rebuild_market_limit) == 2000
@@ -156,6 +170,7 @@ def test_apply_s10_overrides_keeps_base_immutable() -> None:
             "max_abs_deviation": 0.15,
             "max_tiny_price_leg_share": 0.2,
             "max_floor_adjusted_leg_share": 0.25,
+            "require_same_source": True,
         },
     )
 
@@ -164,6 +179,7 @@ def test_apply_s10_overrides_keeps_base_immutable() -> None:
     assert updated["strategies"]["s10"]["prob_sum_tolerance"] == 0.015
     assert updated["strategies"]["s10"]["max_abs_deviation"] == 0.15
     assert updated["strategies"]["s10"]["max_tiny_price_leg_share"] == 0.2
+    assert bool(updated["strategies"]["s10"]["require_same_source"]) is True
 
 
 def test_candidate_sort_key_prefers_constraint_pass_then_slice_stability() -> None:
@@ -422,6 +438,7 @@ def test_summarize_compare_payload_and_markdown() -> None:
                         "max_abs_deviation": 0.15,
                         "max_tiny_price_leg_share": 0.2,
                         "max_floor_adjusted_leg_share": 0.25,
+                        "require_same_source": True,
                     },
                     "min_slice_delta_pnl": 0.1,
                     "max_slice_delta_max_drawdown": -0.1,
@@ -443,10 +460,10 @@ def test_summarize_compare_payload_and_markdown() -> None:
     assert "# S10 Parameter Grid Compare" in markdown
     assert "| rank | candidate | prob_tol |" in markdown
     assert (
-        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | base_settle | cand_settle | settle_mismatch | mismatch_rate | mismatch_slices | pass_settle? | min(Δpnl) | max(ΔmaxDD) |"
+        "| rank | candidate | prob_tol | max_abs | tiny_share | floor_share | same_source | base_settle | cand_settle | settle_mismatch | mismatch_rate | mismatch_slices | pass_settle? | min(Δpnl) | max(ΔmaxDD) |"
         in markdown
     )
     assert (
-        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | unknown | unknown | +0 | 0.00% | none | yes | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
+        "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | true | unknown | unknown | +0 | 0.00% | none | yes | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
         in markdown
     )
