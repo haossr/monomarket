@@ -29,6 +29,20 @@ def _safe_int(raw: object, default: int = 0) -> int:
         return default
 
 
+def _safe_bool(raw: object, default: bool = False) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int | float):
+        return bool(raw)
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in {"1", "true", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
 def _settle_profile(values: list[bool]) -> str:
     if not values:
         return "unknown"
@@ -371,6 +385,70 @@ def apply_constraint_flags(
     entry["passes_constraints"] = bool(passes_min and passes_max and passes_settle_match)
 
 
+def summarize_same_source_rollup(
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[bool, list[dict[str, Any]]] = {False: [], True: []}
+    for item in entries:
+        overrides_raw = item.get("overrides", {})
+        overrides = overrides_raw if isinstance(overrides_raw, dict) else {}
+        grouped[_safe_bool(overrides.get("require_same_source"), default=False)].append(item)
+
+    rollup: list[dict[str, Any]] = []
+    for require_same_source in [False, True]:
+        bucket = grouped[require_same_source]
+        count = len(bucket)
+        pass_bucket = [item for item in bucket if bool(item.get("passes_constraints"))]
+        pass_count = len(pass_bucket)
+        best = sorted(bucket, key=candidate_sort_key)[0] if bucket else None
+        best_pass = sorted(pass_bucket, key=candidate_sort_key)[0] if pass_bucket else None
+
+        rollup.append(
+            {
+                "require_same_source": require_same_source,
+                "candidate_count": count,
+                "pass_count": pass_count,
+                "pass_rate": (float(pass_count) / float(count)) if count else 0.0,
+                "avg_total_delta_pnl": (
+                    sum(_safe_float(item.get("total_delta_pnl")) for item in bucket) / float(count)
+                    if count
+                    else 0.0
+                ),
+                "avg_min_slice_delta_pnl": (
+                    sum(_safe_float(item.get("min_slice_delta_pnl")) for item in bucket)
+                    / float(count)
+                    if count
+                    else 0.0
+                ),
+                "avg_total_delta_exec": (
+                    sum(_safe_float(item.get("total_delta_exec")) for item in bucket) / float(count)
+                    if count
+                    else 0.0
+                ),
+                "avg_total_delta_rej": (
+                    sum(_safe_float(item.get("total_delta_rej")) for item in bucket) / float(count)
+                    if count
+                    else 0.0
+                ),
+                "best_candidate_id": str(best.get("candidate_id", "")) if best else "",
+                "best_total_delta_pnl": _safe_float(best.get("total_delta_pnl")) if best else 0.0,
+                "best_min_slice_delta_pnl": (
+                    _safe_float(best.get("min_slice_delta_pnl")) if best else 0.0
+                ),
+                "best_pass_candidate_id": (
+                    str(best_pass.get("candidate_id", "")) if best_pass else ""
+                ),
+                "best_pass_total_delta_pnl": (
+                    _safe_float(best_pass.get("total_delta_pnl")) if best_pass else 0.0
+                ),
+                "best_pass_min_slice_delta_pnl": (
+                    _safe_float(best_pass.get("min_slice_delta_pnl")) if best_pass else 0.0
+                ),
+            }
+        )
+    return rollup
+
+
 def render_markdown(result: dict[str, Any]) -> str:
     lines: list[str] = [
         "# S10 Parameter Grid Compare",
@@ -430,6 +508,37 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{_safe_float(item.get('total_delta_max_drawdown')):+.4f} | "
             f"{_safe_float(item.get('total_delta_mtm_winrate')):+.4f} | "
             f"{'yes' if bool(item.get('passes_constraints')) else 'no'} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Same-source guard rollup",
+            "",
+            "| same_source | candidates | pass | pass_rate | avg ΣΔpnl | avg min(Δpnl) | avg ΣΔexec | avg ΣΔrej | best candidate | best ΣΔpnl | best min(Δpnl) | best pass candidate | best pass ΣΔpnl |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---|---:|",
+        ]
+    )
+    for item in result.get("same_source_rollup", []):
+        if not isinstance(item, dict):
+            continue
+        best_candidate = str(item.get("best_candidate_id") or "n/a")
+        best_pass_candidate = str(item.get("best_pass_candidate_id") or "n/a")
+        lines.append(
+            "| "
+            f"{str(_safe_bool(item.get('require_same_source'))).lower()} | "
+            f"{_safe_int(item.get('candidate_count'))} | "
+            f"{_safe_int(item.get('pass_count'))} | "
+            f"{_safe_float(item.get('pass_rate')):.2%} | "
+            f"{_safe_float(item.get('avg_total_delta_pnl')):+.4f} | "
+            f"{_safe_float(item.get('avg_min_slice_delta_pnl')):+.4f} | "
+            f"{_safe_float(item.get('avg_total_delta_exec')):+.2f} | "
+            f"{_safe_float(item.get('avg_total_delta_rej')):+.2f} | "
+            f"{best_candidate} | "
+            f"{_safe_float(item.get('best_total_delta_pnl')):+.4f} | "
+            f"{_safe_float(item.get('best_min_slice_delta_pnl')):+.4f} | "
+            f"{best_pass_candidate} | "
+            f"{_safe_float(item.get('best_pass_total_delta_pnl')):+.4f} |"
         )
 
     lines.append("")
@@ -843,6 +952,8 @@ def main() -> int:
     for rank, item in enumerate(entries, start=1):
         item["rank"] = rank
 
+    same_source_rollup = summarize_same_source_rollup(entries)
+
     result: dict[str, Any] = {
         "generated_at": _iso_z(datetime.now(UTC)),
         "anchor_ts": anchor_z,
@@ -861,6 +972,7 @@ def main() -> int:
         "skip_ingest_rebuild": bool(args.skip_ingest_rebuild),
         "inject_candidate_settle_mismatch": bool(args.inject_candidate_settle_mismatch),
         "total_candidates": len(entries),
+        "same_source_rollup": same_source_rollup,
         "candidates": entries,
     }
 
@@ -891,6 +1003,22 @@ def main() -> int:
             f"pass_settle={bool(top.get('passes_settle_profile_match'))} "
             f"ΣΔmaxDD={_safe_float(top.get('total_delta_max_drawdown')):+.4f} "
             f"pass={bool(top.get('passes_constraints'))}"
+        )
+
+    for item in same_source_rollup:
+        if not isinstance(item, dict):
+            continue
+        best_candidate = str(item.get("best_candidate_id") or "n/a")
+        best_pass_candidate = str(item.get("best_pass_candidate_id") or "n/a")
+        print(
+            "  rollup: "
+            f"same_source={str(_safe_bool(item.get('require_same_source'))).lower()} "
+            f"candidates={_safe_int(item.get('candidate_count'))} "
+            f"pass={_safe_int(item.get('pass_count'))} "
+            f"pass_rate={_safe_float(item.get('pass_rate')):.2%} "
+            f"avg_ΣΔpnl={_safe_float(item.get('avg_total_delta_pnl')):+.4f} "
+            f"best={best_candidate} "
+            f"best_pass={best_pass_candidate}"
         )
 
     return 0

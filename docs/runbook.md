@@ -346,7 +346,7 @@ python scripts/s10_param_grid_compare.py \
 输出目录：`artifacts/backtest/s10-grid-<anchor>/`
 - `candidates/cand-*.yaml`：每组参数对应的 candidate 配置
 - `runs/cand-*/compare.json`：调用 `sx12_dual_slice_compare.py` 的原始对照结果
-- `grid-results.json` / `grid-results.md`：按 `pass(min_slice_delta_pnl + max_slice_delta_max_drawdown + settle_profile_match)` -> `min(Δpnl)` -> `max(ΔmaxDD)` -> `ΣΔpnl`（再按 `ΣΔexec`、`ΣΔrej`、`ΣΔmaxDD`）排序的网格排名摘要
+- `grid-results.json` / `grid-results.md`：按 `pass(min_slice_delta_pnl + max_slice_delta_max_drawdown + settle_profile_match)` -> `min(Δpnl)` -> `max(ΔmaxDD)` -> `ΣΔpnl`（再按 `ΣΔexec`、`ΣΔrej`、`ΣΔmaxDD`）排序的网格排名摘要；并新增 `same_source_rollup`/`Same-source guard rollup`，按 `require_same_source` 聚合候选数量、通过率与均值Δ指标，快速比较同源守卫开关影响
 - 结算口径门控默认开启：若某候选在任一切片出现 `settle_mismatch_slice_count>0`，会显示 `pass_settle?=no` 且 `pass=false`。若只想观测不拦截，可加 `--allow-settle-profile-mismatch`。QA 回归可用 `--inject-candidate-settle-mismatch` 强制候选关闭 settle 以验证门控。
 
 `--rolling-reject-top-k` 语义：`0=disabled`（关闭拒单原因摘要输出），`N>0` 输出前 N 个原因（无数据时为 `none`）。

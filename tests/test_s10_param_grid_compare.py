@@ -222,6 +222,61 @@ def test_candidate_sort_key_prefers_constraint_pass_then_slice_stability() -> No
     assert [row["candidate_id"] for row in ranked] == ["cand-a", "cand-b", "cand-c"]
 
 
+def test_summarize_same_source_rollup_groups_and_ranks_candidates() -> None:
+    module = _load_module()
+
+    entries = [
+        {
+            "candidate_id": "cand-a",
+            "overrides": {"require_same_source": False},
+            "passes_constraints": True,
+            "min_slice_delta_pnl": 0.10,
+            "max_slice_delta_max_drawdown": 0.00,
+            "total_delta_pnl": 1.20,
+            "total_delta_exec": 4,
+            "total_delta_rej": -1,
+        },
+        {
+            "candidate_id": "cand-b",
+            "overrides": {"require_same_source": False},
+            "passes_constraints": False,
+            "min_slice_delta_pnl": -0.20,
+            "max_slice_delta_max_drawdown": 0.30,
+            "total_delta_pnl": -0.40,
+            "total_delta_exec": -1,
+            "total_delta_rej": 2,
+        },
+        {
+            "candidate_id": "cand-c",
+            "overrides": {"require_same_source": True},
+            "passes_constraints": True,
+            "min_slice_delta_pnl": 0.05,
+            "max_slice_delta_max_drawdown": 0.01,
+            "total_delta_pnl": 0.80,
+            "total_delta_exec": 2,
+            "total_delta_rej": 0,
+        },
+    ]
+
+    rollup = module.summarize_same_source_rollup(entries)
+    assert len(rollup) == 2
+
+    same_source_off = next(item for item in rollup if item["require_same_source"] is False)
+    assert int(same_source_off["candidate_count"]) == 2
+    assert int(same_source_off["pass_count"]) == 1
+    assert abs(float(same_source_off["pass_rate"]) - 0.5) < 1e-12
+    assert str(same_source_off["best_candidate_id"]) == "cand-a"
+    assert str(same_source_off["best_pass_candidate_id"]) == "cand-a"
+    assert abs(float(same_source_off["avg_total_delta_pnl"]) - 0.4) < 1e-12
+
+    same_source_on = next(item for item in rollup if item["require_same_source"] is True)
+    assert int(same_source_on["candidate_count"]) == 1
+    assert int(same_source_on["pass_count"]) == 1
+    assert abs(float(same_source_on["pass_rate"]) - 1.0) < 1e-12
+    assert str(same_source_on["best_candidate_id"]) == "cand-c"
+    assert str(same_source_on["best_pass_candidate_id"]) == "cand-c"
+
+
 def test_apply_constraint_flags_respects_settle_profile_guard() -> None:
     module = _load_module()
 
@@ -429,6 +484,23 @@ def test_summarize_compare_payload_and_markdown() -> None:
             "min_slice_delta_pnl_threshold": 0.0,
             "max_slice_delta_max_drawdown_threshold": 0.0,
             "total_candidates": 1,
+            "same_source_rollup": [
+                {
+                    "require_same_source": True,
+                    "candidate_count": 1,
+                    "pass_count": 1,
+                    "pass_rate": 1.0,
+                    "avg_total_delta_pnl": 0.5,
+                    "avg_min_slice_delta_pnl": 0.1,
+                    "avg_total_delta_exec": 4.0,
+                    "avg_total_delta_rej": -3.0,
+                    "best_candidate_id": "cand-001",
+                    "best_total_delta_pnl": 0.5,
+                    "best_min_slice_delta_pnl": 0.1,
+                    "best_pass_candidate_id": "cand-001",
+                    "best_pass_total_delta_pnl": 0.5,
+                }
+            ],
             "candidates": [
                 {
                     "rank": 1,
@@ -465,5 +537,10 @@ def test_summarize_compare_payload_and_markdown() -> None:
     )
     assert (
         "| 1 | cand-001 | 0.0150 | 0.1500 | 0.2000 | 0.2500 | true | unknown | unknown | +0 | 0.00% | none | yes | +0.1000 | -0.1000 | +0.5000 | +4 | -3 | +7 | -7 | -3 | +1 | -0.2000 | +0.0800 | yes |"
+        in markdown
+    )
+    assert "## Same-source guard rollup" in markdown
+    assert (
+        "| true | 1 | 1 | 100.00% | +0.5000 | +0.1000 | +4.00 | -3.00 | cand-001 | +0.5000 | +0.1000 | cand-001 | +0.5000 |"
         in markdown
     )
