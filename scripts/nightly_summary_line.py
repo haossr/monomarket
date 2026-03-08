@@ -119,6 +119,83 @@ def _format_bool_flag(value: bool | None) -> str:
     return str(value).lower()
 
 
+def _coerce_bool(raw: object) -> bool | None:
+    return raw if isinstance(raw, bool) else None
+
+
+def _normalize_s10_same_source_rollup(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    defaults: dict[bool, dict[str, Any]] = {
+        False: {
+            "require_same_source": False,
+            "candidate_count": 0,
+            "pass_count": 0,
+            "pass_rate": 0.0,
+            "avg_total_delta_pnl": 0.0,
+            "avg_min_slice_delta_pnl": 0.0,
+            "avg_total_delta_exec": 0.0,
+            "avg_total_delta_rej": 0.0,
+            "best_candidate_id": "n/a",
+            "best_total_delta_pnl": 0.0,
+            "best_min_slice_delta_pnl": 0.0,
+            "best_pass_candidate_id": "n/a",
+            "best_pass_total_delta_pnl": 0.0,
+            "best_pass_min_slice_delta_pnl": 0.0,
+        },
+        True: {
+            "require_same_source": True,
+            "candidate_count": 0,
+            "pass_count": 0,
+            "pass_rate": 0.0,
+            "avg_total_delta_pnl": 0.0,
+            "avg_min_slice_delta_pnl": 0.0,
+            "avg_total_delta_exec": 0.0,
+            "avg_total_delta_rej": 0.0,
+            "best_candidate_id": "n/a",
+            "best_total_delta_pnl": 0.0,
+            "best_min_slice_delta_pnl": 0.0,
+            "best_pass_candidate_id": "n/a",
+            "best_pass_total_delta_pnl": 0.0,
+            "best_pass_min_slice_delta_pnl": 0.0,
+        },
+    }
+    if not isinstance(payload, dict):
+        return [dict(defaults[False]), dict(defaults[True])]
+
+    raw_rows = payload.get("same_source_rollup")
+    rows = raw_rows if isinstance(raw_rows, list) else []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        same_source = _coerce_bool(row.get("require_same_source"))
+        if same_source is None:
+            continue
+
+        candidate_count = max(0, int(_f(row.get("candidate_count"))))
+        pass_count = max(0, int(_f(row.get("pass_count"))))
+        pass_rate = min(1.0, max(0.0, float(_f(row.get("pass_rate")))))
+        if candidate_count > 0 and pass_count <= candidate_count:
+            pass_rate = float(pass_count) / float(candidate_count)
+
+        defaults[same_source] = {
+            "require_same_source": same_source,
+            "candidate_count": candidate_count,
+            "pass_count": pass_count,
+            "pass_rate": pass_rate,
+            "avg_total_delta_pnl": float(_f(row.get("avg_total_delta_pnl"))),
+            "avg_min_slice_delta_pnl": float(_f(row.get("avg_min_slice_delta_pnl"))),
+            "avg_total_delta_exec": float(_f(row.get("avg_total_delta_exec"))),
+            "avg_total_delta_rej": float(_f(row.get("avg_total_delta_rej"))),
+            "best_candidate_id": str(row.get("best_candidate_id") or "n/a"),
+            "best_total_delta_pnl": float(_f(row.get("best_total_delta_pnl"))),
+            "best_min_slice_delta_pnl": float(_f(row.get("best_min_slice_delta_pnl"))),
+            "best_pass_candidate_id": str(row.get("best_pass_candidate_id") or "n/a"),
+            "best_pass_total_delta_pnl": float(_f(row.get("best_pass_total_delta_pnl"))),
+            "best_pass_min_slice_delta_pnl": float(_f(row.get("best_pass_min_slice_delta_pnl"))),
+        }
+
+    return [dict(defaults[False]), dict(defaults[True])]
+
+
 def _strategy_focus_config_context(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {
@@ -155,6 +232,15 @@ def _strategy_focus_config_context(payload: dict[str, Any] | None) -> dict[str, 
 
 
 def _s10_grid_compare_focus(payload: dict[str, Any] | None) -> dict[str, Any]:
+    same_source_rollup = _normalize_s10_same_source_rollup(payload)
+    same_source_rollup_map = {
+        bool(item.get("require_same_source", False)): item
+        for item in same_source_rollup
+        if isinstance(item, dict)
+    }
+    same_source_false = same_source_rollup_map.get(False, {})
+    same_source_true = same_source_rollup_map.get(True, {})
+
     default = {
         "available": False,
         "candidate_count": 0,
@@ -168,6 +254,7 @@ def _s10_grid_compare_focus(payload: dict[str, Any] | None) -> dict[str, Any]:
         "best_settle_mismatch_slice_labels": [],
         "best_passes_settle_profile_match": False,
         "best_passes_constraints": False,
+        "same_source_rollup": same_source_rollup,
         "source": "",
         "text": (
             "s10_grid_available=false s10_grid_candidates=0 "
@@ -175,7 +262,13 @@ def _s10_grid_compare_focus(payload: dict[str, Any] | None) -> dict[str, Any]:
             "s10_grid_pass_settle_candidates=0 s10_grid_pass_settle_rate=0.00% "
             "s10_grid_top_candidate=n/a s10_grid_top_rank=0 "
             "s10_grid_top_settle_mismatch_rate=0.00% s10_grid_top_settle_mismatch_labels=none "
-            "s10_grid_top_pass_settle=false s10_grid_top_pass_constraints=false"
+            "s10_grid_top_pass_settle=false s10_grid_top_pass_constraints=false "
+            f"s10_grid_same_source_false_candidates={int(_f(same_source_false.get('candidate_count')))} "
+            f"s10_grid_same_source_false_pass_rate={_f(same_source_false.get('pass_rate')):.2%} "
+            f"s10_grid_same_source_false_avg_delta_pnl={_f(same_source_false.get('avg_total_delta_pnl')):+.4f} "
+            f"s10_grid_same_source_true_candidates={int(_f(same_source_true.get('candidate_count')))} "
+            f"s10_grid_same_source_true_pass_rate={_f(same_source_true.get('pass_rate')):.2%} "
+            f"s10_grid_same_source_true_avg_delta_pnl={_f(same_source_true.get('avg_total_delta_pnl')):+.4f}"
         ),
     }
     if not isinstance(payload, dict):
@@ -197,7 +290,13 @@ def _s10_grid_compare_focus(payload: dict[str, Any] | None) -> dict[str, Any]:
                 "s10_grid_pass_settle_candidates=0 s10_grid_pass_settle_rate=0.00% "
                 "s10_grid_top_candidate=n/a s10_grid_top_rank=0 "
                 "s10_grid_top_settle_mismatch_rate=0.00% s10_grid_top_settle_mismatch_labels=none "
-                "s10_grid_top_pass_settle=false s10_grid_top_pass_constraints=false"
+                "s10_grid_top_pass_settle=false s10_grid_top_pass_constraints=false "
+                f"s10_grid_same_source_false_candidates={int(_f(same_source_false.get('candidate_count')))} "
+                f"s10_grid_same_source_false_pass_rate={_f(same_source_false.get('pass_rate')):.2%} "
+                f"s10_grid_same_source_false_avg_delta_pnl={_f(same_source_false.get('avg_total_delta_pnl')):+.4f} "
+                f"s10_grid_same_source_true_candidates={int(_f(same_source_true.get('candidate_count')))} "
+                f"s10_grid_same_source_true_pass_rate={_f(same_source_true.get('pass_rate')):.2%} "
+                f"s10_grid_same_source_true_avg_delta_pnl={_f(same_source_true.get('avg_total_delta_pnl')):+.4f}"
             ),
         }
 
@@ -248,6 +347,7 @@ def _s10_grid_compare_focus(payload: dict[str, Any] | None) -> dict[str, Any]:
         "best_settle_mismatch_slice_labels": best_settle_mismatch_slice_labels,
         "best_passes_settle_profile_match": bool(best.get("passes_settle_profile_match", False)),
         "best_passes_constraints": bool(best.get("passes_constraints", False)),
+        "same_source_rollup": same_source_rollup,
         "source": str(payload.get("_source", "")),
         "text": (
             f"s10_grid_available=true "
@@ -261,7 +361,13 @@ def _s10_grid_compare_focus(payload: dict[str, Any] | None) -> dict[str, Any]:
             f"s10_grid_top_settle_mismatch_rate={best_settle_mismatch_slice_rate:.2%} "
             f"s10_grid_top_settle_mismatch_labels={_format_slice_labels(best_settle_mismatch_slice_labels)} "
             f"s10_grid_top_pass_settle={str(bool(best.get('passes_settle_profile_match', False))).lower()} "
-            f"s10_grid_top_pass_constraints={str(bool(best.get('passes_constraints', False))).lower()}"
+            f"s10_grid_top_pass_constraints={str(bool(best.get('passes_constraints', False))).lower()} "
+            f"s10_grid_same_source_false_candidates={int(_f(same_source_false.get('candidate_count')))} "
+            f"s10_grid_same_source_false_pass_rate={_f(same_source_false.get('pass_rate')):.2%} "
+            f"s10_grid_same_source_false_avg_delta_pnl={_f(same_source_false.get('avg_total_delta_pnl')):+.4f} "
+            f"s10_grid_same_source_true_candidates={int(_f(same_source_true.get('candidate_count')))} "
+            f"s10_grid_same_source_true_pass_rate={_f(same_source_true.get('pass_rate')):.2%} "
+            f"s10_grid_same_source_true_avg_delta_pnl={_f(same_source_true.get('avg_total_delta_pnl')):+.4f}"
         ),
     }
 
@@ -1131,6 +1237,35 @@ def build_summary_bundle(
         if isinstance(raw_s10_grid_best_labels, list)
         else []
     )
+    raw_s10_grid_same_source_rollup = s10_grid_focus.get("same_source_rollup")
+    s10_grid_same_source_rollup: list[dict[str, Any]] = []
+    if isinstance(raw_s10_grid_same_source_rollup, list):
+        for item in raw_s10_grid_same_source_rollup:
+            if not isinstance(item, dict):
+                continue
+            same_source = _coerce_bool(item.get("require_same_source"))
+            if same_source is None:
+                continue
+            s10_grid_same_source_rollup.append(
+                {
+                    "require_same_source": same_source,
+                    "candidate_count": int(_f(item.get("candidate_count"))),
+                    "pass_count": int(_f(item.get("pass_count"))),
+                    "pass_rate": float(_f(item.get("pass_rate"))),
+                    "avg_total_delta_pnl": float(_f(item.get("avg_total_delta_pnl"))),
+                    "avg_min_slice_delta_pnl": float(_f(item.get("avg_min_slice_delta_pnl"))),
+                    "avg_total_delta_exec": float(_f(item.get("avg_total_delta_exec"))),
+                    "avg_total_delta_rej": float(_f(item.get("avg_total_delta_rej"))),
+                    "best_candidate_id": str(item.get("best_candidate_id") or "n/a"),
+                    "best_total_delta_pnl": float(_f(item.get("best_total_delta_pnl"))),
+                    "best_min_slice_delta_pnl": float(_f(item.get("best_min_slice_delta_pnl"))),
+                    "best_pass_candidate_id": str(item.get("best_pass_candidate_id") or "n/a"),
+                    "best_pass_total_delta_pnl": float(_f(item.get("best_pass_total_delta_pnl"))),
+                    "best_pass_min_slice_delta_pnl": float(
+                        _f(item.get("best_pass_min_slice_delta_pnl"))
+                    ),
+                }
+            )
 
     strategy_config_context = _strategy_focus_config_context(sx12_compare_payload)
     strategy_focus_baseline_config = strategy_config_context.get("baseline")
@@ -1477,8 +1612,8 @@ def build_summary_bundle(
         f"| {strategy_focus_s9_text} {strategy_focus_s9_activity_hint_text} "
         f"| {strategy_focus_s10_text} {strategy_focus_s10_activity_hint_text} "
         f"s9_minus_s10_pnl={strategy_focus_pnl_diff_s9_minus_s10:.4f} "
-        f"s9_cfg_diff_keys={s9_config_diff_keys_text or "none"} "
-        f"s10_cfg_diff_keys={s10_config_diff_keys_text or "none"} "
+        f"s9_cfg_diff_keys={s9_config_diff_keys_text or 'none'} "
+        f"s10_cfg_diff_keys={s10_config_diff_keys_text or 'none'} "
         f"sx12_cfg_diff_only={str(strategy_config_diff_only).lower()} "
         f"s9_cfg_cross_src_baseline={_format_bool_flag(s9_cross_source_guard_baseline)} "
         f"s9_cfg_cross_src_candidate={_format_bool_flag(s9_cross_source_guard_candidate)} "
@@ -1758,6 +1893,7 @@ def build_summary_bundle(
                     "best_passes_constraints": bool(
                         s10_grid_focus.get("best_passes_constraints", False)
                     ),
+                    "same_source_rollup": s10_grid_same_source_rollup,
                     "text": s10_grid_focus_text,
                 },
                 "text": str(strategy_focus_s10.get("text") or ""),
