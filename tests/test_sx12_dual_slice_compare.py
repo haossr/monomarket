@@ -252,6 +252,44 @@ def test_summarize_strategy_extracts_generation_from_cycle_meta() -> None:
     )
 
 
+def test_extract_strategy_config_context_only_keeps_focus_keys() -> None:
+    module = _load_module()
+
+    context = module._extract_strategy_config_context(
+        config_payload={
+            "strategies": {
+                "s9": {
+                    "min_effective_edge_bps": 20.0,
+                    "require_same_market": True,
+                    "unknown_key": "ignored",
+                },
+                "s10": {
+                    "convert_value": 1.02,
+                    "conversion_fee_bps": 12.0,
+                    "max_weighted_total_cost_bps": 120.0,
+                    "list_value": [1, 2, 3],
+                },
+                "s1": {
+                    "max_signals": 10,
+                },
+            }
+        },
+        strategies=["s9", "s10", "s1"],
+    )
+
+    assert context == {
+        "s9": {
+            "min_effective_edge_bps": 20.0,
+            "require_same_market": True,
+        },
+        "s10": {
+            "convert_value": 1.02,
+            "conversion_fee_bps": 12.0,
+            "max_weighted_total_cost_bps": 120.0,
+        },
+    }
+
+
 def test_summary_delta_and_markdown_render() -> None:
     module = _load_module()
 
@@ -305,6 +343,18 @@ def test_summary_delta_and_markdown_render() -> None:
             "anchor_ts": "2026-03-07T17:39:00Z",
             "baseline_config": "/tmp/base.yaml",
             "candidate_config": "/tmp/candidate.yaml",
+            "baseline_strategy_config": {
+                "s9": {
+                    "min_effective_edge_bps": 20.0,
+                    "require_same_market": True,
+                }
+            },
+            "candidate_strategy_config": {
+                "s9": {
+                    "min_effective_edge_bps": 35.0,
+                    "require_same_market": False,
+                }
+            },
             "strategies": ["s9"],
             "slices": [
                 {
@@ -331,6 +381,10 @@ def test_summary_delta_and_markdown_render() -> None:
         "- settle_window_end: base=true (cycle_meta.signal_generation.settle_window_end), "
         "cand=false (report.execution_config.settle_window_end_positions)"
     ) in rendered
+    assert "## Strategy config context" in rendered
+    assert "- s9 baseline: min_effective_edge_bps=20, require_same_market=true" in rendered
+    assert "- s9 candidate: min_effective_edge_bps=35, require_same_market=false" in rendered
+    assert "- s9 diff: min_effective_edge_bps:20->35, require_same_market:true->false" in rendered
     assert "| s9 | -0.5000 | 0.1000 | +0.6000 |" in rendered
     assert "| 1 | 4 | +3 | 5 | 2 | -3 |" in rendered
     assert (

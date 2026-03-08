@@ -18,6 +18,39 @@ from monomarket.backtest.reject_reason import aggregate_reject_reasons
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+STRATEGY_CONFIG_KEYS: dict[str, tuple[str, ...]] = {
+    "s9": (
+        "min_effective_edge_bps",
+        "fee_bps",
+        "slippage_bps",
+        "depth_reference_liquidity",
+        "depth_penalty_max_bps",
+        "max_total_cost_bps",
+        "max_pairs_per_event",
+        "max_event_pair_notional",
+        "require_same_event",
+        "require_same_condition",
+        "require_same_market",
+        "cross_market_require_same_source",
+        "cross_market_extra_edge_bps",
+    ),
+    "s10": (
+        "prob_sum_tolerance",
+        "convert_value",
+        "conversion_fee_bps",
+        "min_effective_edge_bps",
+        "fee_bps",
+        "slippage_bps",
+        "depth_reference_liquidity",
+        "depth_penalty_max_bps",
+        "max_weighted_total_cost_bps",
+        "max_leg_total_cost_bps",
+        "max_tiny_price_leg_share",
+        "max_floor_adjusted_leg_share",
+        "allow_sell_conversion",
+    ),
+}
+
 
 @dataclass(slots=True, frozen=True)
 class SliceSpec:
@@ -81,6 +114,46 @@ def parse_slice_specs(raw: str) -> list[SliceSpec]:
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     raw = yaml.safe_load(path.read_text())
     return raw if isinstance(raw, dict) else {}
+
+
+def _format_scalar(raw: Any) -> str:
+    if isinstance(raw, bool):
+        return str(raw).lower()
+    if isinstance(raw, float):
+        return f"{raw:g}"
+    return str(raw)
+
+
+def _extract_strategy_config_context(
+    *,
+    config_payload: dict[str, Any],
+    strategies: list[str],
+) -> dict[str, dict[str, Any]]:
+    strategies_payload = config_payload.get("strategies")
+    if not isinstance(strategies_payload, dict):
+        return {}
+
+    context: dict[str, dict[str, Any]] = {}
+    for strategy_raw in strategies:
+        strategy = str(strategy_raw).strip().lower()
+        keys = STRATEGY_CONFIG_KEYS.get(strategy)
+        if not keys:
+            continue
+
+        strategy_payload = strategies_payload.get(strategy)
+        if not isinstance(strategy_payload, dict):
+            continue
+
+        selected: dict[str, Any] = {}
+        for key in keys:
+            if key not in strategy_payload:
+                continue
+            value = strategy_payload.get(key)
+            if isinstance(value, str | int | float | bool):
+                selected[key] = value
+        if selected:
+            context[strategy] = selected
+    return context
 
 
 def _resolve_db_path(config_payload: dict[str, Any], *, config_path: Path) -> Path:
@@ -509,6 +582,23 @@ def _run_backtest(
     return payload
 
 
+def _render_strategy_config_values(config: dict[str, Any]) -> str:
+    if not config:
+        return "none"
+    return ", ".join(f"{key}={_format_scalar(config[key])}" for key in sorted(config.keys()))
+
+
+def _render_strategy_config_diff(base: dict[str, Any], cand: dict[str, Any]) -> str:
+    changed: list[str] = []
+    for key in sorted(set(base.keys()) | set(cand.keys())):
+        base_value = base.get(key)
+        cand_value = cand.get(key)
+        if base_value == cand_value:
+            continue
+        changed.append(f"{key}:{_format_scalar(base_value)}->{_format_scalar(cand_value)}")
+    return ", ".join(changed) if changed else "none"
+
+
 def render_markdown(result: dict[str, Any]) -> str:
     lines: list[str] = [
         "# Sx12 Dual-Slice Compare",
@@ -527,6 +617,29 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- candidate_settle_window_end: {bool(result.get('candidate_settle_window_end', True))}",
         "",
     ]
+
+    raw_baseline_strategy_config = result.get("baseline_strategy_config")
+    baseline_strategy_config: dict[str, Any] = (
+        raw_baseline_strategy_config if isinstance(raw_baseline_strategy_config, dict) else {}
+    )
+    raw_candidate_strategy_config = result.get("candidate_strategy_config")
+    candidate_strategy_config: dict[str, Any] = (
+        raw_candidate_strategy_config if isinstance(raw_candidate_strategy_config, dict) else {}
+    )
+    if baseline_strategy_config or candidate_strategy_config:
+        lines.append("## Strategy config context")
+        for strategy_raw in result.get("strategies", []):
+            strategy = str(strategy_raw).strip().lower()
+            base_payload = baseline_strategy_config.get(strategy)
+            base = base_payload if isinstance(base_payload, dict) else {}
+            cand_payload = candidate_strategy_config.get(strategy)
+            cand = cand_payload if isinstance(cand_payload, dict) else {}
+            if not base and not cand:
+                continue
+            lines.append(f"- {strategy} baseline: {_render_strategy_config_values(base)}")
+            lines.append(f"- {strategy} candidate: {_render_strategy_config_values(cand)}")
+            lines.append(f"- {strategy} diff: {_render_strategy_config_diff(base, cand)}")
+        lines.append("")
 
     for item in result.get("slices", []):
         if not isinstance(item, dict):
@@ -707,12 +820,22 @@ def main() -> int:
 
     normalize_reject_reasons = not bool(args.no_normalize_reject_reasons)
     strategies_csv = ",".join(strategies)
+    baseline_config_payload = _load_yaml_mapping(baseline_config)
+    candidate_config_payload = _load_yaml_mapping(candidate_config)
 
     result: dict[str, Any] = {
         "generated_at": _iso_z(datetime.now(UTC)),
         "anchor_ts": _iso_z(anchor),
         "baseline_config": str(baseline_config),
         "candidate_config": str(candidate_config),
+        "baseline_strategy_config": _extract_strategy_config_context(
+            config_payload=baseline_config_payload,
+            strategies=strategies,
+        ),
+        "candidate_strategy_config": _extract_strategy_config_context(
+            config_payload=candidate_config_payload,
+            strategies=strategies,
+        ),
         "strategies": strategies,
         "normalize_reject_reasons": normalize_reject_reasons,
         "rebuild_signals_window": bool(args.rebuild_signals_window),
