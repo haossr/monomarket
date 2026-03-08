@@ -612,14 +612,67 @@ def _render_strategy_config_diff(base: dict[str, Any], cand: dict[str, Any]) -> 
     return ", ".join(changed) if changed else "none"
 
 
+def _parse_bool_flag(raw: Any) -> bool | None:
+    if isinstance(raw, bool):
+        return raw
+    return None
+
+
+def _format_bool_flag(raw: bool | None) -> str:
+    if raw is None:
+        return "n/a"
+    return str(raw).lower()
+
+
+def _extract_guard_snapshot(
+    *,
+    baseline_strategy_config: dict[str, Any],
+    candidate_strategy_config: dict[str, Any],
+) -> dict[str, dict[str, bool | None]]:
+    def _strategy_bool(
+        payload: dict[str, Any],
+        strategy: str,
+        key: str,
+    ) -> bool | None:
+        row = payload.get(strategy)
+        if not isinstance(row, dict):
+            return None
+        return _parse_bool_flag(row.get(key))
+
+    return {
+        "s9_cross_market_require_same_source": {
+            "baseline": _strategy_bool(
+                baseline_strategy_config,
+                "s9",
+                "cross_market_require_same_source",
+            ),
+            "candidate": _strategy_bool(
+                candidate_strategy_config,
+                "s9",
+                "cross_market_require_same_source",
+            ),
+        },
+        "s10_require_same_source": {
+            "baseline": _strategy_bool(
+                baseline_strategy_config,
+                "s10",
+                "require_same_source",
+            ),
+            "candidate": _strategy_bool(
+                candidate_strategy_config,
+                "s10",
+                "require_same_source",
+            ),
+        },
+    }
+
+
 def _filter_strategy_config_diff_only(
     base: dict[str, Any],
     cand: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], bool]:
     changed_keys = [
-        key
-        for key in sorted(set(base.keys()) | set(cand.keys()))
-        if base.get(key) != cand.get(key)
+        key for key in sorted(set(base.keys()) | set(cand.keys())) if base.get(key) != cand.get(key)
     ]
     if not changed_keys:
         return {}, {}, False
@@ -685,6 +738,26 @@ def render_markdown(result: dict[str, Any]) -> str:
 
         if rendered_strategy_rows == 0 and strategy_config_diff_only:
             lines.append("- no strategy config diffs")
+        lines.append("")
+
+    guard_snapshot_raw = result.get("guard_snapshot")
+    guard_snapshot = guard_snapshot_raw if isinstance(guard_snapshot_raw, dict) else {}
+    if guard_snapshot:
+        lines.append("## Guard snapshot")
+        for guard_key in ("s9_cross_market_require_same_source", "s10_require_same_source"):
+            guard_payload = guard_snapshot.get(guard_key)
+            guard_row = guard_payload if isinstance(guard_payload, dict) else {}
+            baseline_value = _parse_bool_flag(guard_row.get("baseline"))
+            candidate_value = _parse_bool_flag(guard_row.get("candidate"))
+            diff_flag = (
+                "n/a"
+                if baseline_value is None or candidate_value is None
+                else str(baseline_value != candidate_value).lower()
+            )
+            lines.append(
+                f"- {guard_key}: baseline={_format_bool_flag(baseline_value)} "
+                f"candidate={_format_bool_flag(candidate_value)} diff={diff_flag}"
+            )
         lines.append("")
 
     for item in result.get("slices", []):
@@ -833,16 +906,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--baseline-no-settle-window-end",
         action="store_true",
-        help=(
-            "Run baseline slices with --no-settle-window-end (default baseline settle is on)."
-        ),
+        help=("Run baseline slices with --no-settle-window-end (default baseline settle is on)."),
     )
     parser.add_argument(
         "--candidate-no-settle-window-end",
         action="store_true",
-        help=(
-            "Run candidate slices with --no-settle-window-end (default candidate settle is on)."
-        ),
+        help=("Run candidate slices with --no-settle-window-end (default candidate settle is on)."),
     )
     parser.add_argument(
         "--strategy-config-diff-only",
@@ -877,14 +946,11 @@ def main() -> int:
         raise ValueError("no config_context_strategies selected")
 
     unknown_context_strategies = [
-        strategy
-        for strategy in config_context_strategies
-        if strategy not in STRATEGY_CONFIG_KEYS
+        strategy for strategy in config_context_strategies if strategy not in STRATEGY_CONFIG_KEYS
     ]
     if unknown_context_strategies:
         raise ValueError(
-            "unsupported config_context_strategies: "
-            + ",".join(unknown_context_strategies)
+            "unsupported config_context_strategies: " + ",".join(unknown_context_strategies)
         )
 
     specs = parse_slice_specs(str(args.slices))
@@ -903,18 +969,25 @@ def main() -> int:
     baseline_config_payload = _load_yaml_mapping(baseline_config)
     candidate_config_payload = _load_yaml_mapping(candidate_config)
 
+    baseline_strategy_config = _extract_strategy_config_context(
+        config_payload=baseline_config_payload,
+        strategies=config_context_strategies,
+    )
+    candidate_strategy_config = _extract_strategy_config_context(
+        config_payload=candidate_config_payload,
+        strategies=config_context_strategies,
+    )
+
     result: dict[str, Any] = {
         "generated_at": _iso_z(datetime.now(UTC)),
         "anchor_ts": _iso_z(anchor),
         "baseline_config": str(baseline_config),
         "candidate_config": str(candidate_config),
-        "baseline_strategy_config": _extract_strategy_config_context(
-            config_payload=baseline_config_payload,
-            strategies=config_context_strategies,
-        ),
-        "candidate_strategy_config": _extract_strategy_config_context(
-            config_payload=candidate_config_payload,
-            strategies=config_context_strategies,
+        "baseline_strategy_config": baseline_strategy_config,
+        "candidate_strategy_config": candidate_strategy_config,
+        "guard_snapshot": _extract_guard_snapshot(
+            baseline_strategy_config=baseline_strategy_config,
+            candidate_strategy_config=candidate_strategy_config,
         ),
         "strategies": strategies,
         "config_context_strategies": config_context_strategies,
@@ -990,9 +1063,11 @@ def main() -> int:
             baseline_report,
             cycle_meta=baseline_cycle_meta_payload,
         )
-        candidate_settle_window_end, candidate_settle_window_end_source = _extract_settle_window_end(
-            candidate_report,
-            cycle_meta=candidate_cycle_meta_payload,
+        candidate_settle_window_end, candidate_settle_window_end_source = (
+            _extract_settle_window_end(
+                candidate_report,
+                cycle_meta=candidate_cycle_meta_payload,
+            )
         )
 
         baseline_by_strategy = {
