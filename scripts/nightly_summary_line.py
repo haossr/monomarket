@@ -111,6 +111,7 @@ def _strategy_focus_config_context(payload: dict[str, Any] | None) -> dict[str, 
             "baseline": {},
             "candidate": {},
             "diff_keys": {strategy: [] for strategy in FOCUS_STRATEGIES},
+            "strategy_config_diff_only": False,
         }
 
     baseline = _extract_focus_strategy_config(payload.get("baseline_strategy_config"))
@@ -123,12 +124,17 @@ def _strategy_focus_config_context(payload: dict[str, Any] | None) -> dict[str, 
         for strategy in FOCUS_STRATEGIES
     }
     available = bool(baseline or candidate)
+    raw_strategy_config_diff_only = payload.get("strategy_config_diff_only")
+    strategy_config_diff_only = (
+        raw_strategy_config_diff_only if isinstance(raw_strategy_config_diff_only, bool) else False
+    )
     return {
         "available": available,
         "source": str(payload.get("_source", "")),
         "baseline": baseline,
         "candidate": candidate,
         "diff_keys": diff_keys,
+        "strategy_config_diff_only": strategy_config_diff_only,
     }
 
 
@@ -1129,6 +1135,7 @@ def build_summary_bundle(
         s10_config_diff_keys = []
     s9_config_diff_keys_text = ",".join(str(x) for x in s9_config_diff_keys if str(x).strip())
     s10_config_diff_keys_text = ",".join(str(x) for x in s10_config_diff_keys if str(x).strip())
+    strategy_config_diff_only = bool(strategy_config_context.get("strategy_config_diff_only", False))
 
     window_coverage = _compute_window_coverage(payload)
     window_coverage_ratio = float(window_coverage.get("coverage_ratio", 0.0))
@@ -1426,6 +1433,7 @@ def build_summary_bundle(
         f"s9_minus_s10_pnl={strategy_focus_pnl_diff_s9_minus_s10:.4f} "
         f"s9_cfg_diff_keys={s9_config_diff_keys_text or "none"} "
         f"s10_cfg_diff_keys={s10_config_diff_keys_text or "none"} "
+        f"sx12_cfg_diff_only={str(strategy_config_diff_only).lower()} "
         f"{s10_grid_focus_text} "
         f"| {best_text} "
         f"best_strategy_basis={best_strategy_basis} "
@@ -1521,6 +1529,7 @@ def build_summary_bundle(
                 "source": str(strategy_config_context.get("source", "")),
                 "baseline_strategy_config": strategy_focus_baseline_config,
                 "candidate_strategy_config": strategy_focus_candidate_config,
+                "strategy_config_diff_only": strategy_config_diff_only,
                 "strategy_diff_keys": {
                     strategy: [str(key) for key in keys if str(key).strip()]
                     for strategy, keys in strategy_focus_diff_keys.items()
