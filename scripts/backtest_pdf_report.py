@@ -140,6 +140,56 @@ def _extract_sx12_guard_snapshot(sx12_compare_payload: dict[str, Any] | None) ->
     }
 
 
+def _extract_s10_same_source_rollup(s10_grid_payload: dict[str, Any] | None) -> dict[str, Any]:
+    def _default_bucket() -> dict[str, Any]:
+        return {
+            "candidate_count": 0,
+            "pass_count": 0,
+            "pass_rate": 0.0,
+            "avg_total_delta_pnl": 0.0,
+        }
+
+    result: dict[str, Any] = {
+        "available": False,
+        "source": "",
+        "same_source_false": _default_bucket(),
+        "same_source_true": _default_bucket(),
+    }
+    if not isinstance(s10_grid_payload, dict):
+        return result
+
+    result["available"] = True
+    result["source"] = str(s10_grid_payload.get("_source", ""))
+
+    rows_obj = s10_grid_payload.get("same_source_rollup")
+    rows = rows_obj if isinstance(rows_obj, list) else []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        same_source = _coerce_bool(row.get("require_same_source"))
+        if same_source is None:
+            continue
+
+        candidate_count = max(0, _safe_int(row.get("candidate_count")))
+        pass_count = max(0, _safe_int(row.get("pass_count")))
+        pass_rate = max(0.0, min(1.0, _safe_float(row.get("pass_rate"))))
+        if candidate_count > 0 and pass_count <= candidate_count:
+            pass_rate = float(pass_count) / float(candidate_count)
+
+        bucket = {
+            "candidate_count": candidate_count,
+            "pass_count": pass_count,
+            "pass_rate": pass_rate,
+            "avg_total_delta_pnl": _safe_float(row.get("avg_total_delta_pnl")),
+        }
+        if same_source:
+            result["same_source_true"] = bucket
+        else:
+            result["same_source_false"] = bucket
+
+    return result
+
+
 def _load_strategy_rows(payload: dict[str, Any], strategy_csv: Path | None) -> list[dict[str, Any]]:
     if strategy_csv and strategy_csv.exists():
         rows: list[dict[str, Any]] = []
@@ -627,6 +677,7 @@ def render_pdf(
     cycle_meta_payload: dict[str, Any] | None,
     analysis_payload: dict[str, Any] | None,
     sx12_compare_payload: dict[str, Any] | None,
+    s10_grid_payload: dict[str, Any] | None,
     output_path: Path,
     title: str,
 ) -> None:
@@ -971,6 +1022,47 @@ def render_pdf(
         f"baseline={_format_guard_bool(guard_snapshot['s10_require_same_source']['baseline'])} "
         f"candidate={_format_guard_bool(guard_snapshot['s10_require_same_source']['candidate'])}"
     )
+
+    s10_same_source_rollup = _extract_s10_same_source_rollup(s10_grid_payload)
+    s10_rollup_source = str(s10_same_source_rollup.get("source", ""))
+    if s10_rollup_source:
+        write_wrapped(f"S10 same-source rollup source: {s10_rollup_source}")
+
+    same_source_false = s10_same_source_rollup.get("same_source_false", {})
+    if not isinstance(same_source_false, dict):
+        same_source_false = {}
+    same_source_true = s10_same_source_rollup.get("same_source_true", {})
+    if not isinstance(same_source_true, dict):
+        same_source_true = {}
+
+    false_candidates = _safe_int(same_source_false.get("candidate_count"))
+    false_pass_count = _safe_int(same_source_false.get("pass_count"))
+    false_pass_rate_text = _format_rate_with_samples(
+        same_source_false.get("pass_rate"), false_candidates
+    )
+    false_avg_delta_pnl = _safe_float(same_source_false.get("avg_total_delta_pnl"))
+
+    true_candidates = _safe_int(same_source_true.get("candidate_count"))
+    true_pass_count = _safe_int(same_source_true.get("pass_count"))
+    true_pass_rate_text = _format_rate_with_samples(
+        same_source_true.get("pass_rate"), true_candidates
+    )
+    true_avg_delta_pnl = _safe_float(same_source_true.get("avg_total_delta_pnl"))
+
+    write_wrapped(
+        "s10_grid_same_source_false: "
+        f"candidates={false_candidates} "
+        f"pass_count={false_pass_count} "
+        f"pass_rate={false_pass_rate_text} "
+        f"avg_delta_pnl={false_avg_delta_pnl:+.4f}"
+    )
+    write_wrapped(
+        "s10_grid_same_source_true: "
+        f"candidates={true_candidates} "
+        f"pass_count={true_pass_count} "
+        f"pass_rate={true_pass_rate_text} "
+        f"avg_delta_pnl={true_avg_delta_pnl:+.4f}"
+    )
     write_line("")
 
     rolling_summary = _extract_rolling_summary(rolling_payload)
@@ -1205,6 +1297,10 @@ def parse_args() -> argparse.Namespace:
         "--sx12-compare-json",
         help="Optional sx12 dual-slice compare.json for guard snapshot",
     )
+    parser.add_argument(
+        "--s10-grid-json",
+        help="Optional s10 grid-results.json for same-source rollup summary",
+    )
     parser.add_argument("--output", required=True, help="Output PDF path")
     parser.add_argument("--title", default="Monomarket Backtest Report", help="PDF title")
     return parser.parse_args()
@@ -1219,6 +1315,7 @@ def main() -> None:
     cycle_meta_json = Path(args.cycle_meta_json) if args.cycle_meta_json else None
     analysis_json = Path(args.analysis_json) if args.analysis_json else None
     sx12_compare_json = Path(args.sx12_compare_json) if args.sx12_compare_json else None
+    s10_grid_json = Path(args.s10_grid_json) if args.s10_grid_json else None
     output = Path(args.output)
 
     payload = _load_payload(backtest_json)
@@ -1243,6 +1340,13 @@ def main() -> None:
             loaded_sx12_compare["_source"] = str(sx12_compare_json.resolve())
             sx12_compare_payload = loaded_sx12_compare
 
+    s10_grid_payload: dict[str, Any] | None = None
+    if s10_grid_json and s10_grid_json.exists():
+        loaded_s10_grid = _load_payload(s10_grid_json)
+        if isinstance(loaded_s10_grid, dict):
+            loaded_s10_grid["_source"] = str(s10_grid_json.resolve())
+            s10_grid_payload = loaded_s10_grid
+
     render_pdf(
         payload=payload,
         strategy_rows=strategy_rows,
@@ -1251,6 +1355,7 @@ def main() -> None:
         cycle_meta_payload=cycle_meta_payload,
         analysis_payload=analysis_payload,
         sx12_compare_payload=sx12_compare_payload,
+        s10_grid_payload=s10_grid_payload,
         output_path=output,
         title=args.title,
     )
