@@ -25,6 +25,8 @@ REBUILD_STEP_HOURS="12"
 REQUIRE_INTERPRETABLE="0"
 SETTLE_WINDOW_END="1"
 S10_GRID_JSON=""
+AUTO_FIND_S10_GRID_JSON="1"
+S10_GRID_MAX_AGE_HOURS="36"
 
 usage() {
   cat <<'USAGE'
@@ -53,6 +55,8 @@ Options:
   --rebuild-step-hours <f>        Step hours for rebuild-signals-window (default: 12)
   --no-settle-window-end          Disable expired-event settlement at window end (default: enabled)
   --s10-grid-json <path>          Optional S10 grid-results.json for settle-mismatch sidecar metrics
+  --no-auto-s10-grid-json         Disable auto-discovery of latest s10-grid-*/grid-results.json
+  --s10-grid-max-age-hours <f>    Max age window for auto-discovered S10 grid json (default: 36)
   --require-interpretable         Fail if summary marks experiment_interpretable=false
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
@@ -135,6 +139,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --s10-grid-json)
       S10_GRID_JSON="$2"
+      shift 2
+      ;;
+    --no-auto-s10-grid-json)
+      AUTO_FIND_S10_GRID_JSON="0"
+      shift 1
+      ;;
+    --s10-grid-max-age-hours)
+      S10_GRID_MAX_AGE_HOURS="$2"
       shift 2
       ;;
     --require-interpretable)
@@ -331,6 +343,47 @@ fi
 SUMMARY_CHECKSUM_ARGS=()
 if [[ "$NIGHTLY_SUMMARY_CHECKSUM" == "1" ]]; then
   SUMMARY_CHECKSUM_ARGS=(--with-checksum)
+fi
+
+if [[ -z "$S10_GRID_JSON" && "$AUTO_FIND_S10_GRID_JSON" == "1" ]]; then
+  AUTO_FOUND_S10_GRID_JSON="$($PYTHON_BIN - "$ROOT" "$S10_GRID_MAX_AGE_HOURS" <<'PY'
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+max_age_hours = float(sys.argv[2])
+search_root = root / "artifacts" / "backtest"
+now = time.time()
+
+latest: tuple[float, Path] | None = None
+for path in search_root.glob("s10-grid-*/grid-results.json"):
+    if not path.is_file():
+        continue
+    mtime = path.stat().st_mtime
+    age_hours = (now - mtime) / 3600.0
+    if max_age_hours >= 0.0 and age_hours > max_age_hours:
+        continue
+    if latest is None or mtime > latest[0]:
+        latest = (mtime, path)
+
+if latest is not None:
+    print(str(latest[1]))
+PY
+)"
+  if [[ -n "$AUTO_FOUND_S10_GRID_JSON" ]]; then
+    S10_GRID_JSON="$AUTO_FOUND_S10_GRID_JSON"
+    echo "[nightly] auto-detected s10-grid-json: $S10_GRID_JSON"
+  else
+    echo "[nightly] no recent s10-grid-*/grid-results.json found within ${S10_GRID_MAX_AGE_HOURS}h"
+  fi
+fi
+
+if [[ -n "$S10_GRID_JSON" && ! -f "$S10_GRID_JSON" ]]; then
+  echo "[nightly] --s10-grid-json not found: $S10_GRID_JSON" >&2
+  exit 1
 fi
 
 S10_GRID_ARGS=()

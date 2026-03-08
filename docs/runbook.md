@@ -259,6 +259,8 @@ bash scripts/backtest_nightly_report.sh \
   --rolling-reject-top-k 2 \
   --config configs/soak.paper.yaml
 # 默认启用 summary.json checksum；如需关闭可加 --no-checksum
+# 默认会自动发现最近 36h 的 s10-grid-*/grid-results.json（也可显式 --s10-grid-json 指定）
+# 如需关闭自动发现：--no-auto-s10-grid-json
 # 固定窗口重放（避免 pre/post 时间漂移）可加：
 #   --from-ts 2025-08-27T00:00:00Z --to-ts 2026-02-25T12:00:00Z
 # 可选：清空窗口内旧信号后再生成（实验模式，建议仅在隔离 DB 使用）：
