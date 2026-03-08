@@ -16,6 +16,38 @@ from monomarket.backtest.reject_reason import format_reject_top, normalize_rejec
 ROLLING_REJECT_TOP_DELIMITER = ";"
 INTERPRETABLE_MIN_EXECUTED_SIGNALS = 10
 FOCUS_STRATEGIES = ("s9", "s10")
+FOCUS_STRATEGY_CONFIG_KEYS: dict[str, tuple[str, ...]] = {
+    "s9": (
+        "min_effective_edge_bps",
+        "fee_bps",
+        "slippage_bps",
+        "depth_reference_liquidity",
+        "depth_penalty_max_bps",
+        "max_total_cost_bps",
+        "max_pairs_per_event",
+        "max_event_pair_notional",
+        "require_same_event",
+        "require_same_condition",
+        "require_same_market",
+        "cross_market_require_same_source",
+        "cross_market_extra_edge_bps",
+    ),
+    "s10": (
+        "prob_sum_tolerance",
+        "convert_value",
+        "conversion_fee_bps",
+        "min_effective_edge_bps",
+        "fee_bps",
+        "slippage_bps",
+        "depth_reference_liquidity",
+        "depth_penalty_max_bps",
+        "max_weighted_total_cost_bps",
+        "max_leg_total_cost_bps",
+        "max_tiny_price_leg_share",
+        "max_floor_adjusted_leg_share",
+        "allow_sell_conversion",
+    ),
+}
 
 
 def _format_slice_labels(raw: object) -> str:
@@ -23,6 +55,81 @@ def _format_slice_labels(raw: object) -> str:
         return "none"
     labels = [str(item).strip() for item in raw if str(item).strip()]
     return ",".join(labels) if labels else "none"
+
+
+def _coerce_strategy_config_scalar(raw: object) -> str | int | float | bool | None:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return raw
+    if isinstance(raw, str):
+        return raw
+    return None
+
+
+def _extract_focus_strategy_config(raw: object) -> dict[str, dict[str, str | int | float | bool]]:
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict[str, dict[str, str | int | float | bool]] = {}
+    for strategy in FOCUS_STRATEGIES:
+        strategy_payload = raw.get(strategy)
+        if not isinstance(strategy_payload, dict):
+            continue
+
+        keys = FOCUS_STRATEGY_CONFIG_KEYS.get(strategy, ())
+        selected: dict[str, str | int | float | bool] = {}
+        for key in keys:
+            if key not in strategy_payload:
+                continue
+            normalized = _coerce_strategy_config_scalar(strategy_payload.get(key))
+            if normalized is None:
+                continue
+            selected[key] = normalized
+
+        if selected:
+            out[strategy] = selected
+
+    return out
+
+
+def _strategy_config_diff_keys(
+    baseline: dict[str, str | int | float | bool],
+    candidate: dict[str, str | int | float | bool],
+) -> list[str]:
+    keys = sorted(set(baseline.keys()) | set(candidate.keys()))
+    return [key for key in keys if baseline.get(key) != candidate.get(key)]
+
+
+def _strategy_focus_config_context(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {
+            "available": False,
+            "source": "",
+            "baseline": {},
+            "candidate": {},
+            "diff_keys": {strategy: [] for strategy in FOCUS_STRATEGIES},
+        }
+
+    baseline = _extract_focus_strategy_config(payload.get("baseline_strategy_config"))
+    candidate = _extract_focus_strategy_config(payload.get("candidate_strategy_config"))
+    diff_keys = {
+        strategy: _strategy_config_diff_keys(
+            baseline.get(strategy, {}),
+            candidate.get(strategy, {}),
+        )
+        for strategy in FOCUS_STRATEGIES
+    }
+    available = bool(baseline or candidate)
+    return {
+        "available": available,
+        "source": str(payload.get("_source", "")),
+        "baseline": baseline,
+        "candidate": candidate,
+        "diff_keys": diff_keys,
+    }
 
 
 def _s10_grid_compare_focus(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -895,6 +1002,7 @@ def build_summary_bundle(
     cycle_meta_payload: dict[str, Any] | None,
     analysis_payload: dict[str, Any] | None,
     s10_grid_payload: dict[str, Any] | None,
+    sx12_compare_payload: dict[str, Any] | None,
     pdf_path: Path,
     rolling_path: Path,
     nightly_date: str,
@@ -1001,6 +1109,26 @@ def build_summary_bundle(
         if isinstance(raw_s10_grid_best_labels, list)
         else []
     )
+
+    strategy_config_context = _strategy_focus_config_context(sx12_compare_payload)
+    strategy_focus_baseline_config = strategy_config_context.get("baseline")
+    if not isinstance(strategy_focus_baseline_config, dict):
+        strategy_focus_baseline_config = {}
+    strategy_focus_candidate_config = strategy_config_context.get("candidate")
+    if not isinstance(strategy_focus_candidate_config, dict):
+        strategy_focus_candidate_config = {}
+    strategy_focus_diff_keys = strategy_config_context.get("diff_keys")
+    if not isinstance(strategy_focus_diff_keys, dict):
+        strategy_focus_diff_keys = {strategy: [] for strategy in FOCUS_STRATEGIES}
+
+    s9_config_diff_keys = strategy_focus_diff_keys.get("s9")
+    if not isinstance(s9_config_diff_keys, list):
+        s9_config_diff_keys = []
+    s10_config_diff_keys = strategy_focus_diff_keys.get("s10")
+    if not isinstance(s10_config_diff_keys, list):
+        s10_config_diff_keys = []
+    s9_config_diff_keys_text = ",".join(str(x) for x in s9_config_diff_keys if str(x).strip())
+    s10_config_diff_keys_text = ",".join(str(x) for x in s10_config_diff_keys if str(x).strip())
 
     window_coverage = _compute_window_coverage(payload)
     window_coverage_ratio = float(window_coverage.get("coverage_ratio", 0.0))
@@ -1296,6 +1424,8 @@ def build_summary_bundle(
         f"| {strategy_focus_s9_text} {strategy_focus_s9_activity_hint_text} "
         f"| {strategy_focus_s10_text} {strategy_focus_s10_activity_hint_text} "
         f"s9_minus_s10_pnl={strategy_focus_pnl_diff_s9_minus_s10:.4f} "
+        f"s9_cfg_diff_keys={s9_config_diff_keys_text or "none"} "
+        f"s10_cfg_diff_keys={s10_config_diff_keys_text or "none"} "
         f"{s10_grid_focus_text} "
         f"| {best_text} "
         f"best_strategy_basis={best_strategy_basis} "
@@ -1386,6 +1516,17 @@ def build_summary_bundle(
         "strategy_focus": {
             "strategies": [str(s) for s in FOCUS_STRATEGIES],
             "pnl_diff_s9_minus_s10": strategy_focus_pnl_diff_s9_minus_s10,
+            "config_context": {
+                "available": bool(strategy_config_context.get("available", False)),
+                "source": str(strategy_config_context.get("source", "")),
+                "baseline_strategy_config": strategy_focus_baseline_config,
+                "candidate_strategy_config": strategy_focus_candidate_config,
+                "strategy_diff_keys": {
+                    strategy: [str(key) for key in keys if str(key).strip()]
+                    for strategy, keys in strategy_focus_diff_keys.items()
+                    if isinstance(strategy, str) and isinstance(keys, list)
+                },
+            },
             "s9": {
                 "strategy": str(strategy_focus_s9.get("strategy", "s9")),
                 "present": bool(strategy_focus_s9.get("present", False)),
@@ -1442,6 +1583,11 @@ def build_summary_bundle(
                         )
                     ),
                     "text": str(strategy_focus_s9_activity_hint.get("text") or ""),
+                },
+                "config_context": {
+                    "baseline": strategy_focus_baseline_config.get("s9", {}),
+                    "candidate": strategy_focus_candidate_config.get("s9", {}),
+                    "diff_keys": [str(key) for key in s9_config_diff_keys if str(key).strip()],
                 },
                 "text": str(strategy_focus_s9.get("text") or ""),
             },
@@ -1501,6 +1647,11 @@ def build_summary_bundle(
                         )
                     ),
                     "text": str(strategy_focus_s10_activity_hint.get("text") or ""),
+                },
+                "config_context": {
+                    "baseline": strategy_focus_baseline_config.get("s10", {}),
+                    "candidate": strategy_focus_candidate_config.get("s10", {}),
+                    "diff_keys": [str(key) for key in s10_config_diff_keys if str(key).strip()],
                 },
                 "grid_compare": {
                     "available": bool(s10_grid_focus.get("available", False)),
@@ -1714,6 +1865,7 @@ def build_summary_line(
     cycle_meta_payload: dict[str, Any] | None = None,
     analysis_payload: dict[str, Any] | None = None,
     s10_grid_payload: dict[str, Any] | None = None,
+    sx12_compare_payload: dict[str, Any] | None = None,
     pdf_path: Path,
     rolling_path: Path,
     nightly_date: str,
@@ -1725,6 +1877,7 @@ def build_summary_line(
         cycle_meta_payload=cycle_meta_payload,
         analysis_payload=analysis_payload,
         s10_grid_payload=s10_grid_payload,
+        sx12_compare_payload=sx12_compare_payload,
         pdf_path=pdf_path,
         rolling_path=rolling_path,
         nightly_date=nightly_date,
@@ -1741,6 +1894,7 @@ def main() -> None:
     parser.add_argument("--cycle-meta-json", default=None)
     parser.add_argument("--analysis-json", default=None)
     parser.add_argument("--s10-grid-json", default=None)
+    parser.add_argument("--sx12-compare-json", default=None)
     parser.add_argument("--summary-path", required=True)
     parser.add_argument("--summary-json-path", default=None)
     parser.add_argument("--nightly-date", required=True)
@@ -1775,12 +1929,22 @@ def main() -> None:
                 loaded_s10_grid["_source"] = str(s10_grid_path.resolve())
                 s10_grid_payload = loaded_s10_grid
 
+    sx12_compare_payload: dict[str, Any] | None = None
+    if args.sx12_compare_json:
+        sx12_compare_path = Path(args.sx12_compare_json)
+        if sx12_compare_path.exists():
+            loaded_sx12_compare = json.loads(sx12_compare_path.read_text())
+            if isinstance(loaded_sx12_compare, dict):
+                loaded_sx12_compare["_source"] = str(sx12_compare_path.resolve())
+                sx12_compare_payload = loaded_sx12_compare
+
     line, sidecar = build_summary_bundle(
         payload=payload,
         rolling_payload=rolling_payload,
         cycle_meta_payload=cycle_meta_payload,
         analysis_payload=analysis_payload,
         s10_grid_payload=s10_grid_payload,
+        sx12_compare_payload=sx12_compare_payload,
         pdf_path=Path(args.pdf_path),
         rolling_path=rolling_path,
         nightly_date=args.nightly_date,

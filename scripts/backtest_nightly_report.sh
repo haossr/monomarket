@@ -27,6 +27,7 @@ SETTLE_WINDOW_END="1"
 S10_GRID_JSON=""
 AUTO_FIND_S10_GRID_JSON="1"
 S10_GRID_MAX_AGE_HOURS="36"
+SX12_COMPARE_JSON=""
 
 usage() {
   cat <<'USAGE'
@@ -58,6 +59,7 @@ Options:
   --no-auto-s10-grid-json         Disable auto-discovery of latest s10-grid-*/grid-results.json
   --s10-grid-max-age-hours <f>    Max age window for auto-discovered S10 grid json (default: 36)
                                   Auto-discovery prefers same-nightly-date artifacts first.
+  --sx12-compare-json <path>      Optional sx12 dual-slice compare.json for strategy config context
   --require-interpretable         Fail if summary marks experiment_interpretable=false
   --no-checksum              Disable checksum fields in nightly summary.json sidecar
   -h, --help                 Show help
@@ -148,6 +150,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --s10-grid-max-age-hours)
       S10_GRID_MAX_AGE_HOURS="$2"
+      shift 2
+      ;;
+    --sx12-compare-json)
+      SX12_COMPARE_JSON="$2"
       shift 2
       ;;
     --require-interpretable)
@@ -401,9 +407,19 @@ if [[ -n "$S10_GRID_JSON" && ! -f "$S10_GRID_JSON" ]]; then
   exit 1
 fi
 
+if [[ -n "$SX12_COMPARE_JSON" && ! -f "$SX12_COMPARE_JSON" ]]; then
+  echo "[nightly] --sx12-compare-json not found: $SX12_COMPARE_JSON" >&2
+  exit 1
+fi
+
 S10_GRID_ARGS=()
 if [[ -n "$S10_GRID_JSON" ]]; then
   S10_GRID_ARGS=(--s10-grid-json "$S10_GRID_JSON")
+fi
+
+SX12_COMPARE_ARGS=()
+if [[ -n "$SX12_COMPARE_JSON" ]]; then
+  SX12_COMPARE_ARGS=(--sx12-compare-json "$SX12_COMPARE_JSON")
 fi
 
 "$PYTHON_BIN" scripts/nightly_summary_line.py \
@@ -413,6 +429,7 @@ fi
   --cycle-meta-json "$RUN_DIR/cycle-meta.json" \
   --analysis-json "$ANALYSIS_JSON" \
   ${S10_GRID_ARGS[@]+"${S10_GRID_ARGS[@]}"} \
+  ${SX12_COMPARE_ARGS[@]+"${SX12_COMPARE_ARGS[@]}"} \
   --summary-path "$SUMMARY_TXT" \
   --summary-json-path "$SUMMARY_JSON" \
   --nightly-date "$NIGHTLY_DATE" \
